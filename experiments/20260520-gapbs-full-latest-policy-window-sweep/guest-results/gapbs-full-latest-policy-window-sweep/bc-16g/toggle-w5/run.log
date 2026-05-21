@@ -1,0 +1,3 @@
+[2026-05-20T09:36:24Z] starting controller
+[2026-05-20T09:36:24Z] running workload
+[2026-05-20T09:42:04Z] done rc=0 elapsed_s=340 outdir=/root/gapbs-full-latest-policy-window-sweep/bc-16g/toggle-w5

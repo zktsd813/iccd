@@ -1,0 +1,3 @@
+[2026-05-21T04:10:05Z] controller disabled for policy=off
+[2026-05-21T04:10:05Z] running workload
+[2026-05-21T04:13:27Z] done rc=0 elapsed_s=202 outdir=/root/gapbs-placement-64g64g-alllocal-allremote/pr/all-remote

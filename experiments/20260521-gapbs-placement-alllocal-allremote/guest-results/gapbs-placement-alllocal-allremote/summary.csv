@@ -1,0 +1,5 @@
+workload,placement,returncode,elapsed_s,read_s,avg_trial_s,capacity_pages,numa_hint_faults,pgpromote_success,pgdemote_kswapd,pgdemote_direct,anon_n0_before_kb,anon_n1_before_kb,anon_n0_after_kb,anon_n1_after_kb,trial1_s,trial2_s,trial3_s,trial4_s,trial5_s,trial6_s,trial7_s,trial8_s
+bc,all-local,0,265,20.48790,30.34918,0,0,0,0,0,0,0,0,0,45.96927,36.46753,30.23735,35.09290,25.75772,23.86896,22.55816,22.84151
+bc,all-remote,0,302,20.44468,35.06216,0,0,0,0,0,0,0,0,0,43.64350,36.07077,34.49916,37.96012,36.05855,38.30205,28.71114,25.25201
+pr,all-local,0,215,33.99107,22.39903,0,0,0,0,0,0,0,0,0,19.02185,18.52115,19.15260,23.32344,25.76730,26.50374,28.30558,18.59658
+pr,all-remote,0,176,20.24971,19.31847,0,0,0,0,0,0,0,0,0,18.97986,18.62648,19.49102,19.31915,19.42986,19.49073,19.85277,19.35790

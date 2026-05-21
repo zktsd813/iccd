@@ -1,0 +1,13 @@
+workload,cap,window_sec,off_avg_s,on_avg_s,oneshot_avg_s,oneshot_off_s,oneshot_reason,toggle_avg_s,toggle_off_s,toggle_on_s,toggle_reason
+pr,8g,5,18.70209,56.78888,20.48353,40.019,local_access,50.53381,40.019,55.025,local_access
+pr,8g,10,18.70209,56.78888,22.97827,50.011,local_access,36.07283,50.012,80.016,local_access
+pr,8g,20,18.70209,56.78888,23.23777,80.011,local_access,38.70491,80.013,140.016,local_access
+pr,16g,5,19.02841,36.65146,19.91645,35.015,local_access,26.63969,35.016,50.021,local_access
+pr,16g,10,19.02841,36.65146,21.39773,50.010,local_access,24.89355,50.010,80.014,local_access
+pr,16g,20,19.02841,36.65146,22.27940,80.007,local_access,25.33062,80.009,140.012,local_access
+bc,8g,5,16.62260,52.52492,42.69546,65.029,local_access,54.33519,70.025,85.028,local_access
+bc,8g,10,16.62260,52.52492,32.80896,90.015,local_access,50.06638,90.015,130.019,local_access
+bc,8g,20,16.62260,52.52492,46.05124,140.011,local_access,48.00451,140.010,200.013,local_access
+bc,16g,5,49.36582,38.22507,22.11875,70.022,local_access,38.82430,90.024,120.030,remote_ratio
+bc,16g,10,49.36582,38.22507,19.91531,60.010,local_access,38.38612,120.014,150.017,local_access
+bc,16g,20,49.36582,38.22507,25.88901,100.007,local_access,31.59196,100.007,160.010,local_access

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#111} .title{font-size:28px;font-weight:700}.subtitle{font-size:18px}.axis{font-size:16px}.tick{font-size:14px}.label{font-size:16px;font-weight:700}.small{font-size:13px}.ratio{font-size:22px;font-weight:700}</style>
+<text class="title" x="640" y="44" text-anchor="middle">Fixed 8G Remote Friendly / Split32 Stream</text>
+<text class="subtitle" x="640" y="74" text-anchor="middle">60s friendly + 60s unfriendly, scan 256MB, period 1000ms, fast scan off</text>
+<text class="subtitle" x="330.0" y="100" text-anchor="middle" font-weight="700">Friendly fixed8g</text>
+<line x1="80" y1="560" x2="580" y2="560" stroke="#111" stroke-width="2"/>
+<line x1="80" y1="130" x2="80" y2="560" stroke="#111" stroke-width="2"/>
+<line x1="74" y1="560.0" x2="580" y2="560.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="565.0" text-anchor="end">0</text>
+<line x1="74" y1="474.0" x2="580" y2="474.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="479.0" text-anchor="end">240</text>
+<line x1="74" y1="388.0" x2="580" y2="388.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="393.0" text-anchor="end">480</text>
+<line x1="74" y1="302.0" x2="580" y2="302.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="307.0" text-anchor="end">720</text>
+<line x1="74" y1="216.0" x2="580" y2="216.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="221.0" text-anchor="end">960</text>
+<line x1="74" y1="130.0" x2="580" y2="130.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="70" y="135.0" text-anchor="end">1200</text>
+<text class="axis" x="330.0" y="618" text-anchor="middle">Mops/s</text>
+<rect x="150" y="478.6" width="90" height="81.4" fill="#8c8c8c" stroke="#111" stroke-width="2"/>
+<text class="label" x="195.0" y="468.6" text-anchor="middle">227.2</text>
+<text class="axis" x="195.0" y="588" text-anchor="middle">off</text>
+<text class="ratio" x="195.0" y="648" text-anchor="middle">1.00x</text>
+<rect x="296" y="147.5" width="90" height="412.5" fill="#d55e00" stroke="#111" stroke-width="2"/>
+<text class="label" x="341.0" y="137.5" text-anchor="middle">1151.3</text>
+<text class="axis" x="341.0" y="588" text-anchor="middle">on</text>
+<text class="ratio" x="341.0" y="648" text-anchor="middle">5.07x</text>
+<rect x="442" y="137.9" width="90" height="422.1" fill="#0072b2" stroke="#111" stroke-width="2"/>
+<text class="label" x="487.0" y="127.9" text-anchor="middle">1177.9</text>
+<text class="axis" x="487.0" y="588" text-anchor="middle">adaptive</text>
+<text class="ratio" x="487.0" y="648" text-anchor="middle">5.18x</text>
+<text class="small" x="330.0" y="676" text-anchor="middle">ratio vs off</text>
+<text class="subtitle" x="960.0" y="100" text-anchor="middle" font-weight="700">Unfriendly stream32</text>
+<line x1="710" y1="560" x2="1210" y2="560" stroke="#111" stroke-width="2"/>
+<line x1="710" y1="130" x2="710" y2="560" stroke="#111" stroke-width="2"/>
+<line x1="704" y1="560.0" x2="1210" y2="560.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="565.0" text-anchor="end">0</text>
+<line x1="704" y1="474.0" x2="1210" y2="474.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="479.0" text-anchor="end">1000</text>
+<line x1="704" y1="388.0" x2="1210" y2="388.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="393.0" text-anchor="end">2000</text>
+<line x1="704" y1="302.0" x2="1210" y2="302.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="307.0" text-anchor="end">3000</text>
+<line x1="704" y1="216.0" x2="1210" y2="216.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="221.0" text-anchor="end">4000</text>
+<line x1="704" y1="130.0" x2="1210" y2="130.0" stroke="#ddd" stroke-width="1"/>
+<text class="tick" x="700" y="135.0" text-anchor="end">5000</text>
+<text class="axis" x="960.0" y="618" text-anchor="middle">MB/s</text>
+<rect x="780" y="172.0" width="90" height="388.0" fill="#8c8c8c" stroke="#111" stroke-width="2"/>
+<text class="label" x="825.0" y="162.0" text-anchor="middle">4511.4</text>
+<text class="axis" x="825.0" y="588" text-anchor="middle">off</text>
+<text class="ratio" x="825.0" y="648" text-anchor="middle">1.00x</text>
+<rect x="926" y="240.0" width="90" height="320.0" fill="#d55e00" stroke="#111" stroke-width="2"/>
+<text class="label" x="971.0" y="230.0" text-anchor="middle">3721.3</text>
+<text class="axis" x="971.0" y="588" text-anchor="middle">on</text>
+<text class="ratio" x="971.0" y="648" text-anchor="middle">0.82x</text>
+<rect x="1072" y="178.1" width="90" height="381.9" fill="#0072b2" stroke="#111" stroke-width="2"/>
+<text class="label" x="1117.0" y="168.1" text-anchor="middle">4440.9</text>
+<text class="axis" x="1117.0" y="588" text-anchor="middle">adaptive</text>
+<text class="ratio" x="1117.0" y="648" text-anchor="middle">0.98x</text>
+<text class="small" x="960.0" y="676" text-anchor="middle">ratio vs off</text>
+</svg>

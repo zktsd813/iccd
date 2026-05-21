@@ -1,0 +1,153 @@
++ CG=/sys/fs/cgroup/cap_adm_smoke
++ mkdir -p /sys/fs/cgroup/cap_adm_smoke
+++ uname -r
+++ uname -v
++ echo 'kernel=6.18.0modified #177 SMP PREEMPT_DYNAMIC Wed May 20 01:31:11 UTC 2026'
+kernel=6.18.0modified #177 SMP PREEMPT_DYNAMIC Wed May 20 01:31:11 UTC 2026
+++ ls /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity /sys/fs/cgroup/cap_adm_smoke/memory.node_low_wmark /sys/fs/cgroup/cap_adm_smoke/memory.node_high_wmark /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled /sys/fs/cgroup/cap_adm_smoke/memory.reclaimd_state
+++ wc -l
++ echo files=5
+files=5
++ echo 'initial node_capacity'
+initial node_capacity
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity
+node0 0
+node1 0
++ echo 'initial low'
+initial low
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_low_wmark
+node0 0
+node1 0
++ echo 'initial high'
+initial high
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_high_wmark
+node0 0
+node1 0
++ echo 'initial demotion'
+initial demotion
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled
+0
++ set -e
++ try_write demotion_without_capacity /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled 1 fail
++ local label=demotion_without_capacity file=/sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled value=1 expect=fail
++ set +e
++ printf %s 1
++ rc=1
++ set -e
++ '[' fail = fail ']'
++ '[' 1 -ne 0 ']'
++ echo 'PASS demotion_without_capacity rc=1'
+PASS demotion_without_capacity rc=1
++ try_write demotion_invalid_value /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled 2 fail
++ local label=demotion_invalid_value file=/sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled value=2 expect=fail
++ set +e
++ printf %s 2
++ rc=1
++ set -e
++ '[' fail = fail ']'
++ '[' 1 -ne 0 ']'
++ echo 'PASS demotion_invalid_value rc=1'
+PASS demotion_invalid_value rc=1
++ try_write set_node0_capacity_1g /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity '0 262144' pass
++ local label=set_node0_capacity_1g file=/sys/fs/cgroup/cap_adm_smoke/memory.node_capacity 'value=0 262144' expect=pass
++ set +e
++ printf %s '0 262144'
++ rc=0
++ set -e
++ '[' pass = fail ']'
++ '[' 0 -eq 0 ']'
++ echo 'PASS set_node0_capacity_1g'
+PASS set_node0_capacity_1g
++ echo 'after capacity'
+after capacity
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity
+node0 262144
+node1 0
++ echo 'after low'
+after low
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_low_wmark
+node0 249036
+node1 0
++ echo 'after high'
+after high
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_high_wmark
+node0 256901
+node1 0
++ try_write demotion_with_capacity /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled 1 pass
++ local label=demotion_with_capacity file=/sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled value=1 expect=pass
++ set +e
++ printf %s 1
++ rc=0
++ set -e
++ '[' pass = fail ']'
++ '[' 0 -eq 0 ']'
++ echo 'PASS demotion_with_capacity'
+PASS demotion_with_capacity
++ echo 'after demotion on'
+after demotion on
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled
+1
++ try_write clear_last_capacity_while_demotion_on /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity '0 0' fail
++ local label=clear_last_capacity_while_demotion_on file=/sys/fs/cgroup/cap_adm_smoke/memory.node_capacity 'value=0 0' expect=fail
++ set +e
++ printf %s '0 0'
++ rc=1
++ set -e
++ '[' fail = fail ']'
++ '[' 1 -ne 0 ']'
++ echo 'PASS clear_last_capacity_while_demotion_on rc=1'
+PASS clear_last_capacity_while_demotion_on rc=1
++ try_write demotion_off /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled 0 pass
++ local label=demotion_off file=/sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled value=0 expect=pass
++ set +e
++ printf %s 0
++ rc=0
++ set -e
++ '[' pass = fail ']'
++ '[' 0 -eq 0 ']'
++ echo 'PASS demotion_off'
+PASS demotion_off
++ try_write clear_last_capacity_after_demotion_off /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity '0 0' pass
++ local label=clear_last_capacity_after_demotion_off file=/sys/fs/cgroup/cap_adm_smoke/memory.node_capacity 'value=0 0' expect=pass
++ set +e
++ printf %s '0 0'
++ rc=0
++ set -e
++ '[' pass = fail ']'
++ '[' 0 -eq 0 ']'
++ echo 'PASS clear_last_capacity_after_demotion_off'
+PASS clear_last_capacity_after_demotion_off
++ echo 'final node_capacity'
+final node_capacity
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.node_capacity
+node0 0
+node1 0
++ echo 'final demotion'
+final demotion
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.kswapd_demotion_enabled
+0
++ echo reclaimd_state
+reclaimd_state
++ cat /sys/fs/cgroup/cap_adm_smoke/memory.reclaimd_state
+running 0
+wake_count 0
+run_count 0
+pending_nodes 
+inflight_nodes 
+mode 0
+node0_capacity 0
+node0_low_wmark 0
+node0_high_wmark 0
+node0_usage_lru 0
+node0_usage_exact 0
+node0_over_high 0
+node0_failures 0
+node0_cooldown_ms 0
+node1_capacity 0
+node1_low_wmark 0
+node1_high_wmark 0
+node1_usage_lru 0
+node1_usage_exact 0
+node1_over_high 0
+node1_failures 0
+node1_cooldown_ms 0

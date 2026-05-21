@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="340" viewBox="0 0 920 340">
+<rect width="100%" height="100%" fill="white"/>
+<text x="30" y="34" font-size="18" font-family="sans-serif">on/off 3-run mean throughput (Mops/s)</text>
+<line x1="60" y1="280" x2="850" y2="280" stroke="#333"/>
+<line x1="60" y1="60" x2="60" y2="280" stroke="#333"/>
+<rect x="80" y="118.2" width="80" height="161.8" fill="#2f6f9f"/><text x="120.0" y="110.2" text-anchor="middle" font-size="13">91.3</text><text x="120.0" y="300" text-anchor="middle" font-size="13">sparse64 off</text><rect x="205" y="128.4" width="80" height="151.6" fill="#c45137"/><text x="245.0" y="120.4" text-anchor="middle" font-size="13">85.6</text><text x="245.0" y="300" text-anchor="middle" font-size="13">sparse64 on</text><rect x="330" y="70.0" width="80" height="210.0" fill="#2f6f9f"/><text x="370.0" y="62.0" text-anchor="middle" font-size="13">118.5</text><text x="370.0" y="300" text-anchor="middle" font-size="13">pc64 off</text><rect x="455" y="97.9" width="80" height="182.1" fill="#c45137"/><text x="495.0" y="89.9" text-anchor="middle" font-size="13">102.8</text><text x="495.0" y="300" text-anchor="middle" font-size="13">pc64 on</text>
+<text x="30" y="310" font-size="12" font-family="sans-serif">Experiment: 20260507-unfriendly64-pc64-onoff-reps-bound-cxl</text>
+</svg>

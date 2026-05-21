@@ -1,0 +1,61 @@
+{
+  "run_id": "20260510Tfixed8g-remote16-split32-60s-on-localfault10",
+  "case_dir": "/Serverless/iccd/experiments/20260509-fixed8g-remote16-split32-60s-adaptive/qemu-logs/phase_candidate_microbench/20260510Tfixed8g-remote16-split32-60s-on-localfault10/guest-artifacts/20260510Tfixed8g-remote16-split32-60s-on-localfault10/phase_fixed8g_remote_split32_stream4k_localft__on__rep1",
+  "total": {
+    "mean_mops_s": 702.1259365088646,
+    "mean_mb_s": 32651.57797826352,
+    "local_fault_sampled": 1881819,
+    "local_fault_pte_updates": 1881819,
+    "local_fault_refault": 1608016,
+    "local_fault_refault_hit_1000ms": 887146,
+    "local_fault_hit_ratio_pct": 55.17022218684391,
+    "local_fault_refault_avg_us": 12256858.715336166,
+    "local_fault_lost": 273803,
+    "hint_faults": 20883668,
+    "pte_updates": 29146735,
+    "promote_pages": 3993458,
+    "demote_pages": 3746609
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "phase_name": "Friendly fixed8g-hotset-remote",
+      "start_s": 0,
+      "end_s": 60,
+      "mean_mops_s": 957.6886458135509,
+      "median_mops_s": 388.4926846846847,
+      "mean_mb_s": 61292.07333206726,
+      "local_fault_sampled": 1055749,
+      "local_fault_pte_updates": 1055749,
+      "local_fault_refault": 771358,
+      "local_fault_refault_hit_1000ms": 186027,
+      "local_fault_hit_ratio_pct": 24.11681735329121,
+      "local_fault_refault_avg_us": 25214326.3180002,
+      "local_fault_lost": 265000,
+      "hint_faults": 8870972,
+      "pte_updates": 17355538,
+      "promote_pages": 2053177,
+      "demote_pages": 1738532
+    },
+    {
+      "phase": 2,
+      "phase_name": "Unfriendly stream-read-32g-split16-4k",
+      "start_s": 60,
+      "end_s": 120,
+      "mean_mops_s": 459.2615683134513,
+      "median_mops_s": 432.275456,
+      "mean_mb_s": 5427.858826201598,
+      "local_fault_sampled": 826070,
+      "local_fault_pte_updates": 826070,
+      "local_fault_refault": 836658,
+      "local_fault_refault_hit_1000ms": 701119,
+      "local_fault_hit_ratio_pct": 83.79995171264723,
+      "local_fault_refault_avg_us": 310703.5419490401,
+      "local_fault_lost": 8803,
+      "hint_faults": 12012690,
+      "pte_updates": 11791195,
+      "promote_pages": 1940275,
+      "demote_pages": 2004538
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=237
+controller_csv=/root/gapbs-full-latest-policy-window-sweep/bc-16g/oneshot-w20/controller.csv
+stdout=/root/gapbs-full-latest-policy-window-sweep/bc-16g/oneshot-w20/workload.stdout.log
+stderr=/root/gapbs-full-latest-policy-window-sweep/bc-16g/oneshot-w20/workload.stderr.log

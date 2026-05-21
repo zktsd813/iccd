@@ -1,0 +1,3 @@
+sparse_stride_read_64g_block2m_localft
+sparse_stride_read_64g
+stream_triad_sweep_32g

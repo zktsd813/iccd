@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=177
+controller_csv=/root/gapbs-toggle-ours-window-sweep/bc-16g-w10/toggle/controller.csv
+stdout=/root/gapbs-toggle-ours-window-sweep/bc-16g-w10/toggle/workload.stdout.log
+stderr=/root/gapbs-toggle-ours-window-sweep/bc-16g-w10/toggle/workload.stderr.log

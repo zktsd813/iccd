@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=178
+controller_csv=/root/gapbs-full-latest-policy-window-sweep/pr-16g/off/controller.csv
+stdout=/root/gapbs-full-latest-policy-window-sweep/pr-16g/off/workload.stdout.log
+stderr=/root/gapbs-full-latest-policy-window-sweep/pr-16g/off/workload.stderr.log

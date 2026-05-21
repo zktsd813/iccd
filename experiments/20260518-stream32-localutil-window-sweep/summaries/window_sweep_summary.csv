@@ -1,0 +1,4 @@
+window_sec,run_id,off,off_s,local_pte_total,local_refault_total,local_hit_total,local_lost_total,promote_gib,demote_gib,steady_mean_mib_s,steady_median_mib_s,after_off_mean_mib_s
+20,20260518T071000Z-stream32-localutil-window20s-300s,1,60.9,944009,922922,922922,21087,12.95,12.36,1387.7,1314.0,1303.2
+10,20260518T071700Z-stream32-localutil-window10s-300s,1,30.3,925834,921319,921319,4515,7.64,7.07,1426.4,1364.0,1375.5
+5,20260518T072400Z-stream32-localutil-window5s-300s,1,15.9,504148,504148,504148,0,4.02,3.75,3241.4,3270.0,3243.9

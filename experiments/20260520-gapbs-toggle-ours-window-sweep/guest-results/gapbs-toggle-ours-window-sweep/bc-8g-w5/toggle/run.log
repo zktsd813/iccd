@@ -1,0 +1,3 @@
+[2026-05-20T05:45:45Z] starting controller
+[2026-05-20T05:45:45Z] running workload
+[2026-05-20T05:53:03Z] done rc=0 elapsed_s=438 outdir=/root/gapbs-toggle-ours-window-sweep/bc-8g-w5/toggle

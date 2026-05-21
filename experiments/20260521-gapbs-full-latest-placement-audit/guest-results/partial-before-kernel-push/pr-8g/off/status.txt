@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=180
+controller_csv=/root/gapbs-full-latest-placement-audit/pr-8g/off/controller.csv
+stdout=/root/gapbs-full-latest-placement-audit/pr-8g/off/workload.stdout.log
+stderr=/root/gapbs-full-latest-placement-audit/pr-8g/off/workload.stderr.log

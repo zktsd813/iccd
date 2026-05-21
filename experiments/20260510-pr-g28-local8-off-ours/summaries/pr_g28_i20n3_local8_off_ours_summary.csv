@@ -1,0 +1,3 @@
+policy,generate_s,build_s,trial_avg_s,trial_1_s,trial_2_s,trial_3_s,elapsed_s,hint_faults,pte_updates,promoted_pages,promoted_gib,demoted_direct_pages,demoted_direct_gib,demoted_kswapd_pages,local_fault_pte_updates,local_fault_refault,local_fault_refault_hit,local_fault_lost,controller_off_elapsed_ms
+off,60.75393,123.28196,19.12841,19.26414,19.06122,19.05987,273,0,0,0,0.00,11374243,43.39,0,0,0,0,0,
+ours,65.95028,158.45001,19.24772,19.39538,19.17437,19.17341,315,14857778,22113223,2474062,9.44,13477670,51.41,0,746898,597846,318213,149052,170701

@@ -1,0 +1,2 @@
+case,self_cgroup,global_numa_balancing,demotion_enabled,demotion_target,read_time_s,avg_trial_time_s,elapsed_s,trial1_s,trial2_s,trial3_s,trial4_s,trial5_s,trial6_s,trial7_s,trial8_s,numa_hint_faults,numa_pte_updates,numa_pages_migrated,pgpromote_success,pgpromote_candidate,pgdemote_kswapd,pgmigrate_success,pgmigrate_fail
+global2_rootcg,0::/,2,true,"0 1;1 -1",30.93495,55.13737,476,53.06987,45.09279,44.78287,65.22373,58.72298,60.07170,47.73687,66.39816,30669498,30669464,2625006,2625006,3378499,5593940,8959207,240

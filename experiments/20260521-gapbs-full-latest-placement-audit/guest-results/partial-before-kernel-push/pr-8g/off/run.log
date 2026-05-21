@@ -1,0 +1,3 @@
+[2026-05-21T05:18:20Z] controller disabled for policy=off
+[2026-05-21T05:18:20Z] running workload
+[2026-05-21T05:21:20Z] done rc=0 elapsed_s=180 outdir=/root/gapbs-full-latest-placement-audit/pr-8g/off

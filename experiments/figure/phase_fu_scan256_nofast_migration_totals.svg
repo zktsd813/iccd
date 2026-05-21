@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#222}.axis{stroke:#333;stroke-width:1.3}.grid{stroke:#ddd;stroke-width:1}.title{font-size:28px;font-weight:700}.subtitle{font-size:21px;font-weight:700}.label{font-size:18px}.tick{font-size:15px}.value{font-size:16px;font-weight:700}.legend{font-size:16px}</style>
+<text class="title" x="590.0" y="40" text-anchor="middle">Migration totals</text>
+<text class="subtitle" x="118" y="70.0">Migration volume</text>
+<line class="grid" x1="118" y1="341.0" x2="1130" y2="341.0"/>
+<text class="tick" x="106" y="346.0" text-anchor="end">0</text>
+<line class="grid" x1="118" y1="277.8" x2="1130" y2="277.8"/>
+<text class="tick" x="106" y="282.8" text-anchor="end">25</text>
+<line class="grid" x1="118" y1="214.5" x2="1130" y2="214.5"/>
+<text class="tick" x="106" y="219.5" text-anchor="end">50</text>
+<line class="grid" x1="118" y1="151.2" x2="1130" y2="151.2"/>
+<text class="tick" x="106" y="156.2" text-anchor="end">75</text>
+<line class="grid" x1="118" y1="88.0" x2="1130" y2="88.0"/>
+<text class="tick" x="106" y="93.0" text-anchor="end">100</text>
+<line class="axis" x1="118" y1="341.0" x2="1130" y2="341.0"/>
+<line class="axis" x1="118" y1="88.0" x2="118" y2="341.0"/>
+<text class="label" x="38" y="214.5" transform="rotate(-90 38 214.5)" text-anchor="middle">GiB</text>
+<rect x="222.7" y="341.0" width="64" height="0.0" fill="#0b6fba" stroke="#111" stroke-width="1.4"/>
+<rect x="286.7" y="341.0" width="64" height="0.0" fill="#c43c39" stroke="#111" stroke-width="1.4"/>
+<text class="tick" x="286.7" y="368.0" text-anchor="middle">off</text>
+<rect x="560.0" y="201.7" width="64" height="139.3" fill="#0b6fba" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="592.0" y="193.7" text-anchor="middle">55.1</text>
+<rect x="624.0" y="203.7" width="64" height="137.3" fill="#c43c39" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="656.0" y="195.7" text-anchor="middle">54.3</text>
+<text class="tick" x="624.0" y="368.0" text-anchor="middle">on</text>
+<rect x="897.3" y="280.2" width="64" height="60.8" fill="#0b6fba" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="929.3" y="272.2" text-anchor="middle">24.0</text>
+<rect x="961.3" y="281.1" width="64" height="59.9" fill="#c43c39" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="993.3" y="273.1" text-anchor="middle">23.7</text>
+<text class="tick" x="961.3" y="368.0" text-anchor="middle">Miracle</text>
+<rect x="850" y="54.0" width="18" height="18" fill="#0b6fba" stroke="#111" stroke-width="1.2"/>
+<text class="legend" x="876" y="69.0">promote GiB</text>
+<rect x="1000" y="54.0" width="18" height="18" fill="#c43c39" stroke="#111" stroke-width="1.2"/>
+<text class="legend" x="1026" y="69.0">demote GiB</text>
+<text class="subtitle" x="118" y="405.0">Scanner activity</text>
+<line class="grid" x1="118" y1="676.0" x2="1130" y2="676.0"/>
+<text class="tick" x="106" y="681.0" text-anchor="end">0</text>
+<line class="grid" x1="118" y1="612.8" x2="1130" y2="612.8"/>
+<text class="tick" x="106" y="617.8" text-anchor="end">125</text>
+<line class="grid" x1="118" y1="549.5" x2="1130" y2="549.5"/>
+<text class="tick" x="106" y="554.5" text-anchor="end">250</text>
+<line class="grid" x1="118" y1="486.2" x2="1130" y2="486.2"/>
+<text class="tick" x="106" y="491.2" text-anchor="end">375</text>
+<line class="grid" x1="118" y1="423.0" x2="1130" y2="423.0"/>
+<text class="tick" x="106" y="428.0" text-anchor="end">500</text>
+<line class="axis" x1="118" y1="676.0" x2="1130" y2="676.0"/>
+<line class="axis" x1="118" y1="423.0" x2="118" y2="676.0"/>
+<text class="label" x="38" y="549.5" transform="rotate(-90 38 549.5)" text-anchor="middle">M / GiB</text>
+<rect x="222.7" y="676.0" width="64" height="0.0" fill="#6a6a6a" stroke="#111" stroke-width="1.4"/>
+<rect x="286.7" y="676.0" width="64" height="0.0" fill="#2a9d55" stroke="#111" stroke-width="1.4"/>
+<text class="tick" x="286.7" y="703.0" text-anchor="middle">off</text>
+<rect x="560.0" y="642.6" width="64" height="33.4" fill="#6a6a6a" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="592.0" y="634.6" text-anchor="middle">66.1</text>
+<rect x="624.0" y="535.1" width="64" height="140.9" fill="#2a9d55" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="656.0" y="527.1" text-anchor="middle">278.5</text>
+<text class="tick" x="624.0" y="703.0" text-anchor="middle">on</text>
+<rect x="897.3" y="663.7" width="64" height="12.3" fill="#6a6a6a" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="929.3" y="655.7" text-anchor="middle">24.4</text>
+<rect x="961.3" y="607.3" width="64" height="68.7" fill="#2a9d55" stroke="#111" stroke-width="1.4"/>
+<text class="value" x="993.3" y="599.3" text-anchor="middle">135.8</text>
+<text class="tick" x="961.3" y="703.0" text-anchor="middle">Miracle</text>
+<rect x="850" y="389.0" width="18" height="18" fill="#6a6a6a" stroke="#111" stroke-width="1.2"/>
+<text class="legend" x="876" y="404.0">hint faults M</text>
+<rect x="1000" y="389.0" width="18" height="18" fill="#2a9d55" stroke="#111" stroke-width="1.2"/>
+<text class="legend" x="1026" y="404.0">PTE updates GiB</text>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="450" viewBox="0 0 920 450">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="460.0" y="34" font-family="Arial, sans-serif" font-size="20" text-anchor="middle" font-weight="700" fill="#222">Adaptive policy: phase counters</text>
+<rect x="330.00" y="54.00" width="14.00" height="14.00" fill="#6f7fb8" />
+<text x="352" y="66" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="400" fill="#222">hint faults</text>
+<rect x="450.00" y="54.00" width="14.00" height="14.00" fill="#d19a3a" />
+<text x="472" y="66" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="400" fill="#222">promotions</text>
+<line x1="78.00" y1="380.00" x2="868.00" y2="380.00" stroke="#e5e8ef" stroke-width="1" />
+<text x="70" y="384.0" font-family="Arial, sans-serif" font-size="10" text-anchor="end" font-weight="400" fill="#545b66">0.0</text>
+<line x1="78.00" y1="307.50" x2="868.00" y2="307.50" stroke="#e5e8ef" stroke-width="1" />
+<text x="70" y="311.5" font-family="Arial, sans-serif" font-size="10" text-anchor="end" font-weight="400" fill="#545b66">5.2</text>
+<line x1="78.00" y1="235.00" x2="868.00" y2="235.00" stroke="#e5e8ef" stroke-width="1" />
+<text x="70" y="239.0" font-family="Arial, sans-serif" font-size="10" text-anchor="end" font-weight="400" fill="#545b66">10.3</text>
+<line x1="78.00" y1="162.50" x2="868.00" y2="162.50" stroke="#e5e8ef" stroke-width="1" />
+<text x="70" y="166.5" font-family="Arial, sans-serif" font-size="10" text-anchor="end" font-weight="400" fill="#545b66">15.5</text>
+<line x1="78.00" y1="90.00" x2="868.00" y2="90.00" stroke="#e5e8ef" stroke-width="1" />
+<text x="70" y="94.0" font-family="Arial, sans-serif" font-size="10" text-anchor="end" font-weight="400" fill="#545b66">20.6</text>
+<line x1="78.00" y1="90.00" x2="78.00" y2="380.00" stroke="#9aa3b2" stroke-width="1" />
+<line x1="78.00" y1="380.00" x2="868.00" y2="380.00" stroke="#9aa3b2" stroke-width="1" />
+<text x="22" y="235.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">Events, millions</text>
+<text x="143.83333333333331" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P1</text>
+<text x="143.83333333333331" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">F</text>
+<rect x="106.83" y="127.83" width="34.00" height="252.17" fill="#6f7fb8" />
+<text x="123.83333333333331" y="122.82608695652175" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">17.9</text>
+<rect x="146.83" y="337.57" width="34.00" height="42.43" fill="#d19a3a" />
+<text x="163.83333333333331" y="332.5667725421142" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">3.0</text>
+<text x="275.5" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P2</text>
+<text x="275.5" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">U</text>
+<rect x="238.50" y="380.00" width="34.00" height="0.00" fill="#6f7fb8" />
+<rect x="278.50" y="380.00" width="34.00" height="0.00" fill="#d19a3a" />
+<text x="407.16666666666663" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P3</text>
+<text x="407.16666666666663" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">F</text>
+<rect x="370.17" y="188.50" width="34.00" height="191.50" fill="#6f7fb8" />
+<text x="387.16666666666663" y="183.50400602457142" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">13.6</text>
+<rect x="410.17" y="360.55" width="34.00" height="19.45" fill="#d19a3a" />
+<text x="427.16666666666663" y="355.5466791336734" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">1.4</text>
+<text x="538.8333333333333" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P4</text>
+<text x="538.8333333333333" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">U</text>
+<rect x="501.83" y="380.00" width="34.00" height="0.00" fill="#6f7fb8" />
+<rect x="541.83" y="380.00" width="34.00" height="0.00" fill="#d19a3a" />
+<text x="670.5" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P5</text>
+<text x="670.5" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">F</text>
+<rect x="633.50" y="195.56" width="34.00" height="184.44" fill="#6f7fb8" />
+<text x="650.5" y="190.5610702950172" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">13.1</text>
+<rect x="673.50" y="356.09" width="34.00" height="23.91" fill="#d19a3a" />
+<text x="690.5" y="351.08696900027945" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">1.7</text>
+<text x="802.1666666666666" y="408" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="400" fill="#222">P6</text>
+<text x="802.1666666666666" y="424" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" font-weight="400" fill="#666">U</text>
+<rect x="765.17" y="343.13" width="34.00" height="36.87" fill="#6f7fb8" />
+<text x="782.1666666666666" y="338.1261270257205" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" font-weight="400" fill="#333">2.6</text>
+<rect x="805.17" y="380.00" width="34.00" height="0.00" fill="#d19a3a" />
+</svg>

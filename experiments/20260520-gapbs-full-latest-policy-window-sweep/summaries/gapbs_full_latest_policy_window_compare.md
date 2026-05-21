@@ -1,0 +1,34 @@
+# GAPBS full latest-kernel policy/window comparison
+
+Values are GAPBS `Average Time` in seconds; lower is better.
+
+- Kernel: `Linux kernel 6.18.0modified #179 SMP PREEMPT_DYNAMIC Wed May 20 03:30:57 UTC 2026`.
+- Graph input: `/root/gapbs_graphs/kron_g28.sg`, loaded with `-f`.
+- Trials: 8.
+- Runtime knobs: MGLRU `0x0007`, scan size 256MB, scan period min 1000ms, fast scan off, hot threshold 0.
+- `off`: cgroup node capacity is set, cgroup migration off, cgroup/global demotion off.
+- `on`: cgroup migration/demotion on.
+- `one-shot`: migration starts on and turns off once.
+- `toggle`: migration starts on, turns off, then re-enables after 2 non-matching windows.
+
+## PR
+
+| cap | window | off | on | one-shot | one-shot off s | toggle | toggle off->on s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 8g | 5 | 18.70209 | 56.78888 | 20.48353 | 40.019 | 50.53381 | 40.019 -> 55.025 |
+| 8g | 10 | 18.70209 | 56.78888 | 22.97827 | 50.011 | 36.07283 | 50.012 -> 80.016 |
+| 8g | 20 | 18.70209 | 56.78888 | 23.23777 | 80.011 | 38.70491 | 80.013 -> 140.016 |
+| 16g | 5 | 19.02841 | 36.65146 | 19.91645 | 35.015 | 26.63969 | 35.016 -> 50.021 |
+| 16g | 10 | 19.02841 | 36.65146 | 21.39773 | 50.010 | 24.89355 | 50.010 -> 80.014 |
+| 16g | 20 | 19.02841 | 36.65146 | 22.27940 | 80.007 | 25.33062 | 80.009 -> 140.012 |
+
+## BC
+
+| cap | window | off | on | one-shot | one-shot off s | toggle | toggle off->on s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 8g | 5 | 16.62260 | 52.52492 | 42.69546 | 65.029 | 54.33519 | 70.025 -> 85.028 |
+| 8g | 10 | 16.62260 | 52.52492 | 32.80896 | 90.015 | 50.06638 | 90.015 -> 130.019 |
+| 8g | 20 | 16.62260 | 52.52492 | 46.05124 | 140.011 | 48.00451 | 140.010 -> 200.013 |
+| 16g | 5 | 49.36582 | 38.22507 | 22.11875 | 70.022 | 38.82430 | 90.024 -> 120.030 |
+| 16g | 10 | 49.36582 | 38.22507 | 19.91531 | 60.010 | 38.38612 | 120.014 -> 150.017 |
+| 16g | 20 | 49.36582 | 38.22507 | 25.88901 | 100.007 | 31.59196 | 100.007 -> 160.010 |

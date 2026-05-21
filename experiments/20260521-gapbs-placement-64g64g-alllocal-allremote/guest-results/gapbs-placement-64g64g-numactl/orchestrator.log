@@ -1,0 +1,9 @@
+[2026-05-21T04:27:44Z] start workload=pr placement=all-local membind=0
+[2026-05-21T04:30:44Z] done workload=pr placement=all-local rc=0
+[2026-05-21T04:30:44Z] start workload=pr placement=all-remote membind=1
+[2026-05-21T04:42:57Z] done workload=pr placement=all-remote rc=0
+[2026-05-21T04:42:57Z] start workload=bc placement=all-local membind=0
+[2026-05-21T04:44:56Z] done workload=bc placement=all-local rc=0
+[2026-05-21T04:44:56Z] start workload=bc placement=all-remote membind=1
+[2026-05-21T04:53:24Z] done workload=bc placement=all-remote rc=0
+[2026-05-21T04:53:24Z] summary=/root/gapbs-placement-64g64g-numactl/summary.csv

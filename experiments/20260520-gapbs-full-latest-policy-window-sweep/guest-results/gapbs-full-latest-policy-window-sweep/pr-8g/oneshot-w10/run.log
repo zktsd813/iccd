@@ -1,0 +1,3 @@
+[2026-05-20T07:42:17Z] starting controller
+[2026-05-20T07:42:17Z] running workload
+[2026-05-20T07:45:50Z] done rc=0 elapsed_s=213 outdir=/root/gapbs-full-latest-policy-window-sweep/pr-8g/oneshot-w10

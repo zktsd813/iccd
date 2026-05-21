@@ -1,0 +1,101 @@
+### memory.node_balancing
+0
+### memory.node_capacity
+node0 4194304
+node1 0
+### memory.kswapd_demotion_enabled
+1
+### memory.numa_local_fault_on_tiering
+0
+### memory.numa_local_fault_refault_hit_ms
+2000
+### memory.numa_migrate_state
+numa_migration_stop_enabled 0
+numa_pingpong_stat_enabled 0
+numa_migration_stop_effective 0
+numa_migrate_success_total 1979813
+numa_migrate_success_promotion 1979813
+numa_migrate_success_other 0
+numa_migrate_fail_promotion_blocked 0
+numa_migrate_fail_promotion_over_high 0
+numa_migrate_fail_promotion_alloc 0
+numa_demote_promoted 0
+numa_demote_promoted_referenced 0
+numa_promote_candidate_demoted 0
+numa_earlystop_running 1
+numa_earlystop_current_demote_promoted 0
+numa_earlystop_previous_demote_promoted 0
+numa_earlystop_threshold 10000
+numa_earlystop_cnt 0
+numa_restart_cnt 0
+numa_restart_referenced_mean 0
+numa_restart_variation_condition 0
+numa_restart_scanning_counter 0
+numa_local_fault_on_tiering 0
+numa_local_fault_refault_hit_ms 2000
+numa_local_fault_window_seq 6
+numa_local_fault_window_current_seq 6
+numa_local_fault_window_current_pte_updates 102815
+numa_local_fault_window_current_refault 100616
+numa_local_fault_window_current_refault_hit 24176
+numa_local_fault_window_current_lost 2199
+numa_local_fault_window_current_access_bp 9786
+numa_local_fault_window_prev_seq 5
+numa_local_fault_window_prev_pte_updates 192823
+numa_local_fault_window_prev_refault 189223
+numa_local_fault_window_prev_refault_hit 112494
+numa_local_fault_window_prev_lost 3600
+numa_local_fault_window_prev_access_bp 9813
+numa_local_fault_window_prev2_seq 4
+numa_local_fault_window_prev2_pte_updates 197145
+numa_local_fault_window_prev2_refault 166774
+numa_local_fault_window_prev2_refault_hit 71062
+numa_local_fault_window_prev2_lost 30371
+numa_local_fault_window_prev2_access_bp 8459
+numa_local_fault_pfn_candidates 10985711
+numa_local_fault_pfn_selected 876821
+numa_local_fault_pfn_selected_bp 798
+numa_local_fault_sampled 876821
+numa_local_fault_pte_updates 876821
+numa_local_fault_refault 801553
+numa_local_fault_refault_hit 248121
+numa_local_fault_refault_total_ms 9018973764
+numa_local_fault_lost 75268
+numa_local_fault_refault_rate_pct 91
+numa_local_fault_refault_avg_us 11251874
+### memory.numa_stat
+anon N0=0 N1=0
+file N0=0 N1=36036890624
+kernel_stack N0=0 N1=0
+pagetables N0=0 N1=0
+sec_pagetables N0=0 N1=0
+shmem N0=0 N1=0
+file_mapped N0=0 N1=0
+file_dirty N0=0 N1=4096
+file_writeback N0=0 N1=0
+swapcached N0=167936 N1=65536
+anon_thp N0=0 N1=0
+file_thp N0=17081303040 N1=11739856896
+shmem_thp N0=0 N1=0
+inactive_anon N0=200704 N1=65536
+active_anon N0=1351680 N1=0
+inactive_file N0=0 N1=36036550656
+active_file N0=0 N1=0
+unevictable N0=0 N1=0
+slab_reclaimable N0=13191504 N1=2932768
+slab_unreclaimable N0=266912 N1=0
+hugetlb N0=0 N1=0
+workingset_refault_anon N0=0 N1=0
+workingset_refault_file N0=0 N1=0
+workingset_activate_anon N0=0 N1=0
+workingset_activate_file N0=0 N1=0
+workingset_restore_anon N0=0 N1=0
+workingset_restore_file N0=0 N1=0
+workingset_nodereclaim N0=0 N1=0
+pgdemote_kswapd N0=0 N1=0
+pgdemote_direct N0=12605241 N1=0
+pgdemote_khugepaged N0=0 N1=0
+pgdemote_proactive N0=0 N1=0
+pgpromote_success N0=1979813 N1=0
+### memory.current
+36060393472

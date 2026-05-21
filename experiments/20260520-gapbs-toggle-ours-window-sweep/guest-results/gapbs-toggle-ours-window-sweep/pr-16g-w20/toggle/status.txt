@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=260
+controller_csv=/root/gapbs-toggle-ours-window-sweep/pr-16g-w20/toggle/controller.csv
+stdout=/root/gapbs-toggle-ours-window-sweep/pr-16g-w20/toggle/workload.stdout.log
+stderr=/root/gapbs-toggle-ours-window-sweep/pr-16g-w20/toggle/workload.stderr.log

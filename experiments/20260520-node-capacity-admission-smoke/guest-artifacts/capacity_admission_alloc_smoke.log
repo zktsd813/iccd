@@ -1,0 +1,262 @@
++ CG=/sys/fs/cgroup/cap_adm_alloc
++ mkdir -p /sys/fs/cgroup/cap_adm_alloc
++ echo '0 131072'
++ echo 0
++ echo 1485
++ echo 'before capacity'
+before capacity
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.node_capacity
+node0 131072
+node1 0
++ echo 'before high'
+before high
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.node_high_wmark
+node0 128450
+node1 0
++ echo 'before demotion'
+before demotion
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.kswapd_demotion_enabled
+0
++ echo 'before reclaimd'
+before reclaimd
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.reclaimd_state
+running 0
+wake_count 0
+run_count 0
+pending_nodes 
+inflight_nodes 
+mode 0
+node0_capacity 131072
+node0_low_wmark 124518
+node0_high_wmark 128450
+node0_usage_lru 0
+node0_usage_exact 66
+node0_over_high 0
+node0_failures 0
+node0_cooldown_ms 0
+node1_capacity 0
+node1_low_wmark 0
+node1_high_wmark 0
+node1_usage_lru 0
+node1_usage_exact 0
+node1_over_high 0
+node1_failures 0
+node1_cooldown_ms 0
++ rm -f /tmp/cap_alloc_ready
++ pid=1494
++ python3 -
+++ seq 1 120
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ sleep 0.25
++ for i in $(seq 1 120)
++ '[' -s /tmp/cap_alloc_ready ']'
++ break
+++ cat /tmp/cap_alloc_ready
++ echo 'allocator_pid=1494 ready=1494'
+allocator_pid=1494 ready=1494
++ echo 'during numa_stat'
+during numa_stat
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.numa_stat
+anon N0=526041088 N1=1088729088
+file N0=90112 N1=4096
+kernel_stack N0=32768 N1=0
+pagetables N0=0 N1=0
+sec_pagetables N0=0 N1=0
+shmem N0=0 N1=0
+file_mapped N0=0 N1=0
+file_dirty N0=0 N1=4096
+file_writeback N0=0 N1=0
+swapcached N0=0 N1=0
+anon_thp N0=0 N1=0
+file_thp N0=0 N1=0
+shmem_thp N0=0 N1=0
+inactive_anon N0=0 N1=0
+active_anon N0=526041088 N1=1088552960
+inactive_file N0=32768 N1=0
+active_file N0=57344 N1=0
+unevictable N0=0 N1=0
+slab_reclaimable N0=4808 N1=0
+slab_unreclaimable N0=82192 N1=1032
+hugetlb N0=0 N1=0
+workingset_refault_anon N0=0 N1=0
+workingset_refault_file N0=0 N1=0
+workingset_activate_anon N0=0 N1=0
+workingset_activate_file N0=0 N1=0
+workingset_restore_anon N0=0 N1=0
+workingset_restore_file N0=0 N1=0
+workingset_nodereclaim N0=0 N1=0
+pgdemote_kswapd N0=0 N1=0
+pgdemote_direct N0=0 N1=0
+pgdemote_khugepaged N0=0 N1=0
+pgdemote_proactive N0=0 N1=0
+pgpromote_success N0=0 N1=0
++ echo 'during reclaimd'
+during reclaimd
++ cat /sys/fs/cgroup/cap_adm_alloc/memory.reclaimd_state
+running 0
+wake_count 0
+run_count 0
+pending_nodes 
+inflight_nodes 
+mode 0
+node0_capacity 131072
+node0_low_wmark 124518
+node0_high_wmark 128450
+node0_usage_lru 128450
+node0_usage_exact 128450
+node0_over_high 1
+node0_failures 0
+node0_cooldown_ms 0
+node1_capacity 0
+node1_low_wmark 0
+node1_high_wmark 0
+node1_usage_lru 265760
+node1_usage_exact 265858
+node1_over_high 0
+node1_failures 0
+node1_cooldown_ms 0
++ kill 1494
++ wait 1494
++ true

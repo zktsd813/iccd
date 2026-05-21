@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#222}.axis{stroke:#333;stroke-width:1.3}.grid{stroke:#ddd;stroke-width:1}.title{font-size:28px;font-weight:700}.label{font-size:21px}.tick{font-size:17px}.value{font-size:18px;font-weight:700}.ratio{font-size:32px;font-weight:800}.legend{font-size:18px}</style>
+<text class="title" x="600.0" y="40" text-anchor="middle">Average ops over 200s measurement, scan256</text>
+<line class="grid" x1="112" y1="550.0" x2="1142" y2="550.0"/>
+<text class="tick" x="99" y="556.0" text-anchor="end">0</text>
+<line class="grid" x1="112" y1="435.0" x2="1142" y2="435.0"/>
+<text class="tick" x="99" y="441.0" text-anchor="end">200</text>
+<line class="grid" x1="112" y1="320.0" x2="1142" y2="320.0"/>
+<text class="tick" x="99" y="326.0" text-anchor="end">400</text>
+<line class="grid" x1="112" y1="205.0" x2="1142" y2="205.0"/>
+<text class="tick" x="99" y="211.0" text-anchor="end">600</text>
+<line class="grid" x1="112" y1="90.0" x2="1142" y2="90.0"/>
+<text class="tick" x="99" y="96.0" text-anchor="end">800</text>
+<line class="axis" x1="112" y1="550" x2="1142" y2="550"/>
+<line class="axis" x1="112" y1="90" x2="112" y2="550"/>
+<text class="label" x="38" y="320.0" transform="rotate(-90 38 320.0)" text-anchor="middle">Mops/s</text>
+<rect x="165.7" y="512.6" width="118" height="37.4" fill="#777777" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="224.7" y="502.6" text-anchor="middle">65</text>
+<rect x="283.7" y="397.3" width="118" height="152.7" fill="#0b6fba" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="342.7" y="387.3" text-anchor="middle">266</text>
+<text class="ratio" x="283.7" y="355.3" text-anchor="middle">4.08x</text>
+<text class="tick" x="283.7" y="586" text-anchor="middle">0G local</text>
+<text class="tick" x="283.7" y="611" text-anchor="middle">32G remote</text>
+<rect x="509.0" y="388.7" width="118" height="161.3" fill="#777777" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="568.0" y="378.7" text-anchor="middle">281</text>
+<rect x="627.0" y="396.0" width="118" height="154.0" fill="#0b6fba" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="686.0" y="386.0" text-anchor="middle">268</text>
+<text class="ratio" x="627.0" y="346.7" text-anchor="middle">0.95x</text>
+<text class="tick" x="627.0" y="586" text-anchor="middle">8G local</text>
+<text class="tick" x="627.0" y="611" text-anchor="middle">24G remote</text>
+<rect x="852.3" y="225.8" width="118" height="324.2" fill="#777777" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="911.3" y="215.8" text-anchor="middle">564</text>
+<rect x="970.3" y="401.5" width="118" height="148.5" fill="#0b6fba" stroke="#000" stroke-width="1.8"/>
+<text class="value" x="1029.3" y="391.5" text-anchor="middle">258</text>
+<text class="ratio" x="970.3" y="183.8" text-anchor="middle">0.46x</text>
+<text class="tick" x="970.3" y="586" text-anchor="middle">16G local</text>
+<text class="tick" x="970.3" y="611" text-anchor="middle">16G remote</text>
+<rect x="962" y="68" width="24" height="24" fill="#777777" stroke="#000" stroke-width="1.5"/>
+<text class="legend" x="996" y="86">off</text>
+<rect x="1078" y="68" width="24" height="24" fill="#0b6fba" stroke="#000" stroke-width="1.5"/>
+<text class="legend" x="1112" y="86">on</text>
+</svg>

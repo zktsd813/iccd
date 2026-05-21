@@ -1,0 +1,13 @@
+candidate,phase_id,phase_name,phase_kind,off_mops_s,on_mops_s,adaptive_mops_s,on_over_off,adaptive_over_off,on_refault_rate_s,adaptive_refault_rate_s,on_refault_latency_us,adaptive_refault_latency_us
+phase_mulshift4g_rot_move16g3s,1,mulshift-hotset-4g-off0g,friendly_mulshift4g,1400.189837,3088.691564,3031.493811,2.205909,2.165059,1029.344763,1121.123671,3.803279,2.588451
+phase_mulshift4g_rot_move16g3s,2,mulshift-hotset-16g-move-3s,unfriendly_move16g3s,452.456082,994.145545,474.357604,2.197220,1.048406,8034.166456,0.000000,3.603226,0.000000
+phase_mulshift4g_rot_move16g3s,3,mulshift-hotset-4g-off24g,friendly_mulshift4g,597.945598,1710.014667,2635.909215,2.859816,4.408276,1278.524700,1767.968842,3.814128,2.288766
+phase_mulshift4g_rot_move16g3s,4,mulshift-hotset-16g-move-3s,unfriendly_move16g3s,446.533112,731.636631,919.505807,1.638482,2.059211,4611.828391,0.000000,10.979477,0.000000
+phase_mulshift4g_rot_move16g3s,5,mulshift-hotset-4g-off48g,friendly_mulshift4g,598.895529,1855.331489,2027.187557,3.097922,3.384877,1186.689380,1766.092903,1.705514,10.490177
+phase_mulshift4g_rot_move16g3s,6,mulshift-hotset-16g-move-3s,unfriendly_move16g3s,446.808596,753.959249,983.044881,1.687432,2.200148,4956.953359,0.000000,3.204309,0.000000
+phase_mulshift4g_rot_sparse64,1,mulshift-hotset-4g-off40g,friendly_mulshift4g,611.140752,2360.873410,2204.566400,3.863060,3.607297,1766.700925,1764.679154,2.517667,2.822838
+phase_mulshift4g_rot_sparse64,2,sparse-stride-read-64g,unfriendly_sparse64,86.730645,86.728156,96.685469,0.999971,1.114779,3635.667821,0.000000,2.156364,0.000000
+phase_mulshift4g_rot_sparse64,3,mulshift-hotset-4g-off48g,friendly_mulshift4g,600.654665,1361.955935,2050.420500,2.267453,3.413643,1398.567856,1762.865447,2.253797,2.831927
+phase_mulshift4g_rot_sparse64,4,sparse-stride-read-64g,unfriendly_sparse64,89.010238,89.002972,100.380034,0.999918,1.127736,1031.294812,740.185846,2.093898,3.547874
+phase_mulshift4g_rot_sparse64,5,mulshift-hotset-4g-off56g,friendly_mulshift4g,585.125639,735.920991,1835.603709,1.257714,3.137110,0.670815,1619.694626,0.000000,2.367110
+phase_mulshift4g_rot_sparse64,6,sparse-stride-read-64g,unfriendly_sparse64,86.449561,96.971022,110.618952,1.121706,1.279578,0.000000,0.000000,0.000000,0.000000

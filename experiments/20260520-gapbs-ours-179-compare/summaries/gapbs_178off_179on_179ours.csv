@@ -1,0 +1,13 @@
+workload,cap,kernel_policy,avg_trial_s
+pr,8g,#178 off,18.87299
+pr,16g,#178 off,19.06677
+bc,8g,#178 off,16.39678
+bc,16g,#178 off,49.38733
+pr,8g,#179 on,45.41178
+pr,16g,#179 on,44.05163
+bc,8g,#179 on,52.61184
+bc,16g,#179 on,19.98134
+pr,8g,#179 ours,20.18425
+pr,16g,#179 ours,19.77788
+bc,8g,#179 ours,41.69187
+bc,16g,#179 ours,14.17649

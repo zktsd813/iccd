@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#222}.axis{stroke:#333;stroke-width:1}.grid{stroke:#ddd;stroke-width:1}.title{font-size:18px;font-weight:700}.label{font-size:13px}.tick{font-size:12px}.ratio{font-size:20px;font-weight:800}</style>
+<text class="title" x="490.0" y="32" text-anchor="middle">HSS32 split16 scan256 period sweep</text>
+<line class="grid" x1="86" y1="444.0" x2="946" y2="444.0"/>
+<text class="tick" x="78" y="448.0" text-anchor="end">0</text>
+<line class="grid" x1="86" y1="350.5" x2="946" y2="350.5"/>
+<text class="tick" x="78" y="354.5" text-anchor="end">175</text>
+<line class="grid" x1="86" y1="257.0" x2="946" y2="257.0"/>
+<text class="tick" x="78" y="261.0" text-anchor="end">350</text>
+<line class="grid" x1="86" y1="163.5" x2="946" y2="163.5"/>
+<text class="tick" x="78" y="167.5" text-anchor="end">524</text>
+<line class="grid" x1="86" y1="70.0" x2="946" y2="70.0"/>
+<text class="tick" x="78" y="74.0" text-anchor="end">699</text>
+<line class="axis" x1="86" y1="444" x2="946" y2="444"/>
+<line class="axis" x1="86" y1="70" x2="86" y2="444"/>
+<rect x="147.5" y="142.4" width="92.0" height="301.6" fill="#555555" stroke="#000" stroke-width="1.2"/>
+<text class="tick" x="193.5" y="135.4" text-anchor="middle">564</text>
+<text class="tick" x="193.5" y="468" text-anchor="middle">off</text>
+<text class="tick" x="193.5" y="486" text-anchor="middle">baseline</text>
+<rect x="362.5" y="305.8" width="92.0" height="138.2" fill="#777777" stroke="#000" stroke-width="1.2"/>
+<text class="tick" x="408.5" y="298.8" text-anchor="middle">258</text>
+<text class="ratio" x="408.5" y="273.8" text-anchor="middle">0.46x</text>
+<text class="tick" x="408.5" y="468" text-anchor="middle">1000ms</text>
+<text class="tick" x="408.5" y="486" text-anchor="middle">no-fast</text>
+<rect x="577.5" y="298.5" width="92.0" height="145.5" fill="#0b6fba" stroke="#000" stroke-width="1.2"/>
+<text class="tick" x="623.5" y="291.5" text-anchor="middle">272</text>
+<text class="ratio" x="623.5" y="266.5" text-anchor="middle">0.48x</text>
+<text class="tick" x="623.5" y="468" text-anchor="middle">500ms</text>
+<text class="tick" x="623.5" y="486" text-anchor="middle">fast</text>
+<rect x="792.5" y="296.6" width="92.0" height="147.4" fill="#c43c39" stroke="#000" stroke-width="1.2"/>
+<text class="tick" x="838.5" y="289.6" text-anchor="middle">276</text>
+<text class="ratio" x="838.5" y="264.6" text-anchor="middle">0.49x</text>
+<text class="tick" x="838.5" y="468" text-anchor="middle">250ms</text>
+<text class="tick" x="838.5" y="486" text-anchor="middle">fast</text>
+<text class="label" x="30" y="257.0" transform="rotate(-90 30 257.0)" text-anchor="middle">Mops/s</text>
+</svg>

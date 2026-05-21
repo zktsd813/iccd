@@ -1,0 +1,8 @@
+event,timestamp,elapsed_ms,window,window_seq,window_sec,threshold_pct,remote_threshold_pct,min_pte_updates,min_hint_faults,sample_pct,pte_delta,hit_delta,refault_delta,lost_delta,remote_refault_delta,hint_fault_delta,estimated_local_accesses,estimated_remote_accesses,access_pct,fast_pct,remote_ratio_pct,local_consecutive,remote_consecutive,reenable_consecutive,consecutive,stop_reason,controller_state,node_balancing
+start,2026-05-20T08:15:52Z,1,0,1,10.0,80.0,20.0,1000,1000,10.00,0,0,0,0,0,0,0.00,0.00,0.00,0.00,0.00,0,0,0,0,,on,2
+sample,2026-05-20T08:16:02Z,10003,1,1,10.0,80.0,20.0,1000,1000,10.00,0,0,0,0,1,1,10.00,0.00,0.00,0.00,0.00,0,0,0,0,,on,2
+sample,2026-05-20T08:16:12Z,20006,2,2,10.0,80.0,20.0,1000,1000,10.00,39345,1,1,0,0,0,0.00,0.00,0.00,0.00,0.00,0,0,0,0,,on,2
+sample,2026-05-20T08:16:22Z,30007,3,3,10.0,80.0,20.0,1000,1000,10.00,39323,0,39323,0,312860,770850,3128600.00,0.00,100.00,0.00,0.00,1,1,0,1,,on,2
+sample,2026-05-20T08:16:32Z,40009,4,4,10.0,80.0,20.0,1000,1000,10.00,243568,114976,243568,0,92511,5058953,925110.00,4133843.00,100.00,47.20,81.71,2,0,0,2,,on,2
+sample,2026-05-20T08:16:42Z,50010,5,5,10.0,80.0,20.0,1000,1000,10.00,105622,80872,105621,0,253579,939615,2535790.00,0.00,100.00,76.57,0.00,3,1,0,3,,on,2
+off,2026-05-20T08:16:42Z,50010,5,5,10.0,80.0,20.0,1000,1000,10.00,105622,80872,105621,0,253579,939615,2535790.00,0.00,100.00,76.57,0.00,3,1,0,3,local_access,off,0

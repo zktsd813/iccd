@@ -1,0 +1,33 @@
+# Large/generated experiment artifacts
+experiments/**/qemu-logs/
+*.qcow2
+*.img
+*.iso
+
+# Local kernel build outputs
+linux-build-mt/
+vmlinux
+vmlinux.*
+System.map
+Module.symvers
+modules.order
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+*.a
+
+# Archive snapshots kept outside git
+*.bundle
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.xz
+*.zst
+
+# Python/cache noise
+__pycache__/
+*.pyc

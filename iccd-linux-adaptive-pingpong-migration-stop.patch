@@ -1,0 +1,837 @@
+diff -urN base/include/linux/memcontrol.h adaptive/include/linux/memcontrol.h
+--- base/include/linux/memcontrol.h	2026-05-06 09:30:43.617453437 +0000
++++ adaptive/include/linux/memcontrol.h	2026-05-06 09:28:32.788181748 +0000
+@@ -85,6 +85,34 @@
+ };
+ 
+ #ifdef CONFIG_NUMA_BALANCING_MT
++#define MEMCG_NUMA_EARLYSTOP_THRESHOLD	10000
++#define MEMCG_NUMA_EARLYSTOP_SLOPE_MAX	20000
++#define MEMCG_NUMA_RESTART_CANDIDATES	4
++
++struct memcg_numa_earlystop_data {
++	spinlock_t lock;
++	long previous_slope;
++	atomic_long_t current_demote_promoted;
++	unsigned long previous_demote_promoted;
++	long threshold;
++	int earlystop_cnt;
++	int previous_point;
++	int slope_max;
++	int slope_cnt;
++	int ignore;
++	long delta[3];
++	int delta_cnt;
++};
++
++struct memcg_numa_restart_data {
++	int restart_cnt;
++	unsigned long referenced_mean;
++	int variation_condition;
++	int scanning_counter;
++	unsigned long referenced_data[MEMCG_NUMA_RESTART_CANDIDATES];
++	unsigned int referenced_index;
++};
++
+ /*
+  * memcg_reclaimd decouples per-memcg reclaim scheduling from the global
+  * pgdat-based kswapd path and keeps memcg+node work local to each memcg.
+@@ -366,6 +394,12 @@
+ 	atomic64_t	numa_migrate_fail_promotion_blocked;
+ 	atomic64_t	numa_migrate_fail_promotion_over_high;
+ 	atomic64_t	numa_migrate_fail_promotion_alloc;
++	atomic64_t	numa_demote_promoted;
++	atomic64_t	numa_demote_promoted_referenced;
++	atomic64_t	numa_promote_candidate_demoted;
++	bool		numa_page_migration_running;
++	struct memcg_numa_earlystop_data numa_earlystop;
++	struct memcg_numa_restart_data numa_restart;
+ 	struct memcg_reclaimd_ctx reclaimd;
+ #endif 
+ 
+@@ -856,11 +890,43 @@
+ 	return mode;
+ }
+ 
++bool mem_cgroup_numa_migration_running(struct mem_cgroup *memcg);
++bool task_numa_migration_running(struct task_struct *p);
++bool folio_numa_migration_running(struct folio *folio);
++void mem_cgroup_numa_reset_earlystop(struct mem_cgroup *memcg, bool running);
++void mem_cgroup_numa_account_demote_promoted(struct mem_cgroup *memcg,
++					     unsigned long nr_pages,
++					     bool referenced);
++void mem_cgroup_numa_account_promote_candidate_demoted(struct mem_cgroup *memcg,
++							       unsigned long nr_pages);
++
+ #else
+ static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
+ {
+ 	return READ_ONCE(sysctl_numa_balancing_mode);
+ }
++
++static inline bool task_numa_migration_running(struct task_struct *p)
++{
++	return true;
++}
++
++static inline bool folio_numa_migration_running(struct folio *folio)
++{
++	return true;
++}
++
++static inline void mem_cgroup_numa_account_demote_promoted(struct mem_cgroup *memcg,
++							  unsigned long nr_pages,
++							  bool referenced)
++{
++}
++
++static inline void mem_cgroup_numa_account_promote_candidate_demoted(
++	struct mem_cgroup *memcg, unsigned long nr_pages)
++{
++}
++
+ #endif
+ 
+ static inline int task_numa_balancing_mode(struct task_struct *p)
+diff -urN base/include/linux/page-flags.h adaptive/include/linux/page-flags.h
+--- base/include/linux/page-flags.h	2026-05-06 09:31:00.921616920 +0000
++++ adaptive/include/linux/page-flags.h	2026-05-06 09:28:32.788181748 +0000
+@@ -129,6 +129,7 @@
+ #endif
+ #ifdef CONFIG_NUMA_BALANCING
+ 	PG_demoted,
++	PG_promoted,
+ #endif
+ 	__NR_PAGEFLAGS,
+ 
+@@ -570,6 +571,8 @@
+ #ifdef CONFIG_NUMA_BALANCING
+ PAGEFLAG(Demoted, demoted, PF_NO_TAIL)
+ 	TESTCLEARFLAG(Demoted, demoted, PF_NO_TAIL)
++PAGEFLAG(Promoted, promoted, PF_NO_TAIL)
++	TESTCLEARFLAG(Promoted, promoted, PF_NO_TAIL)
+ #endif
+ /* Xen */
+ PAGEFLAG(Pinned, pinned, PF_NO_COMPOUND)
+diff -urN base/include/linux/vm_event_item.h adaptive/include/linux/vm_event_item.h
+--- base/include/linux/vm_event_item.h	2026-05-06 09:31:08.809691114 +0000
++++ adaptive/include/linux/vm_event_item.h	2026-05-06 09:28:32.788181748 +0000
+@@ -68,6 +68,9 @@
+ 		NUMA_HINT_FAULTS,
+ 		NUMA_HINT_FAULTS_LOCAL,
+ 		NUMA_PAGE_MIGRATE,
++		PGDEMOTE_PROMOTED,
++		PGDEMOTE_PROMOTED_REFERENCED,
++		PGPROMOTE_CANDIDATE_DEMOTED,
+ #endif
+ #ifdef CONFIG_MIGRATION
+ 		PGMIGRATE_SUCCESS, PGMIGRATE_FAIL,
+diff -urN base/include/trace/events/mmflags.h adaptive/include/trace/events/mmflags.h
+--- base/include/trace/events/mmflags.h	2026-05-06 09:31:04.685652350 +0000
++++ adaptive/include/trace/events/mmflags.h	2026-05-06 09:28:32.788181748 +0000
+@@ -172,7 +172,8 @@
+ IF_HAVE_PG_IDLE(young)							\
+ IF_HAVE_PG_ARCH_2(arch_2)						\
+ IF_HAVE_PG_ARCH_3(arch_3)						\
+-	IF_HAVE_PG_NUMA_BALANCING(demoted)
++	IF_HAVE_PG_NUMA_BALANCING(demoted)					\
++	IF_HAVE_PG_NUMA_BALANCING(promoted)
+ 
+ #define show_page_flags(flags)						\
+ 	(flags) ? __print_flags(flags, "|",				\
+diff -urN base/kernel/sched/core.c adaptive/kernel/sched/core.c
+--- base/kernel/sched/core.c	2026-05-06 09:31:19.221788740 +0000
++++ adaptive/kernel/sched/core.c	2026-05-06 09:28:29.540149292 +0000
+@@ -4561,6 +4561,8 @@
+ 				numa_balancing_reset_memory_tiering();
+ 			WRITE_ONCE(sysctl_numa_balancing_mode, state);
+ #ifdef CONFIG_NUMA_BALANCING_MT
++			if (state & NUMA_BALANCING_MEMORY_TIERING)
++				mem_cgroup_numa_reset_earlystop(root_mem_cgroup, true);
+ 			sched_numa_balancing_update_state();
+ #else
+ 		__set_numabalancing_state(state);
+diff -urN base/kernel/sched/fair.c adaptive/kernel/sched/fair.c
+--- base/kernel/sched/fair.c	2026-05-06 09:31:28.841878633 +0000
++++ adaptive/kernel/sched/fair.c	2026-05-06 09:28:32.788181748 +0000
+@@ -2003,6 +2003,10 @@
+ 	if (!node_state(dst_nid, N_MEMORY))
+ 		return false;
+ 
++	if (!task_numa_migration_running(p) ||
++	    !folio_numa_migration_running(folio))
++		return false;
++
+ 	/*
+ 	 * The pages in slow memory node should be migrated according
+ 	 * to hot/cold instead of private/shared.
+@@ -3254,7 +3258,8 @@
+ 		return;
+ 
+ #ifdef CONFIG_NUMA_BALANCING_MT
+-	if (task_numa_balancing_mode(p) <= 0)
++	if (task_numa_balancing_mode(p) <= 0 ||
++	    !task_numa_migration_running(p))
+ 		return;
+ #else
+ 	if (!static_branch_likely(&sched_numa_balancing))
+@@ -3381,7 +3386,8 @@
+ #ifdef CONFIG_NUMA_BALANCING_MT
+ static bool task_numa_balancing_enabled(struct task_struct *p)
+ {
+-	return task_numa_balancing_mode(p) > 0;
++	return task_numa_balancing_mode(p) > 0 &&
++	       task_numa_migration_running(p);
+ }
+ #endif
+ 
+diff -urN base/mm/memcontrol.c adaptive/mm/memcontrol.c
+--- base/mm/memcontrol.c	2026-05-06 09:32:32.366465217 +0000
++++ adaptive/mm/memcontrol.c	2026-05-06 09:28:32.792181788 +0000
+@@ -3824,6 +3824,11 @@
+ 	memcg->numa_balancing_scan_period_scale =
+ 		MEMCG_NUMA_BALANCING_SCAN_PERIOD_SCALE_DEF;
+ 	memcg->numa_balancing_hot_threshold_ms = 0;
++	atomic64_set(&memcg->numa_demote_promoted, 0);
++	atomic64_set(&memcg->numa_demote_promoted_referenced, 0);
++	atomic64_set(&memcg->numa_promote_candidate_demoted, 0);
++	spin_lock_init(&memcg->numa_earlystop.lock);
++	mem_cgroup_numa_reset_earlystop(memcg, true);
+ 	memcg_reclaimd_init(memcg);
+ #endif
+ 	memcg1_memcg_init(memcg);
+@@ -4667,12 +4672,104 @@
+ 
+ atomic_t numa_balancing_count = ATOMIC_INIT(0);
+ 
++bool mem_cgroup_numa_migration_running(struct mem_cgroup *memcg)
++{
++	if (!memcg)
++		return true;
++
++	if (!(mem_cgroup_numa_balancing_mode(memcg) &
++	      NUMA_BALANCING_MEMORY_TIERING))
++		return true;
++
++	return READ_ONCE(memcg->numa_page_migration_running);
++}
++
++bool task_numa_migration_running(struct task_struct *p)
++{
++	struct mem_cgroup *memcg;
++	bool running;
++
++	if (!p || !p->mm || mem_cgroup_disabled())
++		return true;
++
++	rcu_read_lock();
++	memcg = mem_cgroup_from_task(p);
++	running = mem_cgroup_numa_migration_running(memcg);
++	rcu_read_unlock();
++
++	return running;
++}
++
++bool folio_numa_migration_running(struct folio *folio)
++{
++	if (!folio || mem_cgroup_disabled())
++		return true;
++
++	return mem_cgroup_numa_migration_running(folio_memcg(folio));
++}
++
++void mem_cgroup_numa_reset_earlystop(struct mem_cgroup *memcg, bool running)
++{
++	struct memcg_numa_earlystop_data *data;
++	unsigned long flags;
++
++	if (!memcg)
++		return;
++
++	data = &memcg->numa_earlystop;
++	spin_lock_irqsave(&data->lock, flags);
++	data->previous_slope = 0;
++	atomic_long_set(&data->current_demote_promoted, 0);
++	data->previous_demote_promoted = 0;
++	data->threshold = MEMCG_NUMA_EARLYSTOP_THRESHOLD;
++	data->earlystop_cnt = 0;
++	data->previous_point = 0;
++	data->slope_max = MEMCG_NUMA_EARLYSTOP_SLOPE_MAX;
++	data->slope_cnt = 0;
++	data->ignore = 0;
++	memset(data->delta, 0, sizeof(data->delta));
++	data->delta_cnt = 0;
++	memset(&memcg->numa_restart, 0, sizeof(memcg->numa_restart));
++	WRITE_ONCE(memcg->numa_page_migration_running, running);
++	spin_unlock_irqrestore(&data->lock, flags);
++}
++
++void mem_cgroup_numa_account_demote_promoted(struct mem_cgroup *memcg,
++					     unsigned long nr_pages,
++					     bool referenced)
++{
++	if (!memcg)
++		return;
++	if (!(mem_cgroup_numa_balancing_mode(memcg) &
++	      NUMA_BALANCING_MEMORY_TIERING))
++		return;
++
++	atomic64_add(nr_pages, &memcg->numa_demote_promoted);
++	if (referenced)
++		atomic64_add(nr_pages, &memcg->numa_demote_promoted_referenced);
++	atomic_long_add(nr_pages,
++			&memcg->numa_earlystop.current_demote_promoted);
++}
++
++void mem_cgroup_numa_account_promote_candidate_demoted(struct mem_cgroup *memcg,
++						       unsigned long nr_pages)
++{
++	if (!memcg)
++		return;
++	if (!(mem_cgroup_numa_balancing_mode(memcg) &
++	      NUMA_BALANCING_MEMORY_TIERING))
++		return;
++
++	atomic64_add(nr_pages, &memcg->numa_promote_candidate_demoted);
++}
++
+ static void memcg_numa_balancing_disable(struct mem_cgroup *memcg)
+ {
+ 	int old_mode;
+ 
+ 	old_mode = xchg(&memcg->node_balancing_mode,
+ 			NUMA_BALANCING_DISABLED);
++	mem_cgroup_numa_reset_earlystop(memcg, true);
+ 	if (old_mode > 0) {
+ 		atomic_dec(&numa_balancing_count);
+ 		sched_numa_balancing_update_state();
+@@ -5771,6 +5868,7 @@
+ 	if (!(old_mode & NUMA_BALANCING_MEMORY_TIERING) &&
+ 	    (mode & NUMA_BALANCING_MEMORY_TIERING))
+ 		numa_balancing_reset_memory_tiering();
++	mem_cgroup_numa_reset_earlystop(memcg, true);
+ 	if (old_mode == 0 && mode > 0) {
+ 		atomic_inc(&numa_balancing_count);
+ 		sched_numa_balancing_update_state();
+@@ -5881,6 +5979,16 @@
+ static int memory_numa_migrate_state_show(struct seq_file *m, void *v)
+ {
+ 	struct mem_cgroup *memcg = mem_cgroup_from_seq(m);
++	unsigned long flags;
++	long earlystop_current;
++	unsigned long earlystop_previous;
++	long earlystop_threshold;
++	unsigned long restart_referenced_mean;
++	int earlystop_running;
++	int earlystop_cnt;
++	int restart_cnt;
++	int restart_variation_condition;
++	int restart_scanning_counter;
+ 
+ 	seq_printf(m, "numa_migrate_success_total %lld\n",
+ 		   atomic64_read(&memcg->numa_migrate_success_total));
+@@ -5894,6 +6002,41 @@
+ 		   atomic64_read(&memcg->numa_migrate_fail_promotion_over_high));
+ 	seq_printf(m, "numa_migrate_fail_promotion_alloc %lld\n",
+ 		   atomic64_read(&memcg->numa_migrate_fail_promotion_alloc));
++	seq_printf(m, "numa_demote_promoted %lld\n",
++		   atomic64_read(&memcg->numa_demote_promoted));
++	seq_printf(m, "numa_demote_promoted_referenced %lld\n",
++		   atomic64_read(&memcg->numa_demote_promoted_referenced));
++	seq_printf(m, "numa_promote_candidate_demoted %lld\n",
++		   atomic64_read(&memcg->numa_promote_candidate_demoted));
++	spin_lock_irqsave(&memcg->numa_earlystop.lock, flags);
++	earlystop_running = READ_ONCE(memcg->numa_page_migration_running);
++	earlystop_current =
++		atomic_long_read(&memcg->numa_earlystop.current_demote_promoted);
++	earlystop_previous = memcg->numa_earlystop.previous_demote_promoted;
++	earlystop_threshold = memcg->numa_earlystop.threshold;
++	earlystop_cnt = memcg->numa_earlystop.earlystop_cnt;
++	restart_cnt = memcg->numa_restart.restart_cnt;
++	restart_referenced_mean = memcg->numa_restart.referenced_mean;
++	restart_variation_condition = memcg->numa_restart.variation_condition;
++	restart_scanning_counter = memcg->numa_restart.scanning_counter;
++	spin_unlock_irqrestore(&memcg->numa_earlystop.lock, flags);
++	seq_printf(m, "numa_earlystop_running %d\n",
++		   earlystop_running);
++	seq_printf(m, "numa_earlystop_current_demote_promoted %ld\n",
++		   earlystop_current);
++	seq_printf(m, "numa_earlystop_previous_demote_promoted %lu\n",
++		   earlystop_previous);
++	seq_printf(m, "numa_earlystop_threshold %ld\n",
++		   earlystop_threshold);
++	seq_printf(m, "numa_earlystop_cnt %d\n",
++		   earlystop_cnt);
++	seq_printf(m, "numa_restart_cnt %d\n", restart_cnt);
++	seq_printf(m, "numa_restart_referenced_mean %lu\n",
++		   restart_referenced_mean);
++	seq_printf(m, "numa_restart_variation_condition %d\n",
++		   restart_variation_condition);
++	seq_printf(m, "numa_restart_scanning_counter %d\n",
++		   restart_scanning_counter);
+ 	return 0;
+ }
+ 
+diff -urN base/mm/memory.c adaptive/mm/memory.c
+--- base/mm/memory.c	2026-05-06 09:32:42.042553554 +0000
++++ adaptive/mm/memory.c	2026-05-06 09:28:32.792181788 +0000
+@@ -5910,7 +5910,15 @@
+ 	target_nid = mpol_misplaced(folio, vmf, addr);
+ #ifdef CONFIG_NUMA_BALANCING
+ 	if (target_nid != NUMA_NO_NODE && folio_test_clear_demoted(folio)) {
++		struct mem_cgroup *memcg;
++		unsigned long nr_pages = folio_nr_pages(folio);
++
+ 		*flags |= TNF_DEMOTED;
++		count_vm_numa_events(PGPROMOTE_CANDIDATE_DEMOTED, nr_pages);
++		memcg = get_mem_cgroup_from_folio(folio);
++		mem_cgroup_numa_account_promote_candidate_demoted(memcg,
++								  nr_pages);
++		mem_cgroup_put(memcg);
+ 	}
+ #endif
+ 
+diff -urN base/mm/migrate.c adaptive/mm/migrate.c
+--- base/mm/migrate.c	2026-05-06 09:33:09.986807263 +0000
++++ adaptive/mm/migrate.c	2026-05-06 09:28:32.792181788 +0000
+@@ -1193,25 +1193,57 @@
+ 
+ #ifdef CONFIG_NUMA_BALANCING
+ static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
+-				     enum migrate_reason reason)
++				     enum migrate_reason reason,
++				     bool demote_promoted,
++				     bool demote_promoted_referenced,
++				     struct mem_cgroup *demote_memcg,
++				     bool was_mapped)
+ {
++	unsigned long nr_pages;
++	bool promote;
++
+ 	if (folio_test_ksm(src))
+ 		return;
+ 
++	promote = reason == MR_NUMA_MISPLACED &&
++		  memory_tiering_enabled(src) &&
++		  node_is_promotion_target(folio_nid(src), folio_nid(dst));
++
+ 	if (reason == MR_DEMOTION) {
+ 		folio_set_demoted(dst);
++		if (!demote_promoted)
++			return;
++
++		nr_pages = folio_nr_pages(src);
++		count_vm_events(PGDEMOTE_PROMOTED, nr_pages);
++		if (demote_promoted_referenced)
++			count_vm_events(PGDEMOTE_PROMOTED_REFERENCED, nr_pages);
++		mem_cgroup_numa_account_demote_promoted(demote_memcg, nr_pages,
++							demote_promoted_referenced);
+ 		return;
+ 	}
+ 
+-	if (reason == MR_NUMA_MISPLACED)
++	if (promote) {
++		nr_pages = folio_nr_pages(dst);
++		folio_set_promoted(dst);
+ 		folio_set_active(dst);
++		if (!was_mapped)
++			return;
++		return;
++	}
+ 
++	if (folio_test_promoted(src))
++		folio_set_promoted(dst);
+ 	if (folio_test_demoted(src))
+ 		folio_set_demoted(dst);
+ }
+ #else
+ static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
+-				     enum migrate_reason reason)
++				     enum migrate_reason reason,
++				     bool demote_promoted,
++				     bool demote_promoted_referenced,
++				     struct mem_cgroup *demote_memcg,
++				     bool was_mapped)
+ {
+ }
+ #endif
+@@ -1376,6 +1408,9 @@
+ 	int old_page_state = 0;
+ 	struct anon_vma *anon_vma = NULL;
+ 	struct list_head *prev;
++	struct mem_cgroup *demote_memcg = NULL;
++	bool demote_promoted = false;
++	bool demote_promoted_referenced = false;
+ 
+ 	__migrate_folio_extract(dst, &old_page_state, &anon_vma);
+ 	prev = dst->lru.prev;
+@@ -1388,11 +1423,25 @@
+ 		goto out_unlock_both;
+ 	}
+ 
++#ifdef CONFIG_NUMA_BALANCING
++	if (reason == MR_DEMOTION && folio_test_promoted(src)) {
++		demote_promoted = true;
++		demote_promoted_referenced = folio_test_referenced(src);
++		demote_memcg = get_mem_cgroup_from_folio(src);
++	}
++#endif
++
+ 	rc = move_to_new_folio(dst, src, mode);
+ 	if (rc)
+ 		goto out;
+ 
+-	numa_note_migrated_folio(src, dst, reason);
++	numa_note_migrated_folio(src, dst, reason, demote_promoted,
++				 demote_promoted_referenced, demote_memcg,
++				 old_page_state & PAGE_WAS_MAPPED);
++	if (demote_memcg) {
++		mem_cgroup_put(demote_memcg);
++		demote_memcg = NULL;
++	}
+ 
+ 	/*
+ 	 * When successful, push dst to LRU immediately: so that if it
+@@ -1433,6 +1482,9 @@
+ 
+ 	return rc;
+ out:
++	if (demote_memcg)
++		mem_cgroup_put(demote_memcg);
++
+ 	/*
+ 	 * A folio that has not been migrated will be restored to
+ 	 * right list unless we want to retry.
+diff -urN base/mm/vmscan.c adaptive/mm/vmscan.c
+--- base/mm/vmscan.c	2026-05-06 09:34:16.167400325 +0000
++++ adaptive/mm/vmscan.c	2026-05-06 09:28:29.540149292 +0000
+@@ -7997,6 +7997,308 @@
+ 	pgdat_kswapd_unlock(pgdat);
+ }
+ 
++#ifdef CONFIG_NUMA_BALANCING_MT
++static struct task_struct *numa_earlystopd_task;
++
++static long numa_abs_long(long val)
++{
++	return val < 0 ? -val : val;
++}
++
++static unsigned long numa_abs_ulong_delta(unsigned long a, unsigned long b)
++{
++	return a > b ? a - b : b - a;
++}
++
++struct numa_restart_scan {
++	unsigned long referenced;
++};
++
++static int numa_restart_pte_entry(pte_t *pte, unsigned long addr,
++				  unsigned long end, struct mm_walk *walk)
++{
++	struct numa_restart_scan *scan = walk->private;
++	pte_t ptent = ptep_get(pte);
++
++	if (!pte_present(ptent))
++		return 0;
++	if (ptep_test_and_clear_young(walk->vma, addr, pte))
++		scan->referenced++;
++	return 0;
++}
++
++static const struct mm_walk_ops numa_restart_walk_ops = {
++	.pte_entry = numa_restart_pte_entry,
++	.walk_lock = PGWALK_RDLOCK,
++};
++
++static unsigned long numa_restart_count_mm(struct mm_struct *mm)
++{
++	struct numa_restart_scan scan = { };
++	struct vm_area_struct *vma;
++	VMA_ITERATOR(vmi, mm, 0);
++
++	mmap_read_lock(mm);
++	for_each_vma(vmi, vma) {
++		if (!(vma->vm_flags & VM_READ) || (vma->vm_flags & VM_HUGETLB))
++			continue;
++		walk_page_vma(vma, &numa_restart_walk_ops, &scan);
++		cond_resched();
++	}
++	mmap_read_unlock(mm);
++
++	return scan.referenced;
++}
++
++static int numa_restart_scan_task(struct task_struct *task, void *arg)
++{
++	struct mm_struct *mm;
++	unsigned long *referenced = arg;
++
++	mm = get_task_mm(task);
++	if (!mm)
++		return 0;
++
++	*referenced += numa_restart_count_mm(mm);
++	mmput(mm);
++	return 0;
++}
++
++static unsigned long numa_restart_referenced_mean(
++	struct memcg_numa_restart_data *data)
++{
++	unsigned long total = 0;
++	int i;
++
++	for (i = 0; i < MEMCG_NUMA_RESTART_CANDIDATES; i++)
++		total += data->referenced_data[i];
++
++	return total / MEMCG_NUMA_RESTART_CANDIDATES;
++}
++
++static void numa_restart_check_memcg(struct mem_cgroup *memcg)
++{
++	struct memcg_numa_restart_data *restart;
++	unsigned long referenced = 0;
++	unsigned long variation;
++	unsigned long flags;
++	bool resume = false;
++
++	if (!memcg || mem_cgroup_is_root(memcg))
++		return;
++	if (!(mem_cgroup_numa_balancing_mode(memcg) &
++	      NUMA_BALANCING_MEMORY_TIERING))
++		return;
++	if (READ_ONCE(memcg->numa_page_migration_running))
++		return;
++
++	mem_cgroup_scan_tasks(memcg, numa_restart_scan_task, &referenced);
++
++	spin_lock_irqsave(&memcg->numa_earlystop.lock, flags);
++	restart = &memcg->numa_restart;
++	if (restart->scanning_counter < MEMCG_NUMA_RESTART_CANDIDATES) {
++		restart->referenced_data[restart->referenced_index] = referenced;
++		restart->referenced_index =
++			(restart->referenced_index + 1) %
++			MEMCG_NUMA_RESTART_CANDIDATES;
++		restart->scanning_counter++;
++		goto out_unlock;
++	}
++
++	restart->referenced_mean = numa_restart_referenced_mean(restart);
++	variation = restart->referenced_mean >> 4;
++	if (restart->variation_condition < 5) {
++		if (numa_abs_ulong_delta(restart->referenced_mean, referenced) <
++		    variation) {
++			restart->variation_condition++;
++		} else if (restart->variation_condition > 0) {
++			restart->variation_condition--;
++		}
++		restart->referenced_data[restart->referenced_index] = referenced;
++		restart->referenced_index =
++			(restart->referenced_index + 1) %
++			MEMCG_NUMA_RESTART_CANDIDATES;
++	} else if (numa_abs_ulong_delta(restart->referenced_mean, referenced) >
++		   variation) {
++		restart->restart_cnt++;
++	} else if (restart->restart_cnt > 0) {
++		restart->restart_cnt--;
++	} else {
++		restart->referenced_data[restart->referenced_index] = referenced;
++		restart->referenced_index =
++			(restart->referenced_index + 1) %
++			MEMCG_NUMA_RESTART_CANDIDATES;
++	}
++
++	if (restart->restart_cnt == 3)
++		resume = true;
++
++out_unlock:
++	spin_unlock_irqrestore(&memcg->numa_earlystop.lock, flags);
++
++	if (resume) {
++		mem_cgroup_numa_reset_earlystop(memcg, true);
++		pr_info("numa earlystop: restarted migration for memcg=%p\n",
++			memcg);
++	}
++}
++
++static void numa_earlystop_check_memcg(struct mem_cgroup *memcg)
++{
++	struct memcg_numa_earlystop_data *data;
++	unsigned long current_count;
++	unsigned long flags;
++	long slope = 0;
++	long abs_slope;
++	bool stop = false;
++
++	if (!memcg)
++		return;
++	if (!(mem_cgroup_numa_balancing_mode(memcg) &
++	      NUMA_BALANCING_MEMORY_TIERING))
++		return;
++	if (!READ_ONCE(memcg->numa_page_migration_running))
++		return;
++
++	data = &memcg->numa_earlystop;
++	spin_lock_irqsave(&data->lock, flags);
++	if (!READ_ONCE(memcg->numa_page_migration_running))
++		goto out_unlock;
++	current_count = atomic_long_read(&data->current_demote_promoted);
++
++	if (data->delta_cnt == 0) {
++		if (current_count)
++			data->previous_demote_promoted = current_count;
++		data->delta[0] = current_count - data->previous_demote_promoted;
++		data->delta_cnt++;
++		data->previous_demote_promoted = current_count;
++		goto out_unlock;
++	}
++
++	if (data->delta_cnt == 1) {
++		data->delta[1] = current_count - data->previous_demote_promoted;
++		data->delta_cnt++;
++		data->previous_demote_promoted = current_count;
++		goto out_unlock;
++	}
++
++	if (data->delta_cnt == 2) {
++		data->delta[2] = current_count - data->previous_demote_promoted;
++		data->delta_cnt++;
++		slope = (data->delta[2] - data->delta[0]) >> 1;
++	} else {
++		data->delta[0] = data->delta[1];
++		data->delta[1] = data->delta[2];
++		data->delta[2] = current_count - data->previous_demote_promoted;
++		slope = (data->delta[2] - data->delta[0]) >> 1;
++	}
++
++	abs_slope = numa_abs_long(slope);
++	if (data->slope_max < abs_slope) {
++		data->slope_max = abs_slope;
++		if (data->threshold < (data->slope_max >> 3))
++			data->threshold = data->slope_max >> 3;
++	}
++
++	if (data->earlystop_cnt == 0) {
++		if (numa_abs_long(data->previous_slope) < data->threshold) {
++			if (abs_slope < data->threshold) {
++				data->previous_point = 0;
++				if (slope && data->previous_slope &&
++				    data->slope_max != MEMCG_NUMA_EARLYSTOP_SLOPE_MAX) {
++					data->slope_cnt++;
++					if (data->slope_cnt == 5) {
++						data->earlystop_cnt = 3;
++						data->slope_cnt = 0;
++					}
++				} else if (data->slope_cnt) {
++					data->slope_cnt = 0;
++				}
++			} else {
++				data->previous_point++;
++				data->slope_cnt = 0;
++			}
++		} else if (abs_slope < data->threshold) {
++			if (data->previous_point > 2) {
++				data->earlystop_cnt++;
++				data->previous_point = 0;
++				data->slope_cnt = 0;
++			} else {
++				data->previous_point--;
++				data->slope_cnt++;
++			}
++		} else {
++			data->previous_point++;
++			data->slope_cnt = 0;
++		}
++	} else if (abs_slope < data->threshold) {
++		data->earlystop_cnt++;
++		data->ignore = 0;
++	} else if (data->ignore == 3) {
++		data->earlystop_cnt = 0;
++		data->ignore = 0;
++		data->previous_point++;
++	} else {
++		data->ignore++;
++		if (data->earlystop_cnt > 1)
++			data->earlystop_cnt--;
++	}
++
++	data->previous_demote_promoted = current_count;
++	data->previous_slope = slope;
++
++	if (data->earlystop_cnt == 8)
++		stop = true;
++
++out_unlock:
++	spin_unlock_irqrestore(&data->lock, flags);
++
++	if (stop) {
++		mem_cgroup_numa_reset_earlystop(memcg, false);
++		pr_info("numa earlystop: stopped migration for memcg=%p\n", memcg);
++	}
++}
++
++static void numa_migration_stopper(void)
++{
++	struct mem_cgroup *memcg = NULL;
++
++	while ((memcg = mem_cgroup_iter(NULL, memcg, NULL))) {
++		numa_earlystop_check_memcg(memcg);
++		numa_restart_check_memcg(memcg);
++	}
++}
++
++static int numa_earlystopd(void *unused)
++{
++	while (!kthread_should_stop()) {
++		numa_migration_stopper();
++		set_current_state(TASK_INTERRUPTIBLE);
++		schedule_timeout(2 * HZ);
++	}
++
++	return 0;
++}
++
++static void numa_earlystopd_run(void)
++{
++	if (numa_earlystopd_task)
++		return;
++
++	numa_earlystopd_task = kthread_run(numa_earlystopd, NULL,
++					   "numa_earlystopd");
++	if (IS_ERR(numa_earlystopd_task)) {
++		pr_err("Failed to start numa_earlystopd, ret=%ld\n",
++		       PTR_ERR(numa_earlystopd_task));
++		numa_earlystopd_task = NULL;
++	}
++}
++#else
++static void numa_earlystopd_run(void)
++{
++}
++#endif
++
+ static const struct ctl_table vmscan_sysctl_table[] = {
+ 	{
+ 		.procname	= "swappiness",
+@@ -8026,6 +8328,7 @@
+ 	swap_setup();
+ 	for_each_node_state(nid, N_MEMORY)
+  		kswapd_run(nid);
++	numa_earlystopd_run();
+ 	register_sysctl_init("vm", vmscan_sysctl_table);
+ 	return 0;
+ }
+diff -urN base/mm/vmstat.c adaptive/mm/vmstat.c
+--- base/mm/vmstat.c	2026-05-06 09:31:15.529754163 +0000
++++ adaptive/mm/vmstat.c	2026-05-06 09:28:32.792181788 +0000
+@@ -1367,6 +1367,9 @@
+ 	[I(NUMA_HINT_FAULTS)]			= "numa_hint_faults",
+ 	[I(NUMA_HINT_FAULTS_LOCAL)]		= "numa_hint_faults_local",
+ 	[I(NUMA_PAGE_MIGRATE)]			= "numa_pages_migrated",
++	[I(PGDEMOTE_PROMOTED)]			= "pgdemote_promoted",
++	[I(PGDEMOTE_PROMOTED_REFERENCED)]	= "pgdemote_promoted_referenced",
++	[I(PGPROMOTE_CANDIDATE_DEMOTED)]	= "pgpromote_candidate_demoted",
+ #endif
+ #ifdef CONFIG_MIGRATION
+ 	[I(PGMIGRATE_SUCCESS)]			= "pgmigrate_success",

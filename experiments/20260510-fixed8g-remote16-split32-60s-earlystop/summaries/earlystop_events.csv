@@ -1,0 +1,10 @@
+policy,event,prev_elapsed_ms,elapsed_ms,phase_id,phase_name,phase_rel_ms,from,to,stop_effective,earlystop_current_demote_promoted,earlystop_cnt,restart_cnt,delta_hint_faults,delta_pte_updates,delta_promoted_pages,delta_demoted_pages,note
+on,earlystop_cnt_transition,87867,88894,2,stream-read-32g-split16-4k,28894,0,1,1,301182,1,0,0,0,0,0,earlystop counter changed
+on,earlystop_cnt_transition,90978,92010,2,stream-read-32g-split16-4k,32010,1,2,1,359451,2,0,170552,264279,36961,44415,earlystop counter changed
+on,earlystop_cnt_transition,93037,94059,2,stream-read-32g-split16-4k,34059,2,1,1,418215,1,0,151228,77081,29822,23855,earlystop counter changed
+on,earlystop_cnt_transition,99273,100328,2,stream-read-32g-split16-4k,40328,1,0,1,521467,0,0,163544,342855,15362,15362,earlystop counter changed
+on,earlystop_cnt_transition,105513,106542,2,stream-read-32g-split16-4k,46542,0,1,1,732990,1,0,293374,258952,51078,51078,earlystop counter changed
+on,earlystop_cnt_transition,107580,108606,2,stream-read-32g-split16-4k,48606,1,2,1,808400,2,0,343185,219763,50260,45331,earlystop counter changed
+on,earlystop_cnt_transition,109653,110683,2,stream-read-32g-split16-4k,50683,2,1,1,921383,1,0,440352,198656,79927,93336,earlystop counter changed
+on,earlystop_cnt_transition,115815,116835,2,stream-read-32g-split16-4k,56835,1,0,1,982961,0,0,2,2,2,0,earlystop counter changed
+adaptive_cgroup,effective_transition,59723,60745,2,stream-read-32g-split16-4k,745,1,0,0,0,0,0,1574383,81362,0,0,effective reflects stop knob + pingpong stat + memory-tiering mode

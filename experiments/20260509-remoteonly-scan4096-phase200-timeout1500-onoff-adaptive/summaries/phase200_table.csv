@@ -1,0 +1,7 @@
+phase,kind,off,on,adaptive,unit
+1,friendly,228.33,271.48,274.69,Mops/s
+2,unfriendly,4518.59,2280.98,3932.91,MB/s
+3,friendly,228.20,691.58,439.58,Mops/s
+4,unfriendly,4519.67,3022.21,4210.88,MB/s
+5,friendly,228.06,736.38,742.07,Mops/s
+6,unfriendly,4519.86,3354.95,2522.70,MB/s

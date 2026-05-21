@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=453
+controller_csv=/root/gapbs-full-latest-policy-window-sweep/bc-8g/on/controller.csv
+stdout=/root/gapbs-full-latest-policy-window-sweep/bc-8g/on/workload.stdout.log
+stderr=/root/gapbs-full-latest-policy-window-sweep/bc-8g/on/workload.stderr.log

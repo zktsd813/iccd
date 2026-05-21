@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=305
+controller_csv=/root/gapbs-placement-64g64g-alllocal-allremote/pr/all-local/controller.csv
+stdout=/root/gapbs-placement-64g64g-alllocal-allremote/pr/all-local/workload.stdout.log
+stderr=/root/gapbs-placement-64g64g-alllocal-allremote/pr/all-local/workload.stderr.log

@@ -1,0 +1,13 @@
+candidate,candidate_label,policy,policy_label,phase_kind,phase_count,mean_mops_s,median_mops_s,refault_rate_s,sample_rate_s,refault_pct,refault_latency_us,hint_faults_s,promote_gib,blocked_s,anon_n0_end_gib
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,off,off+demotion,friendly_mulshift4g,3,865.676988,872.338905,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,1.447138
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,off,off+demotion,unfriendly_move16g3s,3,448.599263,433.772178,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,1.401981
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,on,migration-on,friendly_mulshift4g,3,2218.012573,1816.730238,1164.852947,1164.852947,100.000000,3.107641,28275.328990,7.852657,437.875544,11.571376
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,on,migration-on,unfriendly_move16g3s,3,826.580475,688.924075,5867.649402,5867.649402,100.000000,5.929004,429605.503798,39.723206,5984.203639,15.345931
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,adaptive_cgroup,adaptive,friendly_mulshift4g,3,2564.863527,3045.141163,1551.728472,1551.728472,100.000000,5.122465,20130.099626,10.534523,270.589820,9.466803
+phase_mulshift4g_rot_move16g3s,friendly vs move16g3s,adaptive_cgroup,adaptive,unfriendly_move16g3s,3,792.302764,584.725162,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,10.824539
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,off,off+demotion,friendly_mulshift4g,3,598.973685,604.361223,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.973581
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,off,off+demotion,unfriendly_sparse64,3,87.396815,83.942116,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,1.460158
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,on,migration-on,friendly_mulshift4g,3,1486.250112,1667.147190,1055.313198,1055.313198,100.000000,1.590488,57729.073252,7.115948,1471.927034,11.606373
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,on,migration-on,unfriendly_sparse64,3,90.900716,100.663296,1555.654211,1555.626051,66.667441,1.416754,229014.159567,10.542225,4182.985238,15.616580
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,adaptive_cgroup,adaptive,friendly_mulshift4g,3,2030.196869,2538.719797,1715.746409,1715.746409,100.000000,2.673958,25548.085004,11.607502,75.923186,9.899614
+phase_mulshift4g_rot_sparse64,friendly vs sparse64,adaptive_cgroup,adaptive,unfriendly_sparse64,3,102.561485,106.216594,246.728615,246.728615,33.333333,1.182625,2722.375598,1.682583,0.000000,11.892108

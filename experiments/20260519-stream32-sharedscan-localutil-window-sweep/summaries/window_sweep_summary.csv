@@ -1,0 +1,4 @@
+window_sec,run_id,off_s,final_avg_mib_s,after_off_mib_s,agg_mops_s,per_thread_mops_s,per_thread_pass_s,promote_gib,demote_gib,hint_faults,pte_updates,local_pte,local_refault,local_hit,local_lost
+5,20260519T000000Z-sharedscan-localutil-window5s-300s,30.53,4888.53,5055.07,640.75,20.02,2.39,2.92,1.92,6853182,6678656,839595,839429,762971,166
+10,20260519T001000Z-sharedscan-localutil-window10s-300s,30.92,4938.24,5082.54,647.26,20.23,2.41,2.54,1.67,6675073,6577180,834179,834179,812079,0
+20,20260519T002000Z-sharedscan-localutil-window20s-300s,60.52,4784.43,5203.48,627.10,19.60,2.34,4.45,3.89,11128964,10522791,877667,877667,661398,0

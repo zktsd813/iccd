@@ -1,0 +1,3 @@
+[2026-05-21T04:42:57Z] controller disabled for policy=off
+[2026-05-21T04:42:57Z] running workload
+[2026-05-21T04:44:56Z] done rc=0 elapsed_s=119 outdir=/root/gapbs-placement-64g64g-numactl/bc/all-local

@@ -1,0 +1,7 @@
+placement,candidate,policy,node0_anon_gib,node1_anon_gib
+remote,stream_read_32g_remote_4kstride,off,0.000229,32.000000
+remote,stream_read_32g_remote_4kstride,on,0.000229,32.000000
+split8,stream_read_32g_split8_4kstride,off,8.000225,24.000000
+split8,stream_read_32g_split8_4kstride,on,8.000229,24.000000
+split16,stream_read_32g_split16_4kstride,off,14.602524,17.397701
+split16,stream_read_32g_split16_4kstride,on,14.602535,17.397697

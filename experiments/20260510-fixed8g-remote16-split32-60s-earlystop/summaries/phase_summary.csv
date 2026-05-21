@@ -1,0 +1,7 @@
+policy,phase_id,phase_name,sample_start_ms,sample_end_ms,mean_mops_s,median_mops_s,mean_MBps,median_MBps,hint_faults,pte_updates,promoted_pages,promoted_gib,demoted_pages,demoted_gib,demote_promoted_pages_delta,promote_candidate_demoted_delta,stop_effective_start,stop_effective_end,running_start,running_end,current_demote_promoted_start,current_demote_promoted_end,earlystop_cnt_start,earlystop_cnt_end,restart_cnt_start,restart_cnt_end
+off,1,fixed8g-hotset-remote,50,59130,227.16,226.74,14538.15,14511.33,0,0,0,0.00,0,0.00,0,0,0,0,1,1,0,0,0,0,0,0
+off,2,stream-read-32g-split16-4k,60156,119434,563.19,563.35,4505.50,4506.78,0,0,0,0.00,0,0.00,0,0,0,0,1,1,0,0,0,0,0,0
+on,1,fixed8g-hotset-remote,61,59793,1197.10,1683.65,76614.28,107753.77,4136238,16424065,2097216,8.00,1959295,7.47,58,64,1,1,1,1,0,58,0,0,0,0
+on,2,stream-read-32g-split16-4k,60819,119905,454.17,450.89,3633.33,3607.10,13298051,12820791,2190774,8.36,2066838,7.88,983303,1519394,1,1,1,1,58,983361,0,0,0,0
+adaptive_cgroup,1,fixed8g-hotset-remote,60,59723,1196.61,1663.13,76582.81,106440.12,4120318,16409115,2097158,8.00,1960897,7.48,0,6,1,1,1,1,0,0,0,0,0,0
+adaptive_cgroup,2,stream-read-32g-split16-4k,60745,119031,558.62,558.66,4468.93,4469.31,0,0,0,0.00,0,0.00,0,0,0,0,1,1,0,0,0,0,0,0

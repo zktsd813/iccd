@@ -1,0 +1,5 @@
+returncode=0
+elapsed_s=193
+controller_csv=/root/gapbs-full-latest-placement-audit/pr-8g/oneshot-w5/controller.csv
+stdout=/root/gapbs-full-latest-placement-audit/pr-8g/oneshot-w5/workload.stdout.log
+stderr=/root/gapbs-full-latest-placement-audit/pr-8g/oneshot-w5/workload.stderr.log
