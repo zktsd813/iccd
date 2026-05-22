@@ -1786,8 +1786,8 @@ static void folio_account_local_tiering_sample_unmap(struct folio *folio)
 		return;
 
 	memcg = get_mem_cgroup_from_folio(folio);
-	mem_cgroup_numa_account_local_fault_lost(
-		memcg, folio_nr_pages(folio));
+	mem_cgroup_numa_account_local_fault_lost(memcg, folio,
+						 folio_nr_pages(folio));
 	mem_cgroup_put(memcg);
 }
 #else

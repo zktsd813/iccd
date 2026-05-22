@@ -1019,6 +1019,7 @@ struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 
 		return folio;
 	}
+
 	n = mem_cgroup_preferred_node(numa_node_id(), &cpuset_current_mems_allowed,
 				      1UL << order);
 	return __folio_alloc_node_noprof(gfp, order, n);

@@ -53,6 +53,36 @@ static const struct bus_type memory_tier_subsys = {
 };
 
 #ifdef CONFIG_NUMA_BALANCING
+bool node_is_promotion_target(int src, int dst)
+{
+	if (src == dst)
+		return false;
+	if (src < 0 || src >= nr_node_ids || !node_state(src, N_MEMORY))
+		return false;
+	if (dst < 0 || dst >= nr_node_ids || !node_state(dst, N_MEMORY))
+		return false;
+
+	if (next_demotion_node(dst) == src)
+		return true;
+
+	return !node_is_toptier(src) && node_is_toptier(dst);
+}
+
+bool node_is_promotion_source(int node)
+{
+	int dst;
+
+	if (node < 0 || node >= nr_node_ids || !node_state(node, N_MEMORY))
+		return false;
+
+	for_each_node_state(dst, N_MEMORY) {
+		if (node_is_promotion_target(node, dst))
+			return true;
+	}
+
+	return false;
+}
+
 /**
  * folio_use_access_time - check if a folio reuses cpupid for page access time
  * @folio: folio to check
@@ -65,8 +95,8 @@ static const struct bus_type memory_tier_subsys = {
  */
 bool folio_use_access_time(struct folio *folio)
 {
-	return (folio_numa_balancing_mode(folio) & NUMA_BALANCING_MEMORY_TIERING) &&
-	       !node_is_toptier(folio_nid(folio));
+	return (memory_tiering_enabled(folio) &&
+	       node_is_promotion_source(folio_nid(folio)));
 }
 #endif
 
@@ -130,6 +160,7 @@ static int top_tier_adistance;
  *
  */
 static struct demotion_nodes *node_demotion __read_mostly;
+static int *manual_demotion_target __read_mostly;
 #endif /* CONFIG_MIGRATION */
 
 static BLOCKING_NOTIFIER_HEAD(mt_adistance_algorithms);
@@ -330,10 +361,21 @@ void node_get_allowed_targets(pg_data_t *pgdat, nodemask_t *targets)
 int next_demotion_node(int node)
 {
 	struct demotion_nodes *nd;
+	int manual_target;
 	int target;
 
 	if (!node_demotion)
 		return NUMA_NO_NODE;
+	if (node < 0 || node >= nr_node_ids)
+		return NUMA_NO_NODE;
+
+	if (manual_demotion_target) {
+		manual_target = READ_ONCE(manual_demotion_target[node]);
+		if (manual_target != NUMA_NO_NODE &&
+		    manual_target != node &&
+		    node_state(manual_target, N_MEMORY))
+			return manual_target;
+	}
 
 	nd = &node_demotion[node];
 
@@ -897,6 +939,7 @@ static int __meminit memtier_hotplug_callback(struct notifier_block *self,
 static int __init memory_tier_init(void)
 {
 	int ret;
+	int i;
 
 	ret = subsys_virtual_register(&memory_tier_subsys, NULL);
 	if (ret)
@@ -906,6 +949,14 @@ static int __init memory_tier_init(void)
 	node_demotion = kcalloc(nr_node_ids, sizeof(struct demotion_nodes),
 				GFP_KERNEL);
 	WARN_ON(!node_demotion);
+	manual_demotion_target = kcalloc(nr_node_ids, sizeof(*manual_demotion_target),
+					 GFP_KERNEL);
+	if (!manual_demotion_target) {
+		WARN_ON(1);
+	} else {
+		for (i = 0; i < nr_node_ids; i++)
+			manual_demotion_target[i] = NUMA_NO_NODE;
+	}
 #endif
 
 	mutex_lock(&memory_tier_lock);
@@ -966,8 +1017,60 @@ static ssize_t demotion_enabled_store(struct kobject *kobj,
 static struct kobj_attribute numa_demotion_enabled_attr =
 	__ATTR_RW(demotion_enabled);
 
+static ssize_t demotion_target_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	int nid;
+	ssize_t len = 0;
+
+	if (!manual_demotion_target)
+		return sysfs_emit(buf, "disabled\n");
+
+	for_each_node_state(nid, N_MEMORY) {
+		len += sysfs_emit_at(buf, len, "%d %d\n", nid,
+				     READ_ONCE(manual_demotion_target[nid]));
+	}
+
+	return len;
+}
+
+static ssize_t demotion_target_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int src_nid, dst_nid;
+
+	if (!manual_demotion_target)
+		return -ENOMEM;
+
+	if (sscanf(buf, "%d %d", &src_nid, &dst_nid) != 2)
+		return -EINVAL;
+	if (src_nid < 0 || src_nid >= nr_node_ids)
+		return -EINVAL;
+	if (!node_state(src_nid, N_MEMORY))
+		return -EINVAL;
+	if (dst_nid == src_nid)
+		return -EINVAL;
+	if (dst_nid != NUMA_NO_NODE) {
+		if (dst_nid < 0 || dst_nid >= nr_node_ids)
+			return -EINVAL;
+		if (!node_state(dst_nid, N_MEMORY))
+			return -EINVAL;
+	}
+
+	WRITE_ONCE(manual_demotion_target[src_nid], dst_nid);
+	pr_info("memory-tiers: manual demotion target node%d -> node%d\n",
+		src_nid, dst_nid);
+
+	return count;
+}
+
+static struct kobj_attribute numa_demotion_target_attr =
+	__ATTR_RW(demotion_target);
+
 static struct attribute *numa_attrs[] = {
 	&numa_demotion_enabled_attr.attr,
+	&numa_demotion_target_attr.attr,
 	NULL,
 };
 
@@ -998,4 +1101,8 @@ delete_obj:
 }
 subsys_initcall(numa_init_sysfs);
 #endif /* CONFIG_SYSFS */
+bool memory_tiering_enabled(struct folio *folio)
+{
+	return folio_numa_balancing_mode(folio) & NUMA_BALANCING_MEMORY_TIERING;
+}
 #endif

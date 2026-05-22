@@ -56,6 +56,8 @@ void mt_put_memory_types(struct list_head *memory_types);
 int next_demotion_node(int node);
 void node_get_allowed_targets(pg_data_t *pgdat, nodemask_t *targets);
 bool node_is_toptier(int node);
+bool node_is_promotion_target(int src, int dst);
+bool node_is_promotion_source(int node);
 #else
 static inline int next_demotion_node(int node)
 {
@@ -71,7 +73,19 @@ static inline bool node_is_toptier(int node)
 {
 	return true;
 }
+
+static inline bool node_is_promotion_target(int src, int dst)
+{
+	return false;
+}
+
+static inline bool node_is_promotion_source(int node)
+{
+	return false;
+}
 #endif
+
+bool memory_tiering_enabled(struct folio *folio);
 
 #else
 

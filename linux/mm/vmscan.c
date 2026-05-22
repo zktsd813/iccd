@@ -136,6 +136,11 @@ struct scan_control {
 	/* Shared cgroup tree walk failed, rescan the whole tree */
 	unsigned int memcg_full_walk:1;
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	/* Reclaim is driven by the per-memcg node worker, not global kswapd. */
+	unsigned int memcg_reclaimd:1;
+#endif
+
 	unsigned int hibernation_mode:1;
 
 	/* One of the zones is ready for compaction */
@@ -201,6 +206,9 @@ struct scan_control {
  */
 int vm_swappiness = 60;
 
+#define MEMCG_FORCE_LRU_FAIL_STREAK_THRESHOLD 4
+#define MEMCG_FORCE_LRU_FAIL_STREAK_MAX      1024
+
 #ifdef CONFIG_MEMCG
 
 /* Returns true for reclaim through cgroup limits or cgroup interfaces. */
@@ -248,6 +256,16 @@ static int sc_swappiness(struct scan_control *sc, struct mem_cgroup *memcg)
 		return *sc->proactive_swappiness;
 	return mem_cgroup_swappiness(memcg);
 }
+
+static bool memcg_reclaimd_reclaim(struct scan_control *sc)
+{
+#ifdef CONFIG_NUMA_BALANCING_MT
+	return sc->memcg_reclaimd;
+#else
+	return false;
+#endif
+}
+
 #else
 static bool cgroup_reclaim(struct scan_control *sc)
 {
@@ -267,6 +285,11 @@ static bool writeback_throttling_sane(struct scan_control *sc)
 static int sc_swappiness(struct scan_control *sc, struct mem_cgroup *memcg)
 {
 	return READ_ONCE(vm_swappiness);
+}
+
+static bool memcg_reclaimd_reclaim(struct scan_control *sc)
+{
+	return false;
 }
 #endif
 
@@ -383,6 +406,55 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 	 */
 	return can_demote(nid, sc, memcg);
 }
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+static bool memcg_reclaim_demotion_enabled(struct mem_cgroup *memcg)
+{
+	return memcg_kswapd_demotion_mode(memcg) ==
+		MEMCG_KSWAPD_DEMOTION_NODE_WMARK;
+}
+
+static bool memcg_force_lru_evict_active(struct scan_control *sc,
+					 struct pglist_data *pgdat,
+					 struct mem_cgroup *memcg)
+{
+	struct mem_cgroup_per_node *pn;
+	u32 fail_streak;
+
+	if (!sc || !pgdat || !memcg)
+		return false;
+	if (!sc->target_mem_cgroup || memcg != sc->target_mem_cgroup)
+		return false;
+	if (mem_cgroup_is_root(memcg))
+		return false;
+	if (!current_is_kswapd() && !memcg_reclaimd_reclaim(sc))
+		return false;
+	if (!cgroup_reclaim(sc))
+		return false;
+	if (!numa_demotion_enabled)
+		return false;
+	if (!memcg_reclaim_demotion_enabled(memcg))
+		return false;
+	if (!can_demote(pgdat->node_id, sc, memcg))
+		return false;
+
+	pn = memcg->nodeinfo[pgdat->node_id];
+	if (!pn)
+		return false;
+	if (!READ_ONCE(pn->node_force_lru_evict))
+		return false;
+
+	fail_streak = READ_ONCE(pn->node_force_lru_fail_streak);
+	return fail_streak >= MEMCG_FORCE_LRU_FAIL_STREAK_THRESHOLD;
+}
+#else
+static bool memcg_force_lru_evict_active(struct scan_control *sc,
+					 struct pglist_data *pgdat,
+					 struct mem_cgroup *memcg)
+{
+	return false;
+}
+#endif
 
 /*
  * This misses isolated folios which are not accounted for to save counters.
@@ -1107,12 +1179,14 @@ static unsigned int shrink_folio_list(struct list_head *folio_list,
 	unsigned int nr_reclaimed = 0, nr_demoted = 0;
 	unsigned int pgactivate = 0;
 	bool do_demote_pass;
+	bool force_lru_evict;
 	struct swap_iocb *plug = NULL;
 
 	folio_batch_init(&free_folios);
 	memset(stat, 0, sizeof(*stat));
 	cond_resched();
 	do_demote_pass = can_demote(pgdat->node_id, sc, memcg);
+	force_lru_evict = memcg_force_lru_evict_active(sc, pgdat, memcg);
 
 retry:
 	while (!list_empty(folio_list)) {
@@ -1276,6 +1350,8 @@ retry:
 		case FOLIOREF_ACTIVATE:
 			goto activate_locked;
 		case FOLIOREF_KEEP:
+			if (force_lru_evict)
+				break;
 			stat->nr_ref_keep += nr_pages;
 			goto keep_locked;
 		case FOLIOREF_RECLAIM:
@@ -2760,12 +2836,13 @@ static int get_swappiness(struct lruvec *lruvec, struct scan_control *sc)
 {
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
+	bool demote;
 
 	if (!sc->may_swap)
 		return 0;
 
-	if (!can_demote(pgdat->node_id, sc, memcg) &&
-	    mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH)
+	demote = can_demote(pgdat->node_id, sc, memcg);
+	if (!demote && mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH)
 		return 0;
 
 	return sc_swappiness(sc, memcg);
@@ -4215,6 +4292,32 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 	}
 }
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+static void lru_gen_age_memcg_reclaimd(struct pglist_data *pgdat,
+				       struct scan_control *sc)
+{
+	struct mem_cgroup *memcg = sc->target_mem_cgroup;
+	struct lruvec *lruvec;
+	int swappiness;
+
+	if (!memcg || mem_cgroup_is_root(memcg))
+		return;
+
+	lruvec = mem_cgroup_lruvec(memcg, pgdat);
+	swappiness = get_swappiness(lruvec, sc);
+
+	set_initial_priority(pgdat, sc);
+
+	{
+		DEFINE_MAX_SEQ(lruvec);
+
+		try_to_inc_max_seq(lruvec, max_seq, swappiness, true);
+	}
+
+	clear_mm_walk();
+}
+#endif
+
 /******************************************************************************
  *                          rmap/PT walk feedback
  ******************************************************************************/
@@ -4839,6 +4942,7 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 {
 	bool success;
 	unsigned long nr_to_scan;
+	long ret;
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 	DEFINE_MAX_SEQ(lruvec);
 
@@ -4855,10 +4959,12 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 
 	/* try to get away with not aging at the default priority */
 	if (!success || sc->priority == DEF_PRIORITY)
-		return nr_to_scan >> sc->priority;
+		ret = nr_to_scan >> sc->priority;
+	else
+		/* stop scanning this lruvec as it's low on cold folios */
+		ret = try_to_inc_max_seq(lruvec, max_seq, swappiness, false) ? -1 : 0;
 
-	/* stop scanning this lruvec as it's low on cold folios */
-	return try_to_inc_max_seq(lruvec, max_seq, swappiness, false) ? -1 : 0;
+	return ret;
 }
 
 static bool should_abort_scan(struct lruvec *lruvec, struct scan_control *sc)
@@ -5791,6 +5897,14 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 	BUILD_BUG();
 }
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+static void lru_gen_age_memcg_reclaimd(struct pglist_data *pgdat,
+				       struct scan_control *sc)
+{
+	BUILD_BUG();
+}
+#endif
+
 static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
 	BUILD_BUG();
@@ -6081,6 +6195,11 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 		lru_gen_shrink_node(pgdat, sc);
 		return;
 	}
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (lru_gen_enabled() && memcg_reclaimd_reclaim(sc))
+		lru_gen_age_memcg_reclaimd(pgdat, sc);
+#endif
 
 	target_lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup, pgdat);
 
@@ -6815,7 +6934,14 @@ static void kswapd_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 		return;
 	}
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (sc->target_mem_cgroup)
+		lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup, pgdat);
+	else
+		lruvec = mem_cgroup_lruvec(NULL, pgdat);
+#else
 	lruvec = mem_cgroup_lruvec(NULL, pgdat);
+#endif
 	if (!can_age_anon_pages(lruvec, sc))
 		return;
 
@@ -6872,7 +6998,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 	for_each_managed_zone_pgdat(zone, pgdat, i, highest_zoneidx) {
 		enum zone_stat_item item;
 		unsigned long free_pages;
-
+		//TODO
 		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING)
 			mark = promo_wmark_pages(zone);
 		else
@@ -6924,6 +7050,53 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 
 	return false;
 }
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+static u64 memcg_node_low_wmark(struct mem_cgroup_per_node *pn)
+{
+	u64 cap = READ_ONCE(pn->node_capacity);
+	u64 low = READ_ONCE(pn->node_low_wmark);
+	u64 high = READ_ONCE(pn->node_high_wmark);
+
+	if (!cap)
+		return 0;
+	if (!low || low > cap)
+		low = memcg_node_default_low_wmark(cap);
+	if (high && low > high)
+		low = high;
+	return low;
+}
+
+static u64 memcg_node_reclaim_target(struct mem_cgroup *memcg,
+				     struct mem_cgroup_per_node *pn)
+{
+	if (memcg_kswapd_demotion_mode(memcg) ==
+	    MEMCG_KSWAPD_DEMOTION_NODE_WMARK)
+		return memcg_node_low_wmark(pn);
+
+	return 0;
+}
+
+static bool pgdat_memcg_balanced(pg_data_t *pgdat, struct mem_cgroup *memcg,
+				 int order, int highest_zoneidx)
+{
+	unsigned long pages;
+	u64 target;
+	struct mem_cgroup_per_node *pn;
+
+	if (!memcg) {
+		return true;
+	}
+	pn = memcg->nodeinfo[pgdat->node_id];
+	target = memcg_node_reclaim_target(memcg, pn);
+	if (!target)
+		return true;
+
+	pages = mem_cgroup_node_usage_pages_live(memcg, pgdat->node_id);
+
+	return pages <= target;
+}
+#endif
 
 /* Clear pgdat state for congested, dirty or under writeback. */
 static void clear_pgdat_congested(pg_data_t *pgdat)
@@ -6990,9 +7163,29 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 
 	/* Reclaim a number of pages proportional to the number of zones */
 	sc->nr_to_reclaim = 0;
-	for_each_managed_zone_pgdat(zone, pgdat, z, sc->reclaim_idx) {
-		sc->nr_to_reclaim += max(high_wmark_pages(zone), SWAP_CLUSTER_MAX);
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (sc->target_mem_cgroup) {
+		struct mem_cgroup_per_node *pn = sc->target_mem_cgroup->nodeinfo[pgdat->node_id];
+		u64 reclaim_target = memcg_node_reclaim_target(sc->target_mem_cgroup,
+							       pn);
+		unsigned long pages = 0;
+
+		if (reclaim_target) {
+			pages = mem_cgroup_node_usage_pages_live(sc->target_mem_cgroup,
+								 pgdat->node_id);
+		}
+		sc->nr_to_reclaim += max_t(unsigned long,
+					   pages > reclaim_target ?
+					   pages - reclaim_target : 0,
+					   SWAP_CLUSTER_MAX);
+	} else {
+		for_each_managed_zone_pgdat(zone, pgdat, z, sc->reclaim_idx)
+			sc->nr_to_reclaim += max(high_wmark_pages(zone), SWAP_CLUSTER_MAX);
 	}
+#else
+	for_each_managed_zone_pgdat(zone, pgdat, z, sc->reclaim_idx)
+		sc->nr_to_reclaim += max(high_wmark_pages(zone), SWAP_CLUSTER_MAX);
+#endif
 
 	/*
 	 * Historically care was taken to put equal pressure on all zones but
@@ -7011,6 +7204,45 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 		sc->order = 0;
 
 	/* account for progress from mm_account_reclaimed_pages() */
+	if (sc->target_mem_cgroup &&
+	    (current_is_kswapd() || memcg_reclaimd_reclaim(sc))) {
+		struct mem_cgroup *memcg = sc->target_mem_cgroup;
+		unsigned long reclaimed_delta = sc->nr_reclaimed - nr_reclaimed;
+		unsigned long scanned_delta = sc->nr_scanned;
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+		struct mem_cgroup_per_node *pn = memcg->nodeinfo[pgdat->node_id];
+		u32 fail_streak = READ_ONCE(pn->node_force_lru_fail_streak);
+		bool force_lru_enabled = READ_ONCE(pn->node_force_lru_evict);
+		bool reclaim_demotion_enabled =
+			memcg_reclaim_demotion_enabled(memcg);
+		int demotion_nid = NUMA_NO_NODE;
+		bool memcg_demotion_allowed = false;
+		bool demotion_gate_open;
+
+		if (numa_demotion_enabled) {
+			demotion_nid = next_demotion_node(pgdat->node_id);
+			if (demotion_nid != NUMA_NO_NODE)
+				memcg_demotion_allowed =
+					mem_cgroup_node_allowed(memcg, demotion_nid);
+		}
+		demotion_gate_open = numa_demotion_enabled &&
+				     !sc->no_demotion &&
+				     memcg_demotion_allowed;
+
+		if (force_lru_enabled && reclaim_demotion_enabled &&
+		    demotion_gate_open) {
+			if (scanned_delta && !reclaimed_delta) {
+				if (fail_streak < MEMCG_FORCE_LRU_FAIL_STREAK_MAX)
+					fail_streak++;
+				WRITE_ONCE(pn->node_force_lru_fail_streak, fail_streak);
+			} else if (reclaimed_delta) {
+				fail_streak = 0;
+				WRITE_ONCE(pn->node_force_lru_fail_streak, fail_streak);
+			}
+		}
+#endif
+	}
 	return max(sc->nr_scanned, sc->nr_reclaimed - nr_reclaimed) >= sc->nr_to_reclaim;
 }
 
@@ -7256,7 +7488,6 @@ out:
 		 */
 		wakeup_kcompactd(pgdat, pageblock_order, highest_zoneidx);
 	}
-
 	snapshot_refaults(NULL, pgdat);
 	__fs_reclaim_release(_THIS_IP_);
 	psi_memstall_leave(&pflags);
@@ -7270,6 +7501,102 @@ out:
 	 */
 	return sc.order;
 }
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+bool memcg_reclaimd_shrink_node(struct mem_cgroup *memcg, int nid,
+				struct memcg_reclaimd_result *result)
+{
+	pg_data_t *pgdat = NODE_DATA(nid);
+	struct mem_cgroup_per_node *pn;
+	enum zone_type highest_zoneidx = ZONE_NORMAL;
+	unsigned long pflags;
+	unsigned long total_scanned = 0;
+	unsigned long total_reclaimed = 0;
+	struct scan_control sc = {
+		.gfp_mask = GFP_KERNEL,
+		.order = 0,
+		.may_unmap = 1,
+		.may_writepage = 1,
+		.may_swap = 1,
+		.memcg_full_walk = 1,
+		.memcg_reclaimd = 1,
+		.target_mem_cgroup = memcg,
+	};
+	bool balanced = true;
+
+	if (result) {
+		result->nr_scanned = 0;
+		result->nr_reclaimed = 0;
+		result->balanced = true;
+	}
+	if (!memcg || nid < 0 || nid >= nr_node_ids)
+		return true;
+	pn = memcg->nodeinfo[nid];
+	if (!pn)
+		return true;
+
+	if (highest_zoneidx >= MAX_NR_ZONES)
+		highest_zoneidx = MAX_NR_ZONES - 1;
+
+	set_task_reclaim_state(current, &sc.reclaim_state);
+	psi_memstall_enter(&pflags);
+	__fs_reclaim_acquire(_THIS_IP_);
+	set_reclaim_active(pgdat, highest_zoneidx);
+
+	sc.priority = DEF_PRIORITY;
+	do {
+		bool raise_priority = true;
+		unsigned long nr_reclaimed = sc.nr_reclaimed;
+
+		sc.reclaim_idx = highest_zoneidx;
+		if (buffer_heads_over_limit) {
+			int i;
+			struct zone *zone;
+
+			for (i = MAX_NR_ZONES - 1; i >= 0; i--) {
+				zone = pgdat->node_zones + i;
+				if (!managed_zone(zone))
+					continue;
+				sc.reclaim_idx = i;
+				break;
+			}
+		}
+
+		balanced = pgdat_memcg_balanced(pgdat, memcg, sc.order, highest_zoneidx);
+		if (balanced)
+			break;
+
+		if (!lru_gen_enabled())
+			kswapd_age_node(pgdat, &sc);
+		sc.nr_scanned = 0;
+
+		if (kswapd_shrink_node(pgdat, &sc))
+			raise_priority = false;
+
+		nr_reclaimed = sc.nr_reclaimed - nr_reclaimed;
+		total_scanned += sc.nr_scanned;
+		total_reclaimed += nr_reclaimed;
+		if (sc.nr_scanned && !nr_reclaimed &&
+		    READ_ONCE(pn->node_reclaimd_failures) >= MAX_RECLAIM_RETRIES)
+			break;
+		if (raise_priority || !nr_reclaimed)
+			sc.priority--;
+	} while (sc.priority >= 1);
+
+	balanced = pgdat_memcg_balanced(pgdat, memcg, sc.order, highest_zoneidx);
+	clear_reclaim_active(pgdat, highest_zoneidx);
+	__fs_reclaim_release(_THIS_IP_);
+	psi_memstall_leave(&pflags);
+	set_task_reclaim_state(current, NULL);
+	if (result) {
+		result->nr_scanned = total_scanned;
+		result->nr_reclaimed = total_reclaimed;
+		result->balanced = balanced;
+	}
+
+	return balanced;
+}
+#endif
 
 /*
  * The pgdat->kswapd_highest_zoneidx is used to pass the highest zone index to
@@ -7509,6 +7836,7 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 	wake_up_interruptible(&pgdat->kswapd_wait);
 }
 
+
 #ifdef CONFIG_HIBERNATION
 /*
  * Try to free `nr_to_reclaim' of memory, system-wide, and return the number of
@@ -7589,6 +7917,312 @@ void __meminit kswapd_stop(int nid)
 	pgdat_kswapd_unlock(pgdat);
 }
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+static struct task_struct *numa_earlystopd_task;
+
+static long numa_abs_long(long val)
+{
+	return val < 0 ? -val : val;
+}
+
+static unsigned long numa_abs_ulong_delta(unsigned long a, unsigned long b)
+{
+	return a > b ? a - b : b - a;
+}
+
+struct numa_restart_scan {
+	unsigned long referenced;
+};
+
+static int numa_restart_pte_entry(pte_t *pte, unsigned long addr,
+				  unsigned long end, struct mm_walk *walk)
+{
+	struct numa_restart_scan *scan = walk->private;
+	pte_t ptent = ptep_get(pte);
+
+	if (!pte_present(ptent))
+		return 0;
+	if (ptep_test_and_clear_young(walk->vma, addr, pte))
+		scan->referenced++;
+	return 0;
+}
+
+static const struct mm_walk_ops numa_restart_walk_ops = {
+	.pte_entry = numa_restart_pte_entry,
+	.walk_lock = PGWALK_RDLOCK,
+};
+
+static unsigned long numa_restart_count_mm(struct mm_struct *mm)
+{
+	struct numa_restart_scan scan = { };
+	struct vm_area_struct *vma;
+	VMA_ITERATOR(vmi, mm, 0);
+
+	mmap_read_lock(mm);
+	for_each_vma(vmi, vma) {
+		if (!(vma->vm_flags & VM_READ) || (vma->vm_flags & VM_HUGETLB))
+			continue;
+		walk_page_vma(vma, &numa_restart_walk_ops, &scan);
+		cond_resched();
+	}
+	mmap_read_unlock(mm);
+
+	return scan.referenced;
+}
+
+static int numa_restart_scan_task(struct task_struct *task, void *arg)
+{
+	struct mm_struct *mm;
+	unsigned long *referenced = arg;
+
+	mm = get_task_mm(task);
+	if (!mm)
+		return 0;
+
+	*referenced += numa_restart_count_mm(mm);
+	mmput(mm);
+	return 0;
+}
+
+static unsigned long numa_restart_referenced_mean(
+	struct memcg_numa_restart_data *data)
+{
+	unsigned long total = 0;
+	int i;
+
+	for (i = 0; i < MEMCG_NUMA_RESTART_CANDIDATES; i++)
+		total += data->referenced_data[i];
+
+	return total / MEMCG_NUMA_RESTART_CANDIDATES;
+}
+
+static void numa_restart_check_memcg(struct mem_cgroup *memcg)
+{
+	struct memcg_numa_restart_data *restart;
+	unsigned long referenced = 0;
+	unsigned long variation;
+	unsigned long flags;
+	bool resume = false;
+
+	if (!memcg || mem_cgroup_is_root(memcg))
+		return;
+	if (!(mem_cgroup_numa_balancing_mode(memcg) &
+	      NUMA_BALANCING_MEMORY_TIERING))
+		return;
+	if (!mem_cgroup_numa_migration_stop_enabled(memcg))
+		return;
+	if (READ_ONCE(memcg->numa_page_migration_running))
+		return;
+
+	mem_cgroup_scan_tasks(memcg, numa_restart_scan_task, &referenced);
+
+	spin_lock_irqsave(&memcg->numa_earlystop.lock, flags);
+	restart = &memcg->numa_restart;
+	if (restart->scanning_counter < MEMCG_NUMA_RESTART_CANDIDATES) {
+		restart->referenced_data[restart->referenced_index] = referenced;
+		restart->referenced_index =
+			(restart->referenced_index + 1) %
+			MEMCG_NUMA_RESTART_CANDIDATES;
+		restart->scanning_counter++;
+		goto out_unlock;
+	}
+
+	restart->referenced_mean = numa_restart_referenced_mean(restart);
+	variation = restart->referenced_mean >> 4;
+	if (restart->variation_condition < 5) {
+		if (numa_abs_ulong_delta(restart->referenced_mean, referenced) <
+		    variation) {
+			restart->variation_condition++;
+		} else if (restart->variation_condition > 0) {
+			restart->variation_condition--;
+		}
+		restart->referenced_data[restart->referenced_index] = referenced;
+		restart->referenced_index =
+			(restart->referenced_index + 1) %
+			MEMCG_NUMA_RESTART_CANDIDATES;
+	} else if (numa_abs_ulong_delta(restart->referenced_mean, referenced) >
+		   variation) {
+		restart->restart_cnt++;
+	} else if (restart->restart_cnt > 0) {
+		restart->restart_cnt--;
+	} else {
+		restart->referenced_data[restart->referenced_index] = referenced;
+		restart->referenced_index =
+			(restart->referenced_index + 1) %
+			MEMCG_NUMA_RESTART_CANDIDATES;
+	}
+
+	if (restart->restart_cnt == 3)
+		resume = true;
+
+out_unlock:
+	spin_unlock_irqrestore(&memcg->numa_earlystop.lock, flags);
+
+	if (resume) {
+		mem_cgroup_numa_reset_earlystop(memcg, true);
+		pr_info("numa earlystop: restarted migration for memcg=%p\n",
+			memcg);
+	}
+}
+
+static void numa_earlystop_check_memcg(struct mem_cgroup *memcg)
+{
+	struct memcg_numa_earlystop_data *data;
+	unsigned long current_count;
+	unsigned long flags;
+	long slope = 0;
+	long abs_slope;
+	bool stop = false;
+
+	if (!memcg)
+		return;
+	if (!(mem_cgroup_numa_balancing_mode(memcg) &
+	      NUMA_BALANCING_MEMORY_TIERING))
+		return;
+	if (!mem_cgroup_numa_migration_stop_enabled(memcg))
+		return;
+	if (!READ_ONCE(memcg->numa_page_migration_running))
+		return;
+
+	data = &memcg->numa_earlystop;
+	spin_lock_irqsave(&data->lock, flags);
+	if (!READ_ONCE(memcg->numa_page_migration_running))
+		goto out_unlock;
+	current_count = atomic_long_read(&data->current_demote_promoted);
+
+	if (data->delta_cnt == 0) {
+		if (current_count)
+			data->previous_demote_promoted = current_count;
+		data->delta[0] = current_count - data->previous_demote_promoted;
+		data->delta_cnt++;
+		data->previous_demote_promoted = current_count;
+		goto out_unlock;
+	}
+
+	if (data->delta_cnt == 1) {
+		data->delta[1] = current_count - data->previous_demote_promoted;
+		data->delta_cnt++;
+		data->previous_demote_promoted = current_count;
+		goto out_unlock;
+	}
+
+	if (data->delta_cnt == 2) {
+		data->delta[2] = current_count - data->previous_demote_promoted;
+		data->delta_cnt++;
+		slope = (data->delta[2] - data->delta[0]) >> 1;
+	} else {
+		data->delta[0] = data->delta[1];
+		data->delta[1] = data->delta[2];
+		data->delta[2] = current_count - data->previous_demote_promoted;
+		slope = (data->delta[2] - data->delta[0]) >> 1;
+	}
+
+	abs_slope = numa_abs_long(slope);
+	if (data->slope_max < abs_slope) {
+		data->slope_max = abs_slope;
+		if (data->threshold < (data->slope_max >> 3))
+			data->threshold = data->slope_max >> 3;
+	}
+
+	if (data->earlystop_cnt == 0) {
+		if (numa_abs_long(data->previous_slope) < data->threshold) {
+			if (abs_slope < data->threshold) {
+				data->previous_point = 0;
+				if (slope && data->previous_slope &&
+				    data->slope_max != MEMCG_NUMA_EARLYSTOP_SLOPE_MAX) {
+					data->slope_cnt++;
+					if (data->slope_cnt == 5) {
+						data->earlystop_cnt = 3;
+						data->slope_cnt = 0;
+					}
+				} else if (data->slope_cnt) {
+					data->slope_cnt = 0;
+				}
+			} else {
+				data->previous_point++;
+				data->slope_cnt = 0;
+			}
+		} else if (abs_slope < data->threshold) {
+			if (data->previous_point > 2) {
+				data->earlystop_cnt++;
+				data->previous_point = 0;
+				data->slope_cnt = 0;
+			} else {
+				data->previous_point--;
+				data->slope_cnt++;
+			}
+		} else {
+			data->previous_point++;
+			data->slope_cnt = 0;
+		}
+	} else if (abs_slope < data->threshold) {
+		data->earlystop_cnt++;
+		data->ignore = 0;
+	} else if (data->ignore == 3) {
+		data->earlystop_cnt = 0;
+		data->ignore = 0;
+		data->previous_point++;
+	} else {
+		data->ignore++;
+		if (data->earlystop_cnt > 1)
+			data->earlystop_cnt--;
+	}
+
+	data->previous_demote_promoted = current_count;
+	data->previous_slope = slope;
+
+	if (data->earlystop_cnt == 8)
+		stop = true;
+
+out_unlock:
+	spin_unlock_irqrestore(&data->lock, flags);
+
+	if (stop) {
+		mem_cgroup_numa_reset_earlystop(memcg, false);
+		pr_info("numa earlystop: stopped migration for memcg=%p\n", memcg);
+	}
+}
+
+static void numa_migration_stopper(void)
+{
+	struct mem_cgroup *memcg = NULL;
+
+	while ((memcg = mem_cgroup_iter(NULL, memcg, NULL))) {
+		numa_earlystop_check_memcg(memcg);
+		numa_restart_check_memcg(memcg);
+	}
+}
+
+static int numa_earlystopd(void *unused)
+{
+	while (!kthread_should_stop()) {
+		numa_migration_stopper();
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(2 * HZ);
+	}
+
+	return 0;
+}
+
+static void numa_earlystopd_run(void)
+{
+	if (numa_earlystopd_task)
+		return;
+
+	numa_earlystopd_task = kthread_run(numa_earlystopd, NULL,
+					   "numa_earlystopd");
+	if (IS_ERR(numa_earlystopd_task)) {
+		pr_err("Failed to start numa_earlystopd, ret=%ld\n",
+		       PTR_ERR(numa_earlystopd_task));
+		numa_earlystopd_task = NULL;
+	}
+}
+#else
+static void numa_earlystopd_run(void)
+{
+}
+#endif
+
 static const struct ctl_table vmscan_sysctl_table[] = {
 	{
 		.procname	= "swappiness",
@@ -7618,6 +8252,7 @@ static int __init kswapd_init(void)
 	swap_setup();
 	for_each_node_state(nid, N_MEMORY)
  		kswapd_run(nid);
+	numa_earlystopd_run();
 	register_sysctl_init("vm", vmscan_sysctl_table);
 	return 0;
 }

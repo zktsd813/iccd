@@ -34,9 +34,9 @@
 #include <linux/oom.h>
 #include <linux/numa.h>
 #include <linux/page_owner.h>
+#include <linux/memcontrol.h>
 #include <linux/sched/sysctl.h>
 #include <linux/memory-tiers.h>
-#include <linux/memcontrol.h>
 #include <linux/compat.h>
 #include <linux/pgalloc_tag.h>
 #include <linux/pagewalk.h>
@@ -2051,6 +2051,11 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 
 	nid = folio_nid(folio);
 
+	if (task_numa_balancing_mode(current) <= 0) {
+		nid = NUMA_NO_NODE;
+		goto out_map;
+	}
+
 	target_nid = numa_migrate_check(folio, vmf, haddr, &flags, writable,
 					&last_cpupid, &sample_refault);
 	if (sample_refault)
@@ -2414,12 +2419,12 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 			goto unlock;
 
 		folio = pmd_folio(*pmd);
-		toptier = node_is_toptier(folio_nid(folio));
+		toptier = !node_is_promotion_source(folio_nid(folio));
 		/*
 		 * Skip scanning top tier node if normal numa
 		 * balancing is disabled
 		 */
-		if (!(folio_numa_balancing_mode(folio) & NUMA_BALANCING_NORMAL) &&
+		if (!(task_numa_balancing_mode(current) & NUMA_BALANCING_NORMAL) &&
 		    toptier)
 			goto unlock;
 

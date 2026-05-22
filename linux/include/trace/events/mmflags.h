@@ -137,6 +137,12 @@ TRACE_DEFINE_ENUM(___GFP_LAST_BIT);
 #define IF_HAVE_PG_ARCH_3(_name)
 #endif
 
+#ifdef CONFIG_NUMA_BALANCING
+#define IF_HAVE_PG_NUMA_BALANCING(_name) ,{1UL << PG_##_name, __stringify(_name)}
+#else
+#define IF_HAVE_PG_NUMA_BALANCING(_name)
+#endif
+
 #ifdef CONFIG_NUMA_BALANCING_MT
 #define IF_HAVE_PG_NUMA_BALANCING_MT(_name) ,{1UL << PG_##_name, __stringify(_name)}
 #else
@@ -172,6 +178,8 @@ IF_HAVE_PG_IDLE(idle)							\
 IF_HAVE_PG_IDLE(young)							\
 IF_HAVE_PG_ARCH_2(arch_2)						\
 IF_HAVE_PG_ARCH_3(arch_3)						\
+IF_HAVE_PG_NUMA_BALANCING(demoted)					\
+IF_HAVE_PG_NUMA_BALANCING(promoted)					\
 IF_HAVE_PG_NUMA_BALANCING_MT(local_tiering_sampled)
 
 #define show_page_flags(flags)						\

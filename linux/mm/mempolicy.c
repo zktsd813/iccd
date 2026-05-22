@@ -86,7 +86,6 @@
 #include <linux/sched/mm.h>
 #include <linux/sched/numa_balancing.h>
 #include <linux/sched/task.h>
-#include <linux/memcontrol.h>
 #include <linux/nodemask.h>
 #include <linux/cpuset.h>
 #include <linux/slab.h>
@@ -94,6 +93,7 @@
 #include <linux/export.h>
 #include <linux/nsproxy.h>
 #include <linux/interrupt.h>
+#include <linux/memcontrol.h>
 #include <linux/init.h>
 #include <linux/compat.h>
 #include <linux/ptrace.h>
@@ -2994,10 +2994,10 @@ int mpol_misplaced(struct folio *folio, struct vm_fault *vmf,
 	/* Migrate the folio towards the node whose CPU is referencing it */
 	if (pol->flags & MPOL_F_MORON) {
 		polnid = thisnid;
-
 		if (!should_numa_migrate_memory(current, folio, curnid,
 						thiscpu))
 			goto out;
+
 	}
 
 	if (curnid != polnid)

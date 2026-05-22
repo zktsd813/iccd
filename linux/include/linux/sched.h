@@ -1360,13 +1360,18 @@ struct task_struct {
 	int				numa_scan_seq;
 	unsigned int			numa_scan_period;
 	unsigned int			numa_scan_period_max;
+	unsigned long			numa_scan_policy_seq;
+	int				numa_scan_policy_mode;
+	bool				numa_scan_policy_fast_scan;
+	bool				numa_scan_policy_stale;
 	int				numa_preferred_nid;
 	unsigned long			numa_migrate_retry;
 	/* Migration stamp: */
 	u64				node_stamp;
 	u64				last_task_numa_placement;
 	u64				last_sum_exec_runtime;
-	struct callback_head		numa_work;
+	struct callback_head		numa_work
+	;
 
 	/*
 	 * This pointer is only modified for current in syscall and

@@ -1449,6 +1449,7 @@ typedef struct pglist_data {
 	struct task_struct *kcompactd;
 	bool proactive_compact_trigger;
 #endif
+
 	/*
 	 * This is a per-node reserve of pages that are not available
 	 * to userspace allocations.

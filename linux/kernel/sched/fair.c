@@ -1508,10 +1508,75 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
 /* For sanity's sake, never scan more PTEs than MAX_SCAN_WINDOW MB/sec. */
 #define MAX_SCAN_WINDOW 2560
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+static bool task_numa_fast_scan(struct task_struct *p)
+{
+	struct mem_cgroup *memcg;
+
+	if (!p || mem_cgroup_disabled())
+		return false;
+
+	memcg = mem_cgroup_from_task(p);
+	if (!memcg)
+		return false;
+
+	return READ_ONCE(memcg->numa_balancing_fast_scan);
+}
+
+static unsigned int task_numa_scan_delay(struct task_struct *p)
+{
+	return sysctl_numa_balancing_scan_delay;
+}
+
+static unsigned int task_numa_vma_pid_reset_period(struct task_struct *p)
+{
+	return min_t(unsigned int, UINT_MAX,
+		     (u64)task_numa_scan_delay(p) * 4);
+}
+
+static unsigned int task_numa_hot_threshold(struct task_struct *p)
+{
+	struct mem_cgroup *memcg;
+
+	if (!p || mem_cgroup_disabled())
+		return 0;
+
+	memcg = mem_cgroup_from_task(p);
+	if (!memcg)
+		return 0;
+
+	return READ_ONCE(memcg->numa_balancing_hot_threshold_ms);
+}
+#else
+static inline bool task_numa_fast_scan(struct task_struct *p)
+{
+	(void)p;
+	return false;
+}
+
+static inline unsigned int task_numa_scan_delay(struct task_struct *p)
+{
+	(void)p;
+	return sysctl_numa_balancing_scan_delay;
+}
+
+static inline unsigned int task_numa_vma_pid_reset_period(struct task_struct *p)
+{
+	(void)p;
+	return 4 * sysctl_numa_balancing_scan_delay;
+}
+
+static inline unsigned int task_numa_hot_threshold(struct task_struct *p)
+{
+	(void)p;
+	return 0;
+}
+#endif
+
 static unsigned int task_scan_min(struct task_struct *p)
 {
 	unsigned int scan_size = READ_ONCE(sysctl_numa_balancing_scan_size);
-	unsigned int scan, floor;
+	unsigned int scan, floor, period;
 	unsigned int windows = 1;
 
 	if (scan_size < MAX_SCAN_WINDOW)
@@ -1519,7 +1584,8 @@ static unsigned int task_scan_min(struct task_struct *p)
 	floor = 1000 / windows;
 
 	scan = sysctl_numa_balancing_scan_period_min / task_nr_scan_windows(p);
-	return max_t(unsigned int, floor, scan);
+	period = task_numa_fast_scan(p) ? scan : max_t(unsigned int, floor, scan);
+	return max_t(unsigned int, 1, period);
 }
 
 static unsigned int task_scan_start(struct task_struct *p)
@@ -1916,6 +1982,10 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 	if (!node_state(dst_nid, N_MEMORY))
 		return false;
 
+	if (!task_numa_migration_running(p) ||
+	    !folio_numa_migration_running(folio))
+		return false;
+
 	/*
 	 * The pages in slow memory node should be migrated according
 	 * to hot/cold instead of private/shared.
@@ -1924,12 +1994,19 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 		struct pglist_data *pgdat;
 		struct mem_cgroup *memcg;
 		unsigned long rate_limit;
-		unsigned int latency, th, def_th;
+		unsigned int latency, th, def_th, hot_th;
+		bool reuse_time_enabled;
 		int memcg_wmark_ok;
 		long nr = folio_nr_pages(folio);
 
 		pgdat = NODE_DATA(dst_nid);
 		memcg = folio_memcg(folio);
+		reuse_time_enabled = sched_reuse_time_enabled();
+		if (reuse_time_enabled) {
+			latency = numa_hint_fault_latency(folio);
+			sched_reuse_time_record(p, folio, src_nid, latency);
+		}
+
 		memcg_wmark_ok =
 			mem_cgroup_node_promotion_wmark_ok(memcg, dst_nid, nr);
 		if (memcg_wmark_ok > 0 ||
@@ -1940,22 +2017,30 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			return true;
 		}
 
-		def_th = sysctl_numa_balancing_hot_threshold;
 		rate_limit = MB_TO_PAGES(sysctl_numa_balancing_promote_rate_limit);
-		numa_promotion_adjust_threshold(pgdat, rate_limit, def_th);
+		hot_th = task_numa_hot_threshold(p);
+		if (hot_th) {
+			th = hot_th;
+		} else {
+			def_th = sysctl_numa_balancing_hot_threshold;
+			numa_promotion_adjust_threshold(pgdat, rate_limit, def_th);
+			th = pgdat->nbp_threshold ? : def_th;
+		}
 
-		th = pgdat->nbp_threshold ? : def_th;
-		latency = numa_hint_fault_latency(folio);
+		if (!reuse_time_enabled)
+			latency = numa_hint_fault_latency(folio);
 		if (latency >= th)
 			return false;
 
-		return !numa_promotion_rate_limit(pgdat, rate_limit, nr);
+		if (numa_promotion_rate_limit(pgdat, rate_limit, nr))
+			return false;
+		return true;
 	}
 
 	this_cpupid = cpu_pid_to_cpupid(dst_cpu, current->pid);
 	last_cpupid = folio_xchg_last_cpupid(folio, this_cpupid);
 
-	if (!(task_numa_balancing_mode(p) & NUMA_BALANCING_MEMORY_TIERING) &&
+	if (!memory_tiering_enabled(folio) &&
 	    !node_is_toptier(src_nid) && !cpupid_valid(last_cpupid))
 		return false;
 
@@ -3126,6 +3211,9 @@ void task_numa_free(struct task_struct *p, bool final)
 	unsigned long flags;
 	int i;
 
+	if (!final)
+		WRITE_ONCE(p->numa_scan_policy_stale, true);
+
 	if (!numa_faults)
 		return;
 
@@ -3163,19 +3251,26 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	struct numa_group *ng;
 	int priv;
 
-	if (!static_branch_likely(&sched_numa_balancing))
-		return;
-
 	/* for example, ksmd faulting in a user's mm */
 	if (!p->mm)
 		return;
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (task_numa_balancing_mode(p) <= 0 ||
+	    !task_numa_migration_running(p))
+		return;
+#else
+	if (!static_branch_likely(&sched_numa_balancing))
+		return;
+#endif
 
 	/*
 	 * NUMA faults statistics are unnecessary for the slow memory
 	 * node for memory tiering mode.
 	 */
+	//TODO
 	if (!node_is_toptier(mem_node) &&
-	    (task_numa_balancing_mode(p) & NUMA_BALANCING_MEMORY_TIERING ||
+	    ((task_numa_balancing_mode(p) & NUMA_BALANCING_MEMORY_TIERING) ||
 	     !cpupid_valid(last_cpupid)))
 		return;
 
@@ -3286,7 +3381,75 @@ static bool vma_is_accessed(struct mm_struct *mm, struct vm_area_struct *vma)
 	return false;
 }
 
-#define VMA_PID_RESET_PERIOD (4 * sysctl_numa_balancing_scan_delay)
+#ifdef CONFIG_NUMA_BALANCING_MT
+static bool task_numa_balancing_enabled(struct task_struct *p)
+{
+	return task_numa_balancing_mode(p) > 0 &&
+	       task_numa_migration_running(p);
+}
+
+static void task_numa_sync_scan_policy(struct task_struct *p)
+{
+	struct mm_struct *mm = p->mm;
+	unsigned long policy_seq;
+	unsigned long next_scan;
+	unsigned int scan_min, scan_max;
+	bool fast_scan, stale, same_policy, period_ok;
+	bool mode_started, fast_started, pull_next_scan;
+	int mode, old_mode;
+	bool old_fast_scan;
+
+	if (!mm)
+		return;
+
+	policy_seq = task_numa_balancing_policy_seq(p);
+	mode = task_numa_balancing_mode(p);
+	fast_scan = task_numa_fast_scan(p);
+	stale = READ_ONCE(p->numa_scan_policy_stale);
+
+	scan_min = task_scan_min(p);
+	scan_max = task_scan_max(p);
+	same_policy = p->numa_scan_policy_seq == policy_seq &&
+		      p->numa_scan_policy_mode == mode &&
+		      p->numa_scan_policy_fast_scan == fast_scan;
+	period_ok = p->numa_scan_period >= scan_min &&
+		    p->numa_scan_period <= scan_max;
+	if (same_policy && period_ok) {
+		if (stale)
+			WRITE_ONCE(p->numa_scan_policy_stale, false);
+		return;
+	}
+
+	old_mode = p->numa_scan_policy_mode;
+	old_fast_scan = p->numa_scan_policy_fast_scan;
+	mode_started = old_mode <= 0 && mode > 0;
+	fast_started = !old_fast_scan && fast_scan;
+
+	p->numa_scan_policy_seq = policy_seq;
+	p->numa_scan_policy_mode = mode;
+	p->numa_scan_policy_fast_scan = fast_scan;
+	WRITE_ONCE(p->numa_scan_policy_stale, false);
+
+	p->numa_scan_period_max = scan_max;
+	if (mode_started || fast_started) {
+		p->numa_scan_period = task_scan_start(p);
+		p->node_stamp = 0;
+	} else if (p->numa_scan_period < scan_min) {
+		p->numa_scan_period = scan_min;
+	} else if (p->numa_scan_period > scan_max) {
+		p->numa_scan_period = scan_max;
+	}
+
+	pull_next_scan = mode > 0 && (mode_started || fast_started);
+	if (!pull_next_scan)
+		return;
+
+	next_scan = READ_ONCE(mm->numa_next_scan);
+	while (time_after(next_scan, jiffies) &&
+	       !try_cmpxchg(&mm->numa_next_scan, &next_scan, jiffies))
+		cpu_relax();
+}
+#endif
 
 /*
  * The expensive part of numa migration is done from task_work context.
@@ -3320,6 +3483,12 @@ static void task_numa_work(struct callback_head *work)
 	if (p->flags & PF_EXITING)
 		return;
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (!task_numa_balancing_enabled(p))
+		return;
+	task_numa_sync_scan_policy(p);
+#endif
+
 	/*
 	 * Memory is pinned to only one NUMA node via cpuset.mems, naturally
 	 * no page can be migrated.
@@ -3331,7 +3500,7 @@ static void task_numa_work(struct callback_head *work)
 
 	if (!mm->numa_next_scan) {
 		mm->numa_next_scan = now +
-			msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
+			msecs_to_jiffies(task_numa_scan_delay(p));
 	}
 
 	/*
@@ -3428,18 +3597,19 @@ retry_pids:
 			vma->numab_state->start_scan_seq = mm->numa_scan_seq;
 
 			vma->numab_state->next_scan = now +
-				msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
+				msecs_to_jiffies(task_numa_scan_delay(p));
 
 			/* Reset happens after 4 times scan delay of scan start */
-			vma->numab_state->pids_active_reset =  vma->numab_state->next_scan +
-				msecs_to_jiffies(VMA_PID_RESET_PERIOD);
+			vma->numab_state->pids_active_reset =
+				vma->numab_state->next_scan +
+				msecs_to_jiffies(task_numa_vma_pid_reset_period(p));
 
 			/*
 			 * Ensure prev_scan_seq does not match numa_scan_seq,
 			 * to prevent VMAs being skipped prematurely on the
 			 * first scan:
 			 */
-			 vma->numab_state->prev_scan_seq = mm->numa_scan_seq - 1;
+			vma->numab_state->prev_scan_seq = mm->numa_scan_seq - 1;
 		}
 
 		/*
@@ -3456,7 +3626,7 @@ retry_pids:
 		if (mm->numa_scan_seq &&
 				time_after(jiffies, vma->numab_state->pids_active_reset)) {
 			vma->numab_state->pids_active_reset = vma->numab_state->pids_active_reset +
-				msecs_to_jiffies(VMA_PID_RESET_PERIOD);
+				msecs_to_jiffies(task_numa_vma_pid_reset_period(p));
 			vma->numab_state->pids_active[0] = READ_ONCE(vma->numab_state->pids_active[1]);
 			vma->numab_state->pids_active[1] = 0;
 		}
@@ -3543,7 +3713,8 @@ out:
 	 * Usually update_task_scan_period slows down scanning enough; on an
 	 * overloaded system we need to limit overhead on a per task basis.
 	 */
-	if (unlikely(p->se.sum_exec_runtime != runtime)) {
+	if (!task_numa_fast_scan(p) &&
+	    unlikely(p->se.sum_exec_runtime != runtime)) {
 		u64 diff = p->se.sum_exec_runtime - runtime;
 		p->node_stamp += 32 * diff;
 	}
@@ -3557,14 +3728,28 @@ void init_numa_balancing(u64 clone_flags, struct task_struct *p)
 	if (mm) {
 		mm_users = atomic_read(&mm->mm_users);
 		if (mm_users == 1) {
-			mm->numa_next_scan = jiffies + msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
+			mm->numa_next_scan = jiffies +
+				msecs_to_jiffies(task_numa_scan_delay(p));
 			mm->numa_scan_seq = 0;
 		}
 	}
 	p->node_stamp			= 0;
 	p->numa_scan_seq		= mm ? mm->numa_scan_seq : 0;
-	p->numa_scan_period		= sysctl_numa_balancing_scan_delay;
+	p->numa_scan_period		= task_numa_scan_delay(p);
 	p->numa_migrate_retry		= 0;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	p->numa_scan_policy_seq		= task_numa_balancing_policy_seq(p);
+	p->numa_scan_policy_mode	= task_numa_balancing_mode(p);
+	p->numa_scan_policy_fast_scan	= task_numa_fast_scan(p);
+	p->numa_scan_policy_stale	= false;
+	if (p->numa_scan_policy_fast_scan)
+		p->numa_scan_period	= task_scan_min(p);
+#else
+	p->numa_scan_policy_seq		= 0;
+	p->numa_scan_policy_mode	= 0;
+	p->numa_scan_policy_fast_scan	= false;
+	p->numa_scan_policy_stale	= true;
+#endif
 	/* Protect against double add, see task_tick_numa and task_numa_work */
 	p->numa_work.next		= &p->numa_work;
 	p->numa_faults			= NULL;
@@ -3617,6 +3802,9 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	 * NUMA placement.
 	 */
 	now = curr->se.sum_exec_runtime;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	task_numa_sync_scan_policy(curr);
+#endif
 	period = (u64)curr->numa_scan_period * NSEC_PER_MSEC;
 
 	if (now > curr->node_stamp + period) {
@@ -3634,8 +3822,13 @@ static void update_scan_period(struct task_struct *p, int new_cpu)
 	int src_nid = cpu_to_node(task_cpu(p));
 	int dst_nid = cpu_to_node(new_cpu);
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (!task_numa_balancing_enabled(p))
+		return;
+#else
 	if (!static_branch_likely(&sched_numa_balancing))
 		return;
+#endif
 
 	if (!p->mm || !p->numa_faults || (p->flags & PF_EXITING))
 		return;
@@ -9301,8 +9494,13 @@ static long migrate_degrades_locality(struct task_struct *p, struct lb_env *env)
 	unsigned long src_weight, dst_weight;
 	int src_nid, dst_nid, dist;
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (!task_numa_balancing_enabled(p))
+		return 0;
+#else
 	if (!static_branch_likely(&sched_numa_balancing))
 		return 0;
+#endif
 
 	if (!p->numa_faults || !(env->sd->flags & SD_NUMA))
 		return 0;
@@ -13128,7 +13326,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 		entity_tick(cfs_rq, se, queued);
 	}
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (task_numa_balancing_enabled(curr))
+#else
 	if (static_branch_unlikely(&sched_numa_balancing))
+#endif
 		task_tick_numa(rq, curr);
 
 	update_misfit_status(curr, rq);

@@ -5869,6 +5869,7 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 	struct vm_area_struct *vma = vmf->vma;
 	bool local_fault_refault = false;
 	unsigned int sample_refault_latency = 0;
+	int target_nid;
 
 	if (sample_refault)
 		*sample_refault = false;
@@ -5931,8 +5932,9 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 		unsigned long nr_pages = folio_nr_pages(folio);
 
 		memcg = get_mem_cgroup_from_folio(folio);
-		mem_cgroup_numa_account_local_fault_refault(
-			memcg, folio, nr_pages, sample_refault_latency);
+		mem_cgroup_numa_account_local_fault_refault(memcg, folio,
+							    nr_pages,
+							    sample_refault_latency);
 		mem_cgroup_put(memcg);
 	}
 #endif
@@ -5944,7 +5946,25 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 	if (local_fault_refault)
 		return NUMA_NO_NODE;
 
-	return mpol_misplaced(folio, vmf, addr);
+	target_nid = mpol_misplaced(folio, vmf, addr);
+#ifdef CONFIG_NUMA_BALANCING
+	if (target_nid != NUMA_NO_NODE && folio_test_clear_demoted(folio)) {
+		struct mem_cgroup *memcg;
+		unsigned long nr_pages = folio_nr_pages(folio);
+
+		*flags |= TNF_DEMOTED;
+		memcg = get_mem_cgroup_from_folio(folio);
+		if (mem_cgroup_numa_pingpong_stat_enabled(memcg)) {
+			count_vm_numa_events(PGPROMOTE_CANDIDATE_DEMOTED,
+					     nr_pages);
+			mem_cgroup_numa_account_promote_candidate_demoted(
+				memcg, nr_pages);
+		}
+		mem_cgroup_put(memcg);
+	}
+#endif
+
+	return target_nid;
 }
 
 static void numa_rebuild_single_mapping(struct vm_fault *vmf, struct vm_area_struct *vma,
@@ -6055,6 +6075,11 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	}
 #endif
 
+	if (task_numa_balancing_mode(current) <= 0) {
+		nid = NUMA_NO_NODE;
+		goto out_map;
+	}
+
 	target_nid = numa_migrate_check(folio, vmf, vmf->address, &flags,
 					writable, &last_cpupid,
 					&sample_refault);
@@ -6070,7 +6095,6 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 	writable = false;
 	ignore_writable = true;
-
 	/* Migrate to the requested node */
 	if (!migrate_misplaced_folio(folio, target_nid)) {
 		nid = target_nid;

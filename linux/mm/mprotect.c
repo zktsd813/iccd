@@ -29,10 +29,10 @@
 #include <linux/uaccess.h>
 #include <linux/mm_inline.h>
 #include <linux/pgtable.h>
+#include <linux/memcontrol.h>
 #include <linux/sched/sysctl.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/memory-tiers.h>
-#include <linux/memcontrol.h>
 #include <uapi/linux/mman.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -150,8 +150,12 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 	if (folio_is_file_lru(folio) && folio_test_dirty(folio))
 		goto skip;
 
+	/*
+	 * Don't mess with PTEs if page is already on the node
+	 * a single-threaded process is running on.
+	 */
 	nid = folio_nid(folio);
-	toptier = node_is_toptier(nid);
+	toptier = !node_is_promotion_source(nid);
 
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (toptier && folio_nr_pages(folio) == 1 &&
@@ -162,7 +166,8 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 			folio_set_local_tiering_sampled(folio);
 			folio_xchg_access_time(folio,
 					       jiffies_to_msecs(jiffies));
-			mem_cgroup_numa_account_local_fault_pte(memcg, 1);
+			mem_cgroup_numa_account_local_fault_pte(memcg,
+								folio, 1);
 			mem_cgroup_put(memcg);
 			ret = false;
 			goto skip;
@@ -171,10 +176,6 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 	}
 #endif
 
-	/*
-	 * Don't mess with PTEs if page is already on the node
-	 * a single-threaded process is running on.
-	 */
 	if (target_node == nid)
 		goto skip;
 
@@ -182,7 +183,8 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 	 * Skip scanning top tier node if normal numa
 	 * balancing is disabled
 	 */
-	if (!(folio_numa_balancing_mode(folio) & NUMA_BALANCING_NORMAL) && toptier)
+	if (!(task_numa_balancing_mode(current) & NUMA_BALANCING_NORMAL) &&
+	    toptier)
 		goto skip;
 
 	ret = false;
@@ -334,7 +336,6 @@ static long change_pte_range(struct mmu_gather *tlb,
 				int ret = prot_numa_skip(vma, addr, oldpte, pte,
 							 target_node, folio);
 				if (ret) {
-
 					/* determine batch to skip */
 					nr_ptes = mprotect_folio_pte_batch(folio,
 						  pte, oldpte, max_nr_ptes, /* flags = */ 0);

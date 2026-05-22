@@ -24,12 +24,14 @@
 #include <linux/page-flags.h>
 #include <linux/shrinker.h>
 #include <linux/sched/sysctl.h>
+#include <linux/wait.h>
 
 struct mem_cgroup;
 struct obj_cgroup;
 struct page;
 struct mm_struct;
 struct kmem_cache;
+struct task_struct;
 
 /* Cgroup-specific page state, on top of universal node page state */
 enum memcg_stat_item {
@@ -83,6 +85,56 @@ struct mem_cgroup_reclaim_iter {
 };
 
 #ifdef CONFIG_NUMA_BALANCING_MT
+#define MEMCG_NUMA_EARLYSTOP_THRESHOLD	10000
+#define MEMCG_NUMA_EARLYSTOP_SLOPE_MAX	20000
+#define MEMCG_NUMA_RESTART_CANDIDATES	4
+#define MEMCG_NUMA_LOCAL_FAULT_WINDOW_BUCKETS	64
+
+struct memcg_numa_earlystop_data {
+	spinlock_t lock;
+	long previous_slope;
+	atomic_long_t current_demote_promoted;
+	unsigned long previous_demote_promoted;
+	long threshold;
+	int earlystop_cnt;
+	int previous_point;
+	int slope_max;
+	int slope_cnt;
+	int ignore;
+	long delta[3];
+	int delta_cnt;
+};
+
+struct memcg_numa_restart_data {
+	int restart_cnt;
+	unsigned long referenced_mean;
+	int variation_condition;
+	int scanning_counter;
+	unsigned long referenced_data[MEMCG_NUMA_RESTART_CANDIDATES];
+	unsigned int referenced_index;
+};
+
+struct memcg_numa_local_fault_window_bucket {
+	atomic_t seq;
+	atomic64_t pte_updates;
+	atomic64_t refault;
+	atomic64_t refault_hit;
+	atomic64_t lost;
+};
+
+/*
+ * memcg_reclaimd decouples per-memcg reclaim scheduling from the global
+ * pgdat-based kswapd path and keeps memcg+node work local to each memcg.
+ *
+ * pending_nodes tracks reclaim requests that have been queued for a memcg
+ * but not yet picked by the worker thread.
+ *
+ * inflight_nodes tracks nodes currently owned by the worker so the same
+ * memcg+node pair is not re-enqueued or processed concurrently.
+ *
+ * Actual reclaim is run from this thread context, while pending_nodes and
+ * inflight_nodes are the only scheduling state used for memcg+node work.
+ */
 struct memcg_reclaimd_ctx {
 	struct task_struct *task;
 	wait_queue_head_t waitq;
@@ -106,6 +158,7 @@ enum memcg_kswapd_demotion_mode {
 	MEMCG_KSWAPD_DEMOTION_NODE_WMARK = 1,
 };
 
+/* Default hard-cap watermarks: wake at high and reclaim toward low. */
 #define MEMCG_NODE_LOW_DEFAULT_PCT	95
 #define MEMCG_NODE_HIGH_DEFAULT_PCT	98
 
@@ -158,15 +211,18 @@ struct mem_cgroup_per_node {
 	atomic_t		slab_reclaimable;
 	atomic_t		slab_unreclaimable;
 #endif
+
 #ifdef CONFIG_NUMA_BALANCING_MT
-	u64			node_capacity;
-	u64			node_low_wmark;
-	u64			node_high_wmark;
-	u64			node_next_check;
-	atomic_long_t		node_usage_exact;
-	bool			node_over_high;
-	u32			node_reclaimd_failures;
-	unsigned long		node_reclaimd_cooldown_until;
+	u64		node_capacity;
+	u64		node_low_wmark;
+	u64		node_high_wmark;
+	u64		node_next_check;
+	atomic_long_t	node_usage_exact;
+	bool		node_over_high;
+	bool		node_force_lru_evict;
+	u32		node_force_lru_fail_streak;
+	u32		node_reclaimd_failures;
+	unsigned long	node_reclaimd_cooldown_until;
 #endif
 };
 
@@ -333,21 +389,41 @@ struct mem_cgroup {
 #endif
 
 #ifdef CONFIG_NUMA_BALANCING_MT
-	int			node_balancing_mode;
-	u8			kswapd_demotion_enabled;
-	u32			numa_local_fault_on_tiering;
-	u32			numa_local_fault_refault_hit_ms;
-	atomic64_t		numa_migrate_success_total;
-	atomic64_t		numa_migrate_success_promotion;
-	atomic64_t		numa_migrate_success_other;
-	atomic64_t		numa_migrate_fail_promotion_over_high;
-	atomic64_t		numa_migrate_fail_promotion_alloc;
-	atomic64_t		numa_local_fault_sampled;
-	atomic64_t		numa_local_fault_pte_updates;
-	atomic64_t		numa_local_fault_refault;
-	atomic64_t		numa_local_fault_refault_hit;
-	atomic64_t		numa_local_fault_lost;
-	atomic_t		numa_local_fault_window_seq;
+	/* memory tiering data */
+	int	    	node_balancing_mode;
+	u8		kswapd_demotion_enabled;
+	u8		numa_balancing_fast_scan;
+	u32		numa_balancing_hot_threshold_ms;
+	struct mutex	node_capacity_lock;
+	atomic_t	node_capacity_count;
+	atomic_long_t	numa_balancing_policy_seq;
+	u32		numa_local_fault_on_tiering;
+	u32		numa_local_fault_refault_hit_ms;
+	atomic64_t	numa_migrate_success_total;
+	atomic64_t	numa_migrate_success_promotion;
+	atomic64_t	numa_migrate_success_other;
+	atomic64_t	numa_migrate_fail_promotion_blocked;
+	atomic64_t	numa_migrate_fail_promotion_over_high;
+	atomic64_t	numa_migrate_fail_promotion_alloc;
+	atomic64_t	numa_demote_promoted;
+	atomic64_t	numa_demote_promoted_referenced;
+	atomic64_t	numa_promote_candidate_demoted;
+	bool		numa_migration_stop_enabled;
+	bool		numa_pingpong_stat_enabled;
+	bool		numa_page_migration_running;
+	struct memcg_numa_earlystop_data numa_earlystop;
+	struct memcg_numa_restart_data numa_restart;
+	atomic64_t	numa_local_fault_pfn_candidates;
+	atomic64_t	numa_local_fault_pfn_selected;
+	atomic64_t	numa_local_fault_sampled;
+	atomic64_t	numa_local_fault_pte_updates;
+	atomic64_t	numa_local_fault_refault;
+	atomic64_t	numa_local_fault_refault_hit;
+	atomic_t	numa_local_fault_window_seq;
+	struct memcg_numa_local_fault_window_bucket
+			numa_local_fault_window_buckets[MEMCG_NUMA_LOCAL_FAULT_WINDOW_BUCKETS];
+	atomic64_t	numa_local_fault_lost;
+	atomic64_t	numa_local_fault_refault_total_ms;
 	struct memcg_reclaimd_ctx reclaimd;
 #endif
 
@@ -829,17 +905,15 @@ static inline bool mem_cgroup_numa_balancing_active(void)
 
 static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
 {
+	int mode;
+
 	if (!memcg || mem_cgroup_is_root(memcg))
 		return READ_ONCE(sysctl_numa_balancing_mode);
 
-	return READ_ONCE(memcg->node_balancing_mode);
+	mode = READ_ONCE(memcg->node_balancing_mode);
+	return mode;
 }
 #else
-static inline bool mem_cgroup_numa_balancing_active(void)
-{
-	return false;
-}
-
 static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
 {
 	return READ_ONCE(sysctl_numa_balancing_mode);
@@ -860,6 +934,27 @@ static inline int task_numa_balancing_mode(struct task_struct *p)
 	rcu_read_unlock();
 
 	return mode;
+}
+
+static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
+{
+#ifdef CONFIG_NUMA_BALANCING_MT
+	struct mem_cgroup *memcg;
+	unsigned long seq = 0;
+
+	if (!p || !p->mm || mem_cgroup_disabled())
+		return 0;
+
+	rcu_read_lock();
+	memcg = mem_cgroup_from_task(p);
+	if (memcg && !mem_cgroup_is_root(memcg))
+		seq = atomic_long_read(&memcg->numa_balancing_policy_seq);
+	rcu_read_unlock();
+
+	return seq;
+#else
+	return 0;
+#endif
 }
 
 static inline int folio_numa_balancing_mode(struct folio *folio)
@@ -1361,6 +1456,42 @@ static inline struct mem_cgroup *get_mem_cgroup_from_folio(struct folio *folio)
 {
 	return NULL;
 }
+
+static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
+{
+	return READ_ONCE(sysctl_numa_balancing_mode);
+}
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+static inline bool mem_cgroup_numa_balancing_active(void)
+{
+	return false;
+}
+#endif
+
+static inline int task_numa_balancing_mode(struct task_struct *p)
+{
+	return READ_ONCE(sysctl_numa_balancing_mode);
+}
+
+static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
+{
+	return 0;
+}
+
+static inline int folio_numa_balancing_mode(struct folio *folio)
+{
+	return READ_ONCE(sysctl_numa_balancing_mode);
+}
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+static inline int mem_cgroup_preferred_node(int preferred_nid,
+					    const nodemask_t *allowed,
+					    unsigned long nr_pages)
+{
+	return preferred_nid;
+}
+#endif
 
 static inline
 struct mem_cgroup *mem_cgroup_from_css(struct cgroup_subsys_state *css)
@@ -1946,13 +2077,26 @@ int mem_cgroup_preferred_node(int preferred_nid, const nodemask_t *allowed,
 			      unsigned long nr_pages);
 bool mem_cgroup_numa_should_sample_local_fault(struct mem_cgroup *memcg,
 					       struct folio *folio);
+bool mem_cgroup_numa_migration_running(struct mem_cgroup *memcg);
+bool mem_cgroup_numa_migration_stop_enabled(struct mem_cgroup *memcg);
+bool mem_cgroup_numa_pingpong_stat_enabled(struct mem_cgroup *memcg);
+bool task_numa_migration_running(struct task_struct *p);
+bool folio_numa_migration_running(struct folio *folio);
+void mem_cgroup_numa_reset_earlystop(struct mem_cgroup *memcg, bool running);
+void mem_cgroup_numa_account_demote_promoted(struct mem_cgroup *memcg,
+					     unsigned long nr_pages,
+					     bool referenced);
+void mem_cgroup_numa_account_promote_candidate_demoted(struct mem_cgroup *memcg,
+						       unsigned long nr_pages);
 void mem_cgroup_numa_account_local_fault_pte(struct mem_cgroup *memcg,
+					     struct folio *folio,
 					     unsigned long nr_pages);
 void mem_cgroup_numa_account_local_fault_refault(struct mem_cgroup *memcg,
 						 struct folio *folio,
 						 unsigned long nr_pages,
 						 unsigned int latency_ms);
 void mem_cgroup_numa_account_local_fault_lost(struct mem_cgroup *memcg,
+					      struct folio *folio,
 					      unsigned long nr_pages);
 #else
 static inline u8 memcg_kswapd_demotion_mode(const struct mem_cgroup *memcg)
@@ -1978,12 +2122,6 @@ try_to_free_mem_cgroup_node_pages(struct mem_cgroup *memcg, int nid,
 	return 0;
 }
 
-static inline unsigned long mem_cgroup_node_usage_pages_live(struct mem_cgroup *memcg,
-							     int nid)
-{
-	return 0;
-}
-
 static inline bool mem_cgroup_node_over_high(struct mem_cgroup *memcg, int nid,
 					     unsigned long nr_pages)
 {
@@ -2004,30 +2142,57 @@ static inline int mem_cgroup_preferred_node(int preferred_nid,
 	return preferred_nid;
 }
 
-static inline bool
-mem_cgroup_numa_should_sample_local_fault(struct mem_cgroup *memcg,
-					  struct folio *folio)
+static inline bool mem_cgroup_numa_should_sample_local_fault(
+	struct mem_cgroup *memcg, struct folio *folio)
 {
 	return false;
 }
 
-static inline void
-mem_cgroup_numa_account_local_fault_pte(struct mem_cgroup *memcg,
-					unsigned long nr_pages)
+static inline bool mem_cgroup_numa_migration_stop_enabled(
+	struct mem_cgroup *memcg)
+{
+	return false;
+}
+
+static inline bool mem_cgroup_numa_pingpong_stat_enabled(
+	struct mem_cgroup *memcg)
+{
+	return true;
+}
+
+static inline bool task_numa_migration_running(struct task_struct *p)
+{
+	return true;
+}
+
+static inline bool folio_numa_migration_running(struct folio *folio)
+{
+	return true;
+}
+
+static inline void mem_cgroup_numa_account_demote_promoted(
+	struct mem_cgroup *memcg, unsigned long nr_pages, bool referenced)
 {
 }
 
-static inline void
-mem_cgroup_numa_account_local_fault_refault(struct mem_cgroup *memcg,
-					    struct folio *folio,
-					    unsigned long nr_pages,
-					    unsigned int latency_ms)
+static inline void mem_cgroup_numa_account_promote_candidate_demoted(
+	struct mem_cgroup *memcg, unsigned long nr_pages)
 {
 }
 
-static inline void
-mem_cgroup_numa_account_local_fault_lost(struct mem_cgroup *memcg,
-					 unsigned long nr_pages)
+static inline void mem_cgroup_numa_account_local_fault_pte(
+	struct mem_cgroup *memcg, struct folio *folio, unsigned long nr_pages)
+{
+}
+
+static inline void mem_cgroup_numa_account_local_fault_refault(
+	struct mem_cgroup *memcg, struct folio *folio, unsigned long nr_pages,
+	unsigned int latency_ms)
+{
+}
+
+static inline void mem_cgroup_numa_account_local_fault_lost(
+	struct mem_cgroup *memcg, struct folio *folio, unsigned long nr_pages)
 {
 }
 #endif
@@ -2097,23 +2262,6 @@ static inline ino_t page_cgroup_ino(struct page *page)
 static inline bool mem_cgroup_node_allowed(struct mem_cgroup *memcg, int nid)
 {
 	return true;
-}
-
-static inline int task_numa_balancing_mode(struct task_struct *p)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
-}
-
-static inline int folio_numa_balancing_mode(struct folio *folio)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
-}
-
-static inline int mem_cgroup_preferred_node(int preferred_nid,
-					    const nodemask_t *allowed,
-					    unsigned long nr_pages)
-{
-	return preferred_nid;
 }
 #endif /* CONFIG_MEMCG */
 

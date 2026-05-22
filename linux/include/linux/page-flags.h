@@ -130,6 +130,10 @@ enum pageflags {
 #ifdef CONFIG_NUMA_BALANCING_MT
 	PG_local_tiering_sampled,
 #endif
+#ifdef CONFIG_NUMA_BALANCING
+	PG_demoted,
+	PG_promoted,
+#endif
 	__NR_PAGEFLAGS,
 
 	PG_readahead = PG_reclaim,
@@ -565,11 +569,18 @@ FOLIO_FLAG(active, FOLIO_HEAD_PAGE)
 	FOLIO_TEST_CLEAR_FLAG(active, FOLIO_HEAD_PAGE)
 PAGEFLAG(Workingset, workingset, PF_HEAD)
 	TESTCLEARFLAG(Workingset, workingset, PF_HEAD)
+PAGEFLAG(Checked, checked, PF_NO_COMPOUND)	   /* Used by some filesystems */
+
 #ifdef CONFIG_NUMA_BALANCING_MT
 PAGEFLAG(LocalTieringSampled, local_tiering_sampled, PF_NO_TAIL)
 	TESTCLEARFLAG(LocalTieringSampled, local_tiering_sampled, PF_NO_TAIL)
 #endif
-PAGEFLAG(Checked, checked, PF_NO_COMPOUND)	   /* Used by some filesystems */
+#ifdef CONFIG_NUMA_BALANCING
+PAGEFLAG(Demoted, demoted, PF_NO_TAIL)
+	TESTCLEARFLAG(Demoted, demoted, PF_NO_TAIL)
+PAGEFLAG(Promoted, promoted, PF_NO_TAIL)
+	TESTCLEARFLAG(Promoted, promoted, PF_NO_TAIL)
+#endif
 
 /* Xen */
 PAGEFLAG(Pinned, pinned, PF_NO_COMPOUND)

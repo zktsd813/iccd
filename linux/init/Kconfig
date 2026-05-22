@@ -986,11 +986,12 @@ config NUMA_BALANCING
 config NUMA_BALANCING_MT
 	bool "Memory placement aware NUMA scheduler for multi-tenants"
 	default n
-	depends on NUMA_BALANCING && MEMCG
+	depends on NUMA_BALANCING
 	select PAGE_EXTENSION
 	help
-	  Extend automatic NUMA balancing with per-memory-cgroup controls for
-	  memory tiering, local-node capacity and cgroup-scoped demotion.
+	  This option extends the automatic NUMA aware memory/task placement
+	  support to multi-tenant systems where multiple tasks from different
+	  users share the same CPU.
 
 config NUMA_BALANCING_DEFAULT_ENABLED
 	bool "Automatically enable NUMA aware memory/task placement"
