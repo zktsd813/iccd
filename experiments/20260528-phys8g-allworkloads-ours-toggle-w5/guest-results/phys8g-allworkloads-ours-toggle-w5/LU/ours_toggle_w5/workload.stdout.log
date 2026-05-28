@@ -1,0 +1,60 @@
+
+
+ NAS Parallel Benchmarks (NPB3.4-OMP) - LU Benchmark
+
+ Size:  900x 900x 900
+ Iterations:                     30
+ Number of available threads:    32
+
+ Time step    1
+ Time step   20
+ Time step   30
+ Unknown class
+ RMS-norms of residual
+           1   0.1001493129349E+07
+           2   0.1034895191757E+06
+           3   0.2553930029352E+06
+           4   0.2166402590744E+06
+           5   0.1383061855110E+07
+ RMS-norms of solution error
+           1   0.5334170719986E+03
+           2   0.4830039507200E+02
+           3   0.1348059056037E+03
+           4   0.1162928068225E+03
+           5   0.9006590157206E+03
+ Surface integral
+               0.2841976836770E+03
+ No reference values provided
+ No verification performed
+
+
+ LU Benchmark Completed.
+ Class           =                        U
+ Size            =            900x 900x 900
+ Iterations      =                       30
+ Time in seconds =                   941.86
+ Total threads   =                       32
+ Avail threads   =                       32
+ Mop/s total     =                 45805.27
+ Mop/s/thread    =                  1431.41
+ Operation type  =           floating point
+ Verification    =             UNSUCCESSFUL
+ Version         =                    3.4.3
+ Compile date    =              10 Jan 2025
+
+ Compile options:
+    FC           = gfortran
+    FLINK        = $(FC)
+    F_LIB        = (none)
+    F_INC        = (none)
+    FFLAGS       = -O3 -fopenmp
+    FLINKFLAGS   = $(FFLAGS)
+    RAND         = (none)
+
+
+ Please send all errors/feedbacks to:
+
+ NPB Development Team
+ npb@nas.nasa.gov
+
+

@@ -10,3 +10,57 @@ Warning: Permanently added '[127.0.0.1]:10064' (ED25519) to the list of known ho
 /root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
 [2026-05-28T07:15:22Z] starting controller
 [2026-05-28T07:15:22Z] running workload
+[2026-05-28T07:45:54Z] done rc=0 elapsed_s=1832 outdir=/root/phys8g-allworkloads-ours-toggle-w5/liblinear/ours_toggle_w5
+[2026-05-28T07:45:54Z] done workload=liblinear rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T07:45:54Z] start workload=FT policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T07:45:55Z] starting controller
+[2026-05-28T07:45:55Z] running workload
+[2026-05-28T07:56:07Z] done rc=0 elapsed_s=612 outdir=/root/phys8g-allworkloads-ours-toggle-w5/FT/ours_toggle_w5
+[2026-05-28T07:56:07Z] done workload=FT rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T07:56:08Z] start workload=LU policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T07:56:08Z] starting controller
+[2026-05-28T07:56:08Z] running workload
+[2026-05-28T08:13:21Z] done rc=0 elapsed_s=1033 outdir=/root/phys8g-allworkloads-ours-toggle-w5/LU/ours_toggle_w5
+[2026-05-28T08:13:21Z] done workload=LU rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T08:13:21Z] start workload=SP policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T08:13:21Z] starting controller
+[2026-05-28T08:13:21Z] running workload
+[2026-05-28T08:32:06Z] done rc=0 elapsed_s=1125 outdir=/root/phys8g-allworkloads-ours-toggle-w5/SP/ours_toggle_w5
+[2026-05-28T08:32:06Z] done workload=SP rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T08:32:06Z] start workload=gups policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T08:32:06Z] starting controller
+[2026-05-28T08:32:06Z] running workload
+[2026-05-28T08:42:35Z] done rc=0 elapsed_s=629 outdir=/root/phys8g-allworkloads-ours-toggle-w5/gups/ours_toggle_w5
+[2026-05-28T08:42:35Z] done workload=gups rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T08:42:35Z] start workload=graph500 policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T08:42:35Z] starting controller
+[2026-05-28T08:42:35Z] running workload
+[2026-05-28T08:48:57Z] done rc=0 elapsed_s=382 outdir=/root/phys8g-allworkloads-ours-toggle-w5/graph500/ours_toggle_w5
+[2026-05-28T08:48:58Z] done workload=graph500 rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T08:48:58Z] start workload=btree policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T08:48:58Z] starting controller
+[2026-05-28T08:48:58Z] running workload
+[2026-05-28T09:02:04Z] done rc=0 elapsed_s=786 outdir=/root/phys8g-allworkloads-ours-toggle-w5/btree/ours_toggle_w5
+[2026-05-28T09:02:04Z] done workload=btree rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T09:02:04Z] start workload=xsbench policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T09:02:04Z] starting controller
+[2026-05-28T09:02:04Z] running workload
+[2026-05-28T09:15:06Z] done rc=0 elapsed_s=782 outdir=/root/phys8g-allworkloads-ours-toggle-w5/xsbench/ours_toggle_w5
+[2026-05-28T09:15:07Z] done workload=xsbench rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T09:15:07Z] summary=/root/phys8g-allworkloads-ours-toggle-w5/summary.csv

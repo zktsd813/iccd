@@ -1,0 +1,15 @@
+/root/benchmark/vmitosis-workloads/bin/bench_btree_mt 
+<benchmark exec="/root/benchmark/vmitosis-workloads/bin/bench_btree_mt">
+<config>
+  <openmp>on</openmp>  <memsize>1G <memsize>  <hugetlb>0</hugetlb>
+  <data>-1</data>  <interference>0</interference>
+</config>
+<run>
+BTree Elements: 681M
+BTree #Lookups: 2000M
+Allocator: 10400 MB
+got 0 matches in 650 seconds
+</run>
+Took: 781.18446744073709551292
+Took: 781.18446744073709551292
+</benchmark>

@@ -1,0 +1,13 @@
+/root/benchmark/vmitosis-workloads/bin/bench_gups_mt 64 
+<benchmark exec="/root/benchmark/vmitosis-workloads/bin/bench_gups_mt">
+<config>
+  <openmp>on</openmp>  <memsize>1G <memsize>  <hugetlb>0</hugetlb>
+  <data>-1</data>  <interference>0</interference>
+</config>
+<run>
+<gups tablesize="68719476736"></gups>
+<gups table="0x7f72af7f7010" tablesize="8589934592"></gups>
+</run>
+Took: 626.18446744073709551234
+Took: 626.18446744073709551234
+</benchmark>
