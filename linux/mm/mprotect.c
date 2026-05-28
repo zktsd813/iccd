@@ -157,7 +157,7 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 	nid = folio_nid(folio);
 	toptier = !node_is_promotion_source(nid);
 
-#ifdef CONFIG_NUMA_BALANCING_MT
+	#ifdef CONFIG_NUMA_BALANCING_MT
 	if (toptier && folio_nr_pages(folio) == 1 &&
 	    !folio_test_local_tiering_sampled(folio)) {
 		struct mem_cgroup *memcg = get_mem_cgroup_from_folio(folio);
@@ -174,7 +174,9 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 		}
 		mem_cgroup_put(memcg);
 	}
-#endif
+	if (task_numa_balancing_mode(current) <= 0)
+		goto skip;
+	#endif
 
 	if (target_node == nid)
 		goto skip;

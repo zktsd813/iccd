@@ -2420,6 +2420,10 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 		folio = pmd_folio(*pmd);
 		toptier = !node_is_promotion_source(folio_nid(folio));
+#ifdef CONFIG_NUMA_BALANCING_MT
+		if (task_numa_balancing_mode(current) <= 0)
+			goto unlock;
+#endif
 		/*
 		 * Skip scanning top tier node if normal numa
 		 * balancing is disabled

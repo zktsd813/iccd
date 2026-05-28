@@ -3384,7 +3384,8 @@ static bool vma_is_accessed(struct mm_struct *mm, struct vm_area_struct *vma)
 #ifdef CONFIG_NUMA_BALANCING_MT
 static bool task_numa_balancing_enabled(struct task_struct *p)
 {
-	return task_numa_balancing_mode(p) > 0 &&
+	return (task_numa_balancing_mode(p) > 0 ||
+		task_numa_local_fault_sampling_enabled(p)) &&
 	       task_numa_migration_running(p);
 }
 
@@ -3395,7 +3396,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	unsigned long next_scan;
 	unsigned int scan_min, scan_max;
 	bool fast_scan, stale, same_policy, period_ok;
-	bool mode_started, fast_started, pull_next_scan;
+	bool mode_started, fast_started, pull_next_scan, scan_enabled;
 	int mode, old_mode;
 	bool old_fast_scan;
 
@@ -3405,6 +3406,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	policy_seq = task_numa_balancing_policy_seq(p);
 	mode = task_numa_balancing_mode(p);
 	fast_scan = task_numa_fast_scan(p);
+	scan_enabled = task_numa_balancing_enabled(p);
 	stale = READ_ONCE(p->numa_scan_policy_stale);
 
 	scan_min = task_scan_min(p);
@@ -3422,7 +3424,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 
 	old_mode = p->numa_scan_policy_mode;
 	old_fast_scan = p->numa_scan_policy_fast_scan;
-	mode_started = old_mode <= 0 && mode > 0;
+	mode_started = old_mode <= 0 && scan_enabled;
 	fast_started = !old_fast_scan && fast_scan;
 
 	p->numa_scan_policy_seq = policy_seq;
@@ -3440,7 +3442,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 		p->numa_scan_period = scan_max;
 	}
 
-	pull_next_scan = mode > 0 && (mode_started || fast_started);
+	pull_next_scan = scan_enabled && (mode_started || fast_started);
 	if (!pull_next_scan)
 		return;
 

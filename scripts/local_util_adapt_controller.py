@@ -398,6 +398,7 @@ def run_controller(args: argparse.Namespace) -> int:
         window = 0
         initial_seq = int(knobs.read_knob("numa_local_fault_window", default="0") or 0)
         current_sample_pct = sample_pct(args, knobs)
+        configured_sample_pct = current_sample_pct
         write_event(
             writer,
             "start",
@@ -541,8 +542,12 @@ def run_controller(args: argparse.Namespace) -> int:
             if should_reenable:
                 if not args.dry_run:
                     knobs.write_knob("node_balancing", args.node_balancing_on)
-                    if args.stop_local_fault:
-                        knobs.write_knob("numa_local_fault_on_tiering", int(current_sample_pct), required=False)
+                    if configured_sample_pct > 0:
+                        knobs.write_knob(
+                            "numa_local_fault_on_tiering",
+                            int(configured_sample_pct),
+                            required=False,
+                        )
                 controller_state = "on"
                 node_balancing = knobs.node_balancing()
                 write_event(

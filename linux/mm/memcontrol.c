@@ -4703,6 +4703,25 @@ static ssize_t memory_reclaim(struct kernfs_open_file *of, char *buf,
 
 atomic_t numa_balancing_count = ATOMIC_INIT(0);
 
+static bool memcg_numa_balancing_counted(int mode, u32 local_fault_rate)
+{
+	return mode > 0 || local_fault_rate > 0;
+}
+
+static void memcg_numa_balancing_update_count(bool old_counted,
+					      bool new_counted)
+{
+	if (old_counted == new_counted)
+		return;
+
+	if (new_counted)
+		atomic_inc(&numa_balancing_count);
+	else
+		atomic_dec(&numa_balancing_count);
+
+	sched_numa_balancing_update_state();
+}
+
 bool mem_cgroup_numa_pingpong_stat_enabled(struct mem_cgroup *memcg)
 {
 	if (!memcg)
@@ -4827,16 +4846,19 @@ static void memcg_numa_balancing_bump_policy_seq(struct mem_cgroup *memcg)
 static void memcg_numa_balancing_disable(struct mem_cgroup *memcg)
 {
 	int old_mode;
+	u32 old_local_fault_rate;
+	bool old_counted;
 
-	old_mode = xchg(&memcg->node_balancing_mode,
-			NUMA_BALANCING_DISABLED);
+	old_mode = READ_ONCE(memcg->node_balancing_mode);
+	old_local_fault_rate = READ_ONCE(memcg->numa_local_fault_on_tiering);
+	old_counted = memcg_numa_balancing_counted(old_mode,
+						   old_local_fault_rate);
+	WRITE_ONCE(memcg->node_balancing_mode, NUMA_BALANCING_DISABLED);
+	WRITE_ONCE(memcg->numa_local_fault_on_tiering, 0);
 	if (old_mode != NUMA_BALANCING_DISABLED)
 		memcg_numa_balancing_bump_policy_seq(memcg);
 	mem_cgroup_numa_reset_earlystop(memcg, true);
-	if (old_mode > 0) {
-		atomic_dec(&numa_balancing_count);
-		sched_numa_balancing_update_state();
-	}
+	memcg_numa_balancing_update_count(old_counted, false);
 }
 
 static bool __maybe_unused memcg_reclaimd_should_run(struct mem_cgroup *memcg)
@@ -5687,10 +5709,6 @@ bool mem_cgroup_numa_should_sample_local_fault(struct mem_cgroup *memcg,
 		return false;
 	if (!memcg || mem_cgroup_is_root(memcg))
 		return false;
-	if (READ_ONCE(memcg->node_balancing_mode) !=
-	    NUMA_BALANCING_MEMORY_TIERING)
-		return false;
-
 	rcu_read_lock();
 	task_memcg = mem_cgroup_from_task(current);
 	same_memcg = task_memcg && task_memcg == memcg &&
@@ -6420,6 +6438,8 @@ static ssize_t memory_node_balancing_write(struct kernfs_open_file *of,
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	int mode, old_mode;
+	u32 old_local_fault_rate, new_local_fault_rate;
+	bool old_counted, new_counted;
 	int nid;
 
 	buf = strstrip(buf);
@@ -6431,20 +6451,26 @@ static ssize_t memory_node_balancing_write(struct kernfs_open_file *of,
 	    mode > (NUMA_BALANCING_NORMAL | NUMA_BALANCING_MEMORY_TIERING))
 		return -EINVAL;
 
-	old_mode = xchg(&memcg->node_balancing_mode, mode);
+	old_mode = READ_ONCE(memcg->node_balancing_mode);
+	old_local_fault_rate = READ_ONCE(memcg->numa_local_fault_on_tiering);
+	old_counted = memcg_numa_balancing_counted(old_mode, old_local_fault_rate);
+
+	new_local_fault_rate = old_local_fault_rate;
+	if (mode != 0 && mode != NUMA_BALANCING_MEMORY_TIERING)
+		new_local_fault_rate = 0;
+
+	WRITE_ONCE(memcg->node_balancing_mode, mode);
+	if (new_local_fault_rate != old_local_fault_rate)
+		WRITE_ONCE(memcg->numa_local_fault_on_tiering,
+			   new_local_fault_rate);
+	new_counted = memcg_numa_balancing_counted(mode, new_local_fault_rate);
 	if (old_mode != mode)
 		memcg_numa_balancing_bump_policy_seq(memcg);
 	if (!(old_mode & NUMA_BALANCING_MEMORY_TIERING) &&
 	    (mode & NUMA_BALANCING_MEMORY_TIERING))
 		numa_balancing_reset_memory_tiering();
 	mem_cgroup_numa_reset_earlystop(memcg, true);
-	if (old_mode == 0 && mode > 0) {
-		atomic_inc(&numa_balancing_count);
-		sched_numa_balancing_update_state();
-	} else if (old_mode > 0 && mode == 0) {
-		atomic_dec(&numa_balancing_count);
-		sched_numa_balancing_update_state();
-	}
+	memcg_numa_balancing_update_count(old_counted, new_counted);
 
 	for_each_node_state(nid, N_MEMORY)
 		memcg_node_reset_next_check(memcg->nodeinfo[nid]);
@@ -6452,8 +6478,6 @@ static ssize_t memory_node_balancing_write(struct kernfs_open_file *of,
 		WRITE_ONCE(memcg->nodeinfo[nid]->node_force_lru_fail_streak, 0);
 	for_each_node_state(nid, N_MEMORY)
 		memcg_node_reset_reclaimd_backoff(memcg->nodeinfo[nid]);
-	if (mode != NUMA_BALANCING_MEMORY_TIERING)
-		WRITE_ONCE(memcg->numa_local_fault_on_tiering, 0);
 	return nbytes;
 }
 
@@ -6516,9 +6540,7 @@ static int memory_numa_local_fault_on_tiering_show(struct seq_file *m,
 	struct mem_cgroup *memcg = mem_cgroup_from_seq(m);
 	unsigned int rate = 0;
 
-	if (!mem_cgroup_is_root(memcg) &&
-	    READ_ONCE(memcg->node_balancing_mode) ==
-	    NUMA_BALANCING_MEMORY_TIERING)
+	if (!mem_cgroup_is_root(memcg))
 		rate = READ_ONCE(memcg->numa_local_fault_on_tiering);
 
 	seq_printf(m, "%u\n", rate);
@@ -6530,6 +6552,9 @@ static ssize_t memory_numa_local_fault_on_tiering_write(
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	unsigned int rate;
+	unsigned int old_rate;
+	int mode;
+	bool old_counted, new_counted;
 
 	buf = strstrip(buf);
 	if (kstrtouint(buf, 0, &rate))
@@ -6538,11 +6563,17 @@ static ssize_t memory_numa_local_fault_on_tiering_write(
 		return -EINVAL;
 	if (rate && mem_cgroup_is_root(memcg))
 		return -EOPNOTSUPP;
-	if (rate && READ_ONCE(memcg->node_balancing_mode) !=
-	    NUMA_BALANCING_MEMORY_TIERING)
+	mode = READ_ONCE(memcg->node_balancing_mode);
+	if (rate && mode != 0 && mode != NUMA_BALANCING_MEMORY_TIERING)
 		return -EINVAL;
 
+	old_rate = READ_ONCE(memcg->numa_local_fault_on_tiering);
+	old_counted = memcg_numa_balancing_counted(mode, old_rate);
 	WRITE_ONCE(memcg->numa_local_fault_on_tiering, rate);
+	new_counted = memcg_numa_balancing_counted(mode, rate);
+	if (old_rate != rate)
+		memcg_numa_balancing_bump_policy_seq(memcg);
+	memcg_numa_balancing_update_count(old_counted, new_counted);
 	return nbytes;
 }
 
@@ -6826,9 +6857,7 @@ static int memory_numa_migrate_state_show(struct seq_file *m, void *v)
 			u32 local_window_seq =
 				mem_cgroup_numa_local_fault_window_seq(memcg);
 
-			if (!mem_cgroup_is_root(memcg) &&
-			    READ_ONCE(memcg->node_balancing_mode) ==
-			    NUMA_BALANCING_MEMORY_TIERING)
+			if (!mem_cgroup_is_root(memcg))
 				local_rate =
 					READ_ONCE(memcg->numa_local_fault_on_tiering);
 

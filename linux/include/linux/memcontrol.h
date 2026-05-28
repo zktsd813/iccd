@@ -913,10 +913,25 @@ static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
 	mode = READ_ONCE(memcg->node_balancing_mode);
 	return mode;
 }
+
+static inline bool mem_cgroup_numa_local_fault_sampling_enabled(
+	struct mem_cgroup *memcg)
+{
+	if (!memcg || mem_cgroup_is_root(memcg))
+		return false;
+
+	return READ_ONCE(memcg->numa_local_fault_on_tiering) > 0;
+}
 #else
 static inline int mem_cgroup_numa_balancing_mode(struct mem_cgroup *memcg)
 {
 	return READ_ONCE(sysctl_numa_balancing_mode);
+}
+
+static inline bool mem_cgroup_numa_local_fault_sampling_enabled(
+	struct mem_cgroup *memcg)
+{
+	return false;
 }
 #endif
 
@@ -934,6 +949,22 @@ static inline int task_numa_balancing_mode(struct task_struct *p)
 	rcu_read_unlock();
 
 	return mode;
+}
+
+static inline bool task_numa_local_fault_sampling_enabled(struct task_struct *p)
+{
+	struct mem_cgroup *memcg;
+	bool enabled;
+
+	if (!p || !p->mm || mem_cgroup_disabled())
+		return false;
+
+	rcu_read_lock();
+	memcg = mem_cgroup_from_task(p);
+	enabled = mem_cgroup_numa_local_fault_sampling_enabled(memcg);
+	rcu_read_unlock();
+
+	return enabled;
 }
 
 static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
@@ -1472,6 +1503,11 @@ static inline bool mem_cgroup_numa_balancing_active(void)
 static inline int task_numa_balancing_mode(struct task_struct *p)
 {
 	return READ_ONCE(sysctl_numa_balancing_mode);
+}
+
+static inline bool task_numa_local_fault_sampling_enabled(struct task_struct *p)
+{
+	return false;
 }
 
 static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
