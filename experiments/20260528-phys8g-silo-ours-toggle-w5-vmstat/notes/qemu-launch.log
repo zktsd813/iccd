@@ -1,0 +1,23 @@
+QEMU launch plan
+  repo root : /Serverless/Migration-friendly
+  kernel    : /Serverless/iccd/linux-build-mt/arch/x86/boot/bzImage
+  rootfs    : /Serverless/Migration-friendly/qemu/build/ubuntu.img
+  rootfs fmt: raw
+  drive if  : virtio
+  net dev   : virtio-net-pci
+  root dev  : /dev/vda2
+  initrd    : /Serverless/Migration-friendly/scripts/kernel/kernel-artifacts/initramfs-6.18.0modified.img
+  accel     : kvm
+  cpus/mem  : 32 / 168G
+  host cpus : 0-31
+  numa n0   : cpus=0-31, mem=8G, host_nodes=0
+  numa n1   : mem=160G, host_nodes=2
+  numa mem  : policy=bind, prealloc=1
+  serial log: /Serverless/Migration-friendly/scripts/kernel/qemu-logs/silo8vm_20260528_094719.serial.log
+  qmp socket: /Serverless/Migration-friendly/scripts/kernel/qemu-logs/silo8vm_20260528_094719.qmp.sock
+  ssh fwd   : host 10065 -> guest 22
+
+Command:
+  /Serverless/Migration-friendly/qemu/build/qemu-system-x86_64 -name silo8vm -machine q35 -cpu host -smp 32 -m 168G -kernel /Serverless/iccd/linux-build-mt/arch/x86/boot/bzImage -append console=ttyS0\ root=/dev/vda2\ rw\ loglevel=7\ nokaslr -drive file=/Serverless/Migration-friendly/qemu/build/ubuntu.img\,if=virtio\,format=raw -netdev user\,id=net0\,hostfwd=tcp::10065-:22 -device virtio-net-pci\,netdev=net0 -nographic -serial file:/Serverless/Migration-friendly/scripts/kernel/qemu-logs/silo8vm_20260528_094719.serial.log -monitor stdio -qmp unix:/Serverless/Migration-friendly/scripts/kernel/qemu-logs/silo8vm_20260528_094719.qmp.sock\,server\,wait=off -object memory-backend-ram\,id=mem0\,size=8G\,host-nodes=0\,policy=bind\,prealloc=on -object memory-backend-ram\,id=mem1\,size=160G\,host-nodes=2\,policy=bind\,prealloc=on -numa node\,nodeid=0\,cpus=0-31\,memdev=mem0 -numa node\,nodeid=1\,memdev=mem1 -accel kvm -initrd /Serverless/Migration-friendly/scripts/kernel/kernel-artifacts/initramfs-6.18.0modified.img 
+QEMU 9.2.4 monitor - type 'help' for more information
+(qemu) qemu-system-x86_64: terminating on signal 15 from pid 4167226 (bash)

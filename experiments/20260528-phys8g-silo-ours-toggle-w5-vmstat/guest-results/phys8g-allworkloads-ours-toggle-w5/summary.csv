@@ -1,0 +1,2 @@
+workload,returncode,elapsed_s,read_s,avg_trial_s,took_s,trial_count,migration_off_ms,migration_on_ms,stop_reason,final_controller_state,numa_hint_faults,pgpromote_success,pgdemote_kswapd,pgdemote_direct,pgmigrate_success,trial1_s,trial2_s,trial3_s,trial4_s,trial5_s,trial6_s,trial7_s,trial8_s,trial9_s,trial10_s,trial11_s,trial12_s,trial13_s,trial14_s,trial15_s,trial16_s,trial17_s,trial18_s,trial19_s,trial20_s
+silo,0,1075,,,,0,15013;335221,25020,local_access,off,32769927,2195945,6470850,0,8964043,,,,,,,,,,,,,,,,,,,,

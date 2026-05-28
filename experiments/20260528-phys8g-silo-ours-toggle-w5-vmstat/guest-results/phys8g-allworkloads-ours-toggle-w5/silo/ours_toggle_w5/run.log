@@ -1,0 +1,8 @@
+[2026-05-28T06:50:09Z] starting controller
+[2026-05-28T06:50:09Z] running workload
+[2026-05-28T06:58:13Z] starting controller
+[2026-05-28T06:58:13Z] running workload
+[2026-05-28T07:15:22Z] done rc=0 elapsed_s=1029 outdir=/root/phys8g-allworkloads-ours-toggle-w5/silo/ours_toggle_w5
+[2026-05-28T09:47:55Z] starting controller
+[2026-05-28T09:47:55Z] running workload
+[2026-05-28T10:05:50Z] done rc=0 elapsed_s=1075 outdir=/root/phys8g-allworkloads-ours-toggle-w5/silo/ours_toggle_w5

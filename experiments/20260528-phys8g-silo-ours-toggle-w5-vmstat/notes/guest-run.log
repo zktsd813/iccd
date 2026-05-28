@@ -1,0 +1,10 @@
+Warning: Permanently added '[127.0.0.1]:10065' (ED25519) to the list of known hosts.
+[2026-05-28T09:47:54Z] start workload=silo policy=ours_toggle_w5
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T09:47:55Z] starting controller
+[2026-05-28T09:47:55Z] running workload
+[2026-05-28T10:05:50Z] done rc=0 elapsed_s=1075 outdir=/root/phys8g-allworkloads-ours-toggle-w5/silo/ours_toggle_w5
+[2026-05-28T10:05:51Z] done workload=silo rc=0
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+/root/phys8g-allworkloads-ours-toggle-w5/summary.csv
+[2026-05-28T10:05:51Z] summary=/root/phys8g-allworkloads-ours-toggle-w5/summary.csv

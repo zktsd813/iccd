@@ -41,6 +41,30 @@ class WindowStats:
     hint_faults: int = 0
 
 
+VMSTAT_KEYS = (
+    "numa_hint_faults",
+    "numa_hint_faults_local",
+    "numa_pages_migrated",
+    "pgmigrate_success",
+    "pgpromote_candidate",
+    "pgpromote_success",
+    "pgdemote_kswapd",
+    "pgdemote_direct",
+)
+
+
+@dataclass
+class VmstatStats:
+    numa_hint_faults: int = 0
+    numa_hint_faults_local: int = 0
+    numa_pages_migrated: int = 0
+    pgmigrate_success: int = 0
+    pgpromote_candidate: int = 0
+    pgpromote_success: int = 0
+    pgdemote_kswapd: int = 0
+    pgdemote_direct: int = 0
+
+
 class CgroupKnobs:
     def __init__(self, cgroup: Path):
         self.cgroup = cgroup
@@ -149,6 +173,32 @@ def read_bucket(knobs: CgroupKnobs, prefix: str) -> Optional[WindowStats]:
     )
 
 
+def read_vmstat() -> VmstatStats:
+    values = {key: 0 for key in VMSTAT_KEYS}
+    try:
+        with Path("/proc/vmstat").open(encoding="ascii") as fp:
+            for line in fp:
+                fields = line.split()
+                if len(fields) != 2 or fields[0] not in values:
+                    continue
+                try:
+                    values[fields[0]] = int(fields[1])
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return VmstatStats(**values)
+
+
+def diff_vmstat(cur: VmstatStats, base: VmstatStats) -> VmstatStats:
+    return VmstatStats(
+        **{
+            key: max(0, getattr(cur, key) - getattr(base, key))
+            for key in VMSTAT_KEYS
+        }
+    )
+
+
 def sleep_interruptible(seconds: float, stop_file: Optional[Path], stop_flag) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -196,6 +246,7 @@ def remote_ratio_pct(stats: WindowStats, sample_percent: float) -> float:
 
 def write_event(writer: csv.DictWriter, event: str, started_ms: int, window: int,
                 window_seq: int, args, stats: WindowStats, remote_stats: WindowStats,
+                vmstat_stats: VmstatStats,
                 local_consecutive: int,
                 remote_consecutive: int, node_balancing: str, sample_percent: float,
                 stop_reason: str = "", reenable_consecutive: int = 0,
@@ -227,6 +278,14 @@ def write_event(writer: csv.DictWriter, event: str, started_ms: int, window: int
             "access_pct": f"{access_pct:.2f}",
             "fast_pct": f"{fast_pct:.2f}",
             "remote_ratio_pct": f"{remote_pct:.2f}",
+            "vmstat_numa_hint_faults_delta": vmstat_stats.numa_hint_faults,
+            "vmstat_numa_hint_faults_local_delta": vmstat_stats.numa_hint_faults_local,
+            "vmstat_numa_pages_migrated_delta": vmstat_stats.numa_pages_migrated,
+            "vmstat_pgmigrate_success_delta": vmstat_stats.pgmigrate_success,
+            "vmstat_pgpromote_candidate_delta": vmstat_stats.pgpromote_candidate,
+            "vmstat_pgpromote_success_delta": vmstat_stats.pgpromote_success,
+            "vmstat_pgdemote_kswapd_delta": vmstat_stats.pgdemote_kswapd,
+            "vmstat_pgdemote_direct_delta": vmstat_stats.pgdemote_direct,
             "local_consecutive": local_consecutive,
             "remote_consecutive": remote_consecutive,
             "reenable_consecutive": reenable_consecutive,
@@ -378,6 +437,14 @@ def run_controller(args: argparse.Namespace) -> int:
         "access_pct",
         "fast_pct",
         "remote_ratio_pct",
+        "vmstat_numa_hint_faults_delta",
+        "vmstat_numa_hint_faults_local_delta",
+        "vmstat_numa_pages_migrated_delta",
+        "vmstat_pgmigrate_success_delta",
+        "vmstat_pgpromote_candidate_delta",
+        "vmstat_pgpromote_success_delta",
+        "vmstat_pgdemote_kswapd_delta",
+        "vmstat_pgdemote_direct_delta",
         "local_consecutive",
         "remote_consecutive",
         "reenable_consecutive",
@@ -408,6 +475,7 @@ def run_controller(args: argparse.Namespace) -> int:
             args,
             WindowStats(),
             WindowStats(),
+            VmstatStats(),
             0,
             0,
             knobs.node_balancing(),
@@ -434,10 +502,13 @@ def run_controller(args: argparse.Namespace) -> int:
                 window_seq = 0
 
             base = read_totals(knobs)
+            vmstat_base = read_vmstat()
             if not sleep_interruptible(args.window_sec, args.stop_file, stop_flag):
                 break
             cur = read_totals(knobs)
+            vmstat_cur = read_vmstat()
             raw_stats = diff_stats(cur, base)
+            vmstat_stats = diff_vmstat(vmstat_cur, vmstat_base)
             stats = raw_stats
 
             if not args.no_window_buckets:
@@ -482,6 +553,7 @@ def run_controller(args: argparse.Namespace) -> int:
                 args,
                 stats,
                 raw_stats,
+                vmstat_stats,
                 local_consecutive,
                 remote_consecutive,
                 node_balancing,
@@ -520,6 +592,7 @@ def run_controller(args: argparse.Namespace) -> int:
                     args,
                     stats,
                     raw_stats,
+                    vmstat_stats,
                     local_consecutive,
                     remote_consecutive,
                     node_balancing,
@@ -559,6 +632,7 @@ def run_controller(args: argparse.Namespace) -> int:
                     args,
                     stats,
                     raw_stats,
+                    vmstat_stats,
                     local_consecutive,
                     remote_consecutive,
                     node_balancing,
@@ -581,6 +655,7 @@ def run_controller(args: argparse.Namespace) -> int:
             args,
             WindowStats(),
             WindowStats(),
+            VmstatStats(),
             local_consecutive,
             remote_consecutive,
             knobs.node_balancing(),
