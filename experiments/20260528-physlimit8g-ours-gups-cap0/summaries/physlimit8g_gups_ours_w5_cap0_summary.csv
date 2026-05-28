@@ -1,0 +1,2 @@
+workload,cap,policy,returncode,elapsed_s,migration_off_s,stop_reason,off_baseline_s,on_baseline_s,ours_vs_off,ours_vs_on,numa_hint_faults,pgpromote_success,pgdemote_total,pgmigrate_success
+gups,physical_8G,ours_w5_cap0,0,645,45.022,local_access,656.20000,1223.32000,1.01736,1.89662,15567673,1189723,2343360,3666756

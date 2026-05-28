@@ -1,0 +1,236 @@
+Database Benchmark:
+  pid: 3283
+settings:
+  par-loading : 0
+  pin-cpus    : 0
+  slow-exit   : 0
+  retry-txns  : 0
+  backoff-txns: 0
+  bench       : ycsb
+  scale       : 550000
+  num-cpus    : 32
+  num-threads : 32
+  db-type     : ndb-proto2
+  basedir     : /root
+  txn-flags   : 0
+  ops/worker  : 200000000
+  var-encode  : yes
+  allocator   : jemalloc
+  numa-memory : disabled
+  logfiles : []
+  assignments : []
+  disable-gc : 0
+  disable-snapshots : 0
+  stats-server-sockfile: 
+system properties:
+  btree_internal_node_size: 264
+  btree_leaf_node_size    : 312
+  tuple_prefetch          : no
+  btree_node_prefetch     : yes
+ycsb settings:
+  workload_mix: [100, 0, 0, 0]
+[INFO] finished loading USERTABLE range [kstart=0, kend=17187500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=17187500, kend=34375000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=34375000, kend=51562500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=51562500, kend=68750000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=68750000, kend=85937500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=85937500, kend=103125000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=103125000, kend=120312500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=120312500, kend=137500000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=137500000, kend=154687500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=154687500, kend=171875000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=171875000, kend=189062500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=189062500, kend=206250000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=206250000, kend=223437500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=223437500, kend=240625000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=240625000, kend=257812500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=257812500, kend=275000000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=275000000, kend=292187500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=292187500, kend=309375000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=309375000, kend=326562500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=326562500, kend=343750000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=343750000, kend=360937500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=360937500, kend=378125000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=378125000, kend=395312500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=395312500, kend=412500000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=412500000, kend=429687500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=429687500, kend=446875000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=446875000, kend=464062500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=464062500, kend=481250000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=481250000, kend=498437500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=498437500, kend=515625000) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=515625000, kend=532812500) - nkeys: 17187500
+[INFO] finished loading USERTABLE range [kstart=532812500, kend=550000000) - nkeys: 17187500
+timed region dataloading took 123694 ms
+DB size: 81501.6 MB
+wait_an_epoch(): consistent reads happening in e-1: 119
+[0, 0, 0] txns persisted in loading phase
+table USERTABLE size 550000000
+starting benchmark...
+time: 5 throughput: 1.20435e+07 ops/sec
+time: 10 throughput: 1.15234e+07 ops/sec
+time: 15 throughput: 1.18186e+07 ops/sec
+time: 20 throughput: 1.2459e+07 ops/sec
+time: 25 throughput: 8.85947e+06 ops/sec
+time: 30 throughput: 8.85634e+06 ops/sec
+time: 35 throughput: 8.84866e+06 ops/sec
+time: 40 throughput: 8.84602e+06 ops/sec
+time: 45 throughput: 8.84819e+06 ops/sec
+time: 50 throughput: 8.90437e+06 ops/sec
+time: 55 throughput: 8.85952e+06 ops/sec
+time: 60 throughput: 8.85396e+06 ops/sec
+time: 65 throughput: 8.85207e+06 ops/sec
+time: 70 throughput: 8.8498e+06 ops/sec
+time: 75 throughput: 8.85176e+06 ops/sec
+time: 80 throughput: 8.8504e+06 ops/sec
+time: 85 throughput: 8.85534e+06 ops/sec
+time: 90 throughput: 8.85729e+06 ops/sec
+time: 95 throughput: 8.85324e+06 ops/sec
+time: 100 throughput: 8.84757e+06 ops/sec
+time: 105 throughput: 8.84588e+06 ops/sec
+time: 110 throughput: 8.84447e+06 ops/sec
+time: 115 throughput: 8.85135e+06 ops/sec
+time: 120 throughput: 8.85127e+06 ops/sec
+time: 125 throughput: 8.85841e+06 ops/sec
+time: 130 throughput: 8.84946e+06 ops/sec
+time: 135 throughput: 8.84541e+06 ops/sec
+time: 140 throughput: 8.85264e+06 ops/sec
+time: 145 throughput: 8.84943e+06 ops/sec
+time: 150 throughput: 8.85023e+06 ops/sec
+time: 155 throughput: 8.85027e+06 ops/sec
+time: 160 throughput: 8.86364e+06 ops/sec
+time: 165 throughput: 8.85663e+06 ops/sec
+time: 170 throughput: 8.86248e+06 ops/sec
+time: 175 throughput: 8.85379e+06 ops/sec
+time: 180 throughput: 8.84958e+06 ops/sec
+time: 185 throughput: 8.85213e+06 ops/sec
+time: 190 throughput: 8.85396e+06 ops/sec
+time: 195 throughput: 8.86107e+06 ops/sec
+time: 200 throughput: 8.85238e+06 ops/sec
+time: 205 throughput: 8.84881e+06 ops/sec
+time: 210 throughput: 8.84779e+06 ops/sec
+time: 215 throughput: 8.84542e+06 ops/sec
+time: 220 throughput: 8.84652e+06 ops/sec
+time: 225 throughput: 8.85094e+06 ops/sec
+time: 230 throughput: 8.85946e+06 ops/sec
+time: 235 throughput: 8.85118e+06 ops/sec
+time: 240 throughput: 8.84734e+06 ops/sec
+time: 245 throughput: 8.85289e+06 ops/sec
+time: 250 throughput: 8.84982e+06 ops/sec
+time: 255 throughput: 8.85056e+06 ops/sec
+time: 260 throughput: 8.85242e+06 ops/sec
+time: 265 throughput: 8.85725e+06 ops/sec
+time: 270 throughput: 8.85345e+06 ops/sec
+time: 275 throughput: 8.84753e+06 ops/sec
+time: 280 throughput: 8.84468e+06 ops/sec
+time: 285 throughput: 8.84844e+06 ops/sec
+time: 290 throughput: 8.84966e+06 ops/sec
+time: 295 throughput: 9.11642e+06 ops/sec
+time: 300 throughput: 8.86148e+06 ops/sec
+time: 305 throughput: 8.85415e+06 ops/sec
+time: 310 throughput: 8.84199e+06 ops/sec
+time: 315 throughput: 8.84474e+06 ops/sec
+time: 320 throughput: 8.84757e+06 ops/sec
+time: 325 throughput: 8.85558e+06 ops/sec
+time: 330 throughput: 8.85127e+06 ops/sec
+time: 335 throughput: 8.85162e+06 ops/sec
+time: 340 throughput: 8.84981e+06 ops/sec
+time: 345 throughput: 8.84566e+06 ops/sec
+time: 350 throughput: 8.84932e+06 ops/sec
+time: 355 throughput: 8.84862e+06 ops/sec
+time: 360 throughput: 8.85989e+06 ops/sec
+time: 365 throughput: 8.84759e+06 ops/sec
+time: 370 throughput: 8.85804e+06 ops/sec
+time: 375 throughput: 8.85472e+06 ops/sec
+time: 380 throughput: 8.84691e+06 ops/sec
+time: 385 throughput: 8.84594e+06 ops/sec
+time: 390 throughput: 8.84884e+06 ops/sec
+time: 395 throughput: 8.84965e+06 ops/sec
+time: 400 throughput: 8.85009e+06 ops/sec
+time: 405 throughput: 8.8623e+06 ops/sec
+time: 410 throughput: 8.85819e+06 ops/sec
+time: 415 throughput: 8.84618e+06 ops/sec
+time: 420 throughput: 8.84257e+06 ops/sec
+time: 425 throughput: 8.84491e+06 ops/sec
+time: 430 throughput: 8.84836e+06 ops/sec
+time: 435 throughput: 8.84832e+06 ops/sec
+time: 440 throughput: 8.98916e+06 ops/sec
+time: 445 throughput: 8.8522e+06 ops/sec
+time: 450 throughput: 8.8459e+06 ops/sec
+time: 455 throughput: 8.84743e+06 ops/sec
+time: 460 throughput: 8.84816e+06 ops/sec
+time: 465 throughput: 8.84958e+06 ops/sec
+time: 470 throughput: 8.84897e+06 ops/sec
+time: 475 throughput: 8.85011e+06 ops/sec
+time: 480 throughput: 8.85574e+06 ops/sec
+time: 485 throughput: 8.84521e+06 ops/sec
+time: 490 throughput: 8.84884e+06 ops/sec
+time: 495 throughput: 8.84641e+06 ops/sec
+time: 500 throughput: 8.84381e+06 ops/sec
+time: 505 throughput: 8.85384e+06 ops/sec
+time: 510 throughput: 8.85073e+06 ops/sec
+time: 515 throughput: 8.85994e+06 ops/sec
+time: 520 throughput: 8.84624e+06 ops/sec
+time: 525 throughput: 8.84434e+06 ops/sec
+time: 530 throughput: 8.84701e+06 ops/sec
+time: 535 throughput: 8.84409e+06 ops/sec
+time: 540 throughput: 8.84417e+06 ops/sec
+time: 545 throughput: 8.85126e+06 ops/sec
+time: 550 throughput: 8.85559e+06 ops/sec
+time: 555 throughput: 8.84781e+06 ops/sec
+time: 560 throughput: 8.84873e+06 ops/sec
+time: 565 throughput: 8.84389e+06 ops/sec
+time: 570 throughput: 8.84589e+06 ops/sec
+time: 575 throughput: 8.84714e+06 ops/sec
+time: 580 throughput: 8.85016e+06 ops/sec
+time: 585 throughput: 8.85887e+06 ops/sec
+time: 590 throughput: 8.84395e+06 ops/sec
+time: 595 throughput: 8.84738e+06 ops/sec
+time: 600 throughput: 8.84456e+06 ops/sec
+time: 605 throughput: 8.99133e+06 ops/sec
+time: 610 throughput: 8.84989e+06 ops/sec
+time: 615 throughput: 8.85133e+06 ops/sec
+time: 620 throughput: 8.86267e+06 ops/sec
+time: 625 throughput: 8.84963e+06 ops/sec
+time: 630 throughput: 8.84777e+06 ops/sec
+time: 635 throughput: 8.85152e+06 ops/sec
+time: 640 throughput: 8.84646e+06 ops/sec
+time: 645 throughput: 8.84824e+06 ops/sec
+time: 650 throughput: 8.84863e+06 ops/sec
+time: 655 throughput: 8.85704e+06 ops/sec
+time: 660 throughput: 8.8497e+06 ops/sec
+time: 665 throughput: 8.84525e+06 ops/sec
+time: 670 throughput: 8.84879e+06 ops/sec
+time: 675 throughput: 8.85081e+06 ops/sec
+time: 680 throughput: 8.84684e+06 ops/sec
+time: 685 throughput: 8.84842e+06 ops/sec
+time: 690 throughput: 8.85394e+06 ops/sec
+time: 695 throughput: 8.84135e+06 ops/sec
+time: 700 throughput: 8.84273e+06 ops/sec
+time: 705 throughput: 8.83499e+06 ops/sec
+--- table statistics ---
+table USERTABLE size 550000000 (+0 records)
+--- benchmark statistics ---
+runtime: 705.069 sec
+memory delta: -0.949219 MB
+memory delta rate: -0.00134628 MB/sec
+logical memory delta: 0 MB
+logical memory delta rate: 0 MB/sec
+agg_nosync_throughput: 8.94199e+06 ops/sec
+avg_nosync_per_core_throughput: 279437 ops/sec/core
+agg_throughput: 8.94199e+06 ops/sec
+avg_per_core_throughput: 279437 ops/sec/core
+agg_persist_throughput: 8.94199e+06 ops/sec
+avg_per_core_persist_throughput: 279437 ops/sec/core
+avg_latency: 0.00354291 ms
+avg_persist_latency: 0 ms
+agg_abort_rate: 0 aborts/sec
+avg_per_core_abort_rate: 0 aborts/sec/core
+txn breakdown: [[Read, 6304714668]]
+--- system counters (for benchmark) ---
+--- perf counters (if enabled, for benchmark) ---
+--- allocator stats ---
+[allocator] ncpus=0
+---------------------------------------
+dumping heap profile...
+printing jemalloc stats...

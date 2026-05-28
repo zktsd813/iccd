@@ -1,0 +1,3 @@
+[2026-05-28T06:05:03Z] starting controller
+[2026-05-28T06:05:03Z] running workload
+[2026-05-28T06:15:54Z] done rc=0 elapsed_s=651 outdir=/root/physlimit-gups-ours-toggle-w5/8g/toggle_w5

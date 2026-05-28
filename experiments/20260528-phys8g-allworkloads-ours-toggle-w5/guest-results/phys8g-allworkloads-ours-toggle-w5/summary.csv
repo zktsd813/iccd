@@ -1,0 +1,5 @@
+workload,returncode,elapsed_s,read_s,avg_trial_s,took_s,trial_count,migration_off_ms,migration_on_ms,stop_reason,final_controller_state,numa_hint_faults,pgpromote_success,pgdemote_kswapd,pgdemote_direct,pgmigrate_success,trial1_s,trial2_s,trial3_s,trial4_s,trial5_s,trial6_s,trial7_s,trial8_s,trial9_s,trial10_s,trial11_s,trial12_s,trial13_s,trial14_s,trial15_s,trial16_s,trial17_s,trial18_s,trial19_s,trial20_s
+bc,0,428,25.58096,50.06641,,8,70025,,local_access,off,13651318,1287263,2150203,0,3523924,54.28303,51.62719,43.26644,51.90187,50.45344,51.24709,43.63103,54.12121,,,,,,,,,,,,
+liblinear,,,,,,0,,,,on,0,0,0,0,0,,,,,,,,,,,,,,,,,,,,
+pr,0,234,29.92487,25.32617,,8,40019,,local_access,off,7980616,245557,1587843,0,1840488,23.35172,19.35976,30.69842,30.30358,30.44137,31.03562,18.69349,18.72542,,,,,,,,,,,,
+silo,0,1029,,,,0,15009;330163,35020,local_access,off,33667736,2502786,6805925,0,9384354,,,,,,,,,,,,,,,,,,,,

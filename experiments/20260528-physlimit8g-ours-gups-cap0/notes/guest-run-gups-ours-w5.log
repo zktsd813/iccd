@@ -1,0 +1,5 @@
+Warning: Permanently added '[127.0.0.1]:10043' (ED25519) to the list of known hosts.
+/root/scripts/run_local_util_adapt_experiment.sh: line 446: printf: write error: Invalid argument
+[2026-05-28T04:25:45Z] starting controller
+[2026-05-28T04:25:45Z] running workload
+[2026-05-28T04:36:30Z] done rc=0 elapsed_s=645 outdir=/root/physlimit8g-ours-gups-cap0/gups/ours_w5
