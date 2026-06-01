@@ -2376,10 +2376,6 @@ static struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
 	struct page *page;
 
 	nodemask = policy_nodemask(gfp, pol, ilx, &nid);
-	nid = mem_cgroup_preferred_node(nid,
-					nodemask ? nodemask :
-					&cpuset_current_mems_allowed,
-					1UL << order);
 
 	if (pol->mode == MPOL_PREFERRED_MANY)
 		return alloc_pages_preferred_many(gfp, order, nid, nodemask);

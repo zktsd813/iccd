@@ -1511,16 +1511,7 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
 #ifdef CONFIG_NUMA_BALANCING_MT
 static bool task_numa_fast_scan(struct task_struct *p)
 {
-	struct mem_cgroup *memcg;
-
-	if (!p || mem_cgroup_disabled())
-		return false;
-
-	memcg = mem_cgroup_from_task(p);
-	if (!memcg)
-		return false;
-
-	return READ_ONCE(memcg->numa_balancing_fast_scan);
+	return false;
 }
 
 static unsigned int task_numa_scan_delay(struct task_struct *p)
@@ -1536,16 +1527,7 @@ static unsigned int task_numa_vma_pid_reset_period(struct task_struct *p)
 
 static unsigned int task_numa_hot_threshold(struct task_struct *p)
 {
-	struct mem_cgroup *memcg;
-
-	if (!p || mem_cgroup_disabled())
-		return 0;
-
-	memcg = mem_cgroup_from_task(p);
-	if (!memcg)
-		return 0;
-
-	return READ_ONCE(memcg->numa_balancing_hot_threshold_ms);
+	return 0;
 }
 #else
 static inline bool task_numa_fast_scan(struct task_struct *p)
@@ -1982,35 +1964,25 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 	if (!node_state(dst_nid, N_MEMORY))
 		return false;
 
-	if (!task_numa_migration_running(p) ||
-	    !folio_numa_migration_running(folio))
-		return false;
-
 	/*
 	 * The pages in slow memory node should be migrated according
 	 * to hot/cold instead of private/shared.
 	 */
 	if (folio_use_access_time(folio)) {
 		struct pglist_data *pgdat;
-		struct mem_cgroup *memcg;
 		unsigned long rate_limit;
 		unsigned int latency, th, def_th, hot_th;
 		bool reuse_time_enabled;
-		int memcg_wmark_ok;
 		long nr = folio_nr_pages(folio);
 
 		pgdat = NODE_DATA(dst_nid);
-		memcg = folio_memcg(folio);
 		reuse_time_enabled = sched_reuse_time_enabled();
 		if (reuse_time_enabled) {
 			latency = numa_hint_fault_latency(folio);
 			sched_reuse_time_record(p, folio, src_nid, latency);
 		}
 
-		memcg_wmark_ok =
-			mem_cgroup_node_promotion_wmark_ok(memcg, dst_nid, nr);
-		if (memcg_wmark_ok > 0 ||
-		    (memcg_wmark_ok < 0 && pgdat_free_space_enough(pgdat))) {
+		if (pgdat_free_space_enough(pgdat)) {
 			/* workload changed, reset hot threshold */
 			pgdat->nbp_threshold = 0;
 			mod_node_page_state(pgdat, PGPROMOTE_CANDIDATE_NRL, nr);
@@ -3256,8 +3228,7 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 		return;
 
 #ifdef CONFIG_NUMA_BALANCING_MT
-	if (task_numa_balancing_mode(p) <= 0 ||
-	    !task_numa_migration_running(p))
+	if (task_numa_balancing_mode(p) <= 0)
 		return;
 #else
 	if (!static_branch_likely(&sched_numa_balancing))
@@ -3385,8 +3356,7 @@ static bool vma_is_accessed(struct mm_struct *mm, struct vm_area_struct *vma)
 static bool task_numa_balancing_enabled(struct task_struct *p)
 {
 	return (task_numa_balancing_mode(p) > 0 ||
-		task_numa_local_fault_sampling_enabled(p)) &&
-	       task_numa_migration_running(p);
+		task_numa_local_fault_sampling_enabled(p));
 }
 
 static void task_numa_sync_scan_policy(struct task_struct *p)
@@ -3395,6 +3365,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	unsigned long policy_seq;
 	unsigned long next_scan;
 	unsigned int scan_min, scan_max;
+	unsigned int local_scan_period;
 	bool fast_scan, stale, same_policy, period_ok;
 	bool mode_started, fast_started, pull_next_scan, scan_enabled;
 	int mode, old_mode;
@@ -3411,6 +3382,7 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 
 	scan_min = task_scan_min(p);
 	scan_max = task_scan_max(p);
+	local_scan_period = task_numa_local_fault_scan_period_ms(p);
 	same_policy = p->numa_scan_policy_seq == policy_seq &&
 		      p->numa_scan_policy_mode == mode &&
 		      p->numa_scan_policy_fast_scan == fast_scan;
@@ -3441,6 +3413,8 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	} else if (p->numa_scan_period > scan_max) {
 		p->numa_scan_period = scan_max;
 	}
+	if (local_scan_period && p->numa_scan_period > local_scan_period)
+		p->numa_scan_period = local_scan_period;
 
 	pull_next_scan = scan_enabled && (mode_started || fast_started);
 	if (!pull_next_scan)
@@ -3526,6 +3500,23 @@ static void task_numa_work(struct callback_head *work)
 	 * the next time around.
 	 */
 	p->node_stamp += 2 * TICK_NSEC;
+
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (task_numa_local_fault_sampling_enabled(p)) {
+		unsigned int local_scan_mb =
+			task_numa_local_fault_scan_size_mb(p);
+		int local_nid = numa_node_id();
+
+		if (local_scan_mb && !node_is_promotion_source(local_nid))
+			task_numa_scan_local_faults(
+				p, local_nid,
+				(unsigned long)local_scan_mb <<
+					(20 - PAGE_SHIFT));
+	}
+
+	if (task_numa_balancing_mode(p) <= 0)
+		goto out_account_scan_cost;
+#endif
 
 	pages = sysctl_numa_balancing_scan_size;
 	pages <<= 20 - PAGE_SHIFT; /* MB in pages */
@@ -3709,6 +3700,7 @@ out:
 		reset_ptenuma_scan(p);
 	mmap_read_unlock(mm);
 
+out_account_scan_cost:
 	/*
 	 * Make sure tasks use at least 32x as much time to run other code
 	 * than they used here, to limit NUMA PTE scanning overhead to 3% max.

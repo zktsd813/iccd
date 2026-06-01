@@ -11,11 +11,22 @@ variables instead.
 git submodule update --init VM
 ```
 
+Before running current ICCD experiments, read:
+
+```text
+docs/iccd-experiment-protocol-20260601.md
+```
+
+Current performance runs should use `SLOW_MEMORY_MODE=host-cxl`, which binds the
+guest slow node to the real host CXL NUMA node and exposes HMAT metadata. The
+`qemu-cxl` mode is for CXL Type3 topology/driver validation, not throughput or
+latency measurements.
+
 ## Files
 
-- `run_ours_experiment.sh`: one workload execution wrapper. It creates a
-  cgroup for process containment, applies global NUMA/demotion/local-fault
-  knobs, runs `off`, `on`, or `ours`, and writes logs/counters.
+- `run_ours_experiment.sh`: one workload execution wrapper. Current ICCD
+  global experiments should rely on global NUMA/demotion/local-fault knobs, not
+  memcg NUMA controls.
 - `local_util_adapt_controller.py`: userspace controller for `ours`. It reads
   local-fault stats and toggles global NUMA balancing when the configured local
   access condition is met.

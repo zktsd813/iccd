@@ -2,18 +2,16 @@
 /*
  * Debugfs reuse-time histogram for NUMA promotion candidates.
  *
- * The recorder is intentionally target-cgroup scoped.  It does not record
- * anything until a target memory cgroup and source NUMA node mask are set.
+ * The recorder is intentionally global. It records promotion-candidate reuse
+ * times for the configured source NUMA node mask.
  */
 #include <linux/bitops.h>
-#include <linux/cgroup.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/jiffies.h>
 #include <linux/jump_label.h>
 #include <linux/kernel.h>
-#include <linux/memcontrol.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -35,11 +33,9 @@
 
 struct reuse_time_config {
 	struct rcu_head rcu;
-	struct mem_cgroup *target_memcg;
 	nodemask_t source_nids;
 	char source_nids_param[RT_SOURCE_NIDS_MAX];
 	bool enabled;
-	bool match_descendants;
 };
 
 struct reuse_time_cpu_stats {
@@ -48,8 +44,6 @@ struct reuse_time_cpu_stats {
 	u64 recorded;
 	u64 ignored_disabled;
 	u64 ignored_null;
-	u64 ignored_no_target;
-	u64 ignored_cgroup;
 	u64 ignored_no_balancing;
 	u64 ignored_untracked_node;
 };
@@ -63,8 +57,7 @@ static bool reuse_time_key_enabled;
 
 static bool reuse_time_config_active(const struct reuse_time_config *config)
 {
-	return config && config->enabled && config->target_memcg &&
-		!nodes_empty(config->source_nids);
+	return config && config->enabled && !nodes_empty(config->source_nids);
 }
 
 static void reuse_time_update_static_key_locked(const struct reuse_time_config *config)
@@ -87,8 +80,6 @@ static void reuse_time_put_config(struct reuse_time_config *config)
 	if (!config)
 		return;
 
-	if (config->target_memcg)
-		mem_cgroup_put(config->target_memcg);
 	kfree(config);
 }
 
@@ -117,7 +108,7 @@ static void reuse_time_put_old_config(struct reuse_time_config *old_config)
 		call_rcu(&old_config->rcu, reuse_time_free_config_rcu);
 }
 
-static struct reuse_time_config *reuse_time_clone_config_locked(bool preserve_target)
+static struct reuse_time_config *reuse_time_clone_config_locked(void)
 {
 	struct reuse_time_config *old_config;
 	struct reuse_time_config *new_config;
@@ -131,13 +122,6 @@ static struct reuse_time_config *reuse_time_clone_config_locked(bool preserve_ta
 	if (old_config) {
 		*new_config = *old_config;
 		memset(&new_config->rcu, 0, sizeof(new_config->rcu));
-		if (!preserve_target) {
-			new_config->target_memcg = NULL;
-		} else if (new_config->target_memcg &&
-		    !mem_cgroup_tryget(new_config->target_memcg)) {
-			kfree(new_config);
-			return NULL;
-		}
 	} else {
 		new_config->enabled = true;
 		nodes_clear(new_config->source_nids);
@@ -157,17 +141,8 @@ static void reuse_time_snapshot_config(struct reuse_time_config *snapshot)
 	if (config) {
 		*snapshot = *config;
 		memset(&snapshot->rcu, 0, sizeof(snapshot->rcu));
-		if (snapshot->target_memcg &&
-		    !mem_cgroup_tryget(snapshot->target_memcg))
-			snapshot->target_memcg = NULL;
 	}
 	rcu_read_unlock();
-}
-
-static void reuse_time_put_snapshot(struct reuse_time_config *snapshot)
-{
-	if (snapshot->target_memcg)
-		mem_cgroup_put(snapshot->target_memcg);
 }
 
 static void reuse_time_reset_stats(void)
@@ -189,27 +164,6 @@ static bool reuse_time_node_tracked(const struct reuse_time_config *config,
 		return false;
 
 	return node_isset(nid, config->source_nids);
-}
-
-static bool reuse_time_memcg_matches_target(const struct reuse_time_config *config,
-					    struct mem_cgroup *memcg)
-{
-	if (!memcg)
-		return false;
-
-	if (config->match_descendants)
-		return mem_cgroup_is_descendant(memcg, config->target_memcg);
-
-	return memcg == config->target_memcg;
-}
-
-static bool reuse_time_task_matches_target(const struct reuse_time_config *config,
-					   struct task_struct *task)
-{
-	if (!config->target_memcg)
-		return false;
-
-	return reuse_time_memcg_matches_target(config, mem_cgroup_from_task(task));
 }
 
 static u32 reuse_time_quantum_ms(void)
@@ -261,16 +215,6 @@ void sched_reuse_time_record(struct task_struct *p, struct folio *folio,
 
 	if (!p || !folio) {
 		stats->ignored_null++;
-		goto out;
-	}
-
-	if (!config->target_memcg) {
-		stats->ignored_no_target++;
-		goto out;
-	}
-
-	if (!reuse_time_task_matches_target(config, p)) {
-		stats->ignored_cgroup++;
 		goto out;
 	}
 
@@ -388,34 +332,6 @@ static const struct file_operations reuse_time_hist_fops = {
 	.release = single_release,
 };
 
-static void reuse_time_print_target(struct seq_file *m,
-				    const struct reuse_time_config *config)
-{
-	char *path;
-
-	if (!config->target_memcg) {
-		seq_puts(m, "target_cgroup_id 0\n");
-		seq_puts(m, "target_cgroup_path <unset>\n");
-		return;
-	}
-
-	seq_printf(m, "target_cgroup_id %llu\n",
-		   cgroup_id(config->target_memcg->css.cgroup));
-
-	path = kmalloc(PATH_MAX, GFP_KERNEL);
-	if (!path) {
-		seq_puts(m, "target_cgroup_path <nomem>\n");
-		return;
-	}
-
-	if (cgroup_path(config->target_memcg->css.cgroup, path, PATH_MAX) >= 0)
-		seq_printf(m, "target_cgroup_path %s\n", path);
-	else
-		seq_puts(m, "target_cgroup_path <error>\n");
-
-	kfree(path);
-}
-
 static int reuse_time_stats_show(struct seq_file *m, void *v)
 {
 	struct reuse_time_config snapshot;
@@ -430,9 +346,6 @@ static int reuse_time_stats_show(struct seq_file *m, void *v)
 		   snapshot.source_nids_param : "<unset>");
 	seq_printf(m, "source_nids_mask %*pbl\n",
 		   nodemask_pr_args(&snapshot.source_nids));
-	seq_printf(m, "match_descendants %u\n",
-		   snapshot.match_descendants ? 1 : 0);
-	reuse_time_print_target(m, &snapshot);
 	seq_printf(m, "time_quantum_ms %u\n", reuse_time_quantum_ms());
 	seq_printf(m, "total_calls %llu\n",
 		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
@@ -446,12 +359,6 @@ static int reuse_time_stats_show(struct seq_file *m, void *v)
 	seq_printf(m, "ignored_null %llu\n",
 		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
 						 ignored_null)));
-	seq_printf(m, "ignored_no_target %llu\n",
-		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
-						 ignored_no_target)));
-	seq_printf(m, "ignored_cgroup %llu\n",
-		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
-						 ignored_cgroup)));
 	seq_printf(m, "ignored_no_balancing %llu\n",
 		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
 						 ignored_no_balancing)));
@@ -459,7 +366,6 @@ static int reuse_time_stats_show(struct seq_file *m, void *v)
 		   reuse_time_sum_field(offsetof(struct reuse_time_cpu_stats,
 						 ignored_untracked_node)));
 
-	reuse_time_put_snapshot(&snapshot);
 	return 0;
 }
 
@@ -528,7 +434,7 @@ static ssize_t reuse_time_enable_write(struct file *file,
 		return ret;
 
 	mutex_lock(&reuse_time_config_lock);
-	new_config = reuse_time_clone_config_locked(true);
+	new_config = reuse_time_clone_config_locked();
 	if (!new_config)
 		goto nomem_unlock;
 
@@ -548,59 +454,6 @@ static const struct file_operations reuse_time_enable_fops = {
 	.owner = THIS_MODULE,
 	.read = reuse_time_enable_read,
 	.write = reuse_time_enable_write,
-	.llseek = default_llseek,
-};
-
-static ssize_t reuse_time_match_descendants_read(struct file *file,
-						 char __user *buf,
-						 size_t count, loff_t *ppos)
-{
-	const struct reuse_time_config *config;
-	bool match = false;
-
-	rcu_read_lock();
-	config = rcu_dereference(reuse_time_current_config);
-	if (config)
-		match = config->match_descendants;
-	rcu_read_unlock();
-
-	return reuse_time_bool_read(match, buf, count, ppos);
-}
-
-static ssize_t reuse_time_match_descendants_write(struct file *file,
-						  const char __user *ubuf,
-						  size_t count, loff_t *ppos)
-{
-	struct reuse_time_config *new_config;
-	struct reuse_time_config *old_config;
-	bool match;
-	int ret;
-
-	ret = kstrtobool_from_user(ubuf, count, &match);
-	if (ret)
-		return ret;
-
-	mutex_lock(&reuse_time_config_lock);
-	new_config = reuse_time_clone_config_locked(true);
-	if (!new_config)
-		goto nomem_unlock;
-
-	new_config->match_descendants = match;
-	old_config = reuse_time_publish_config_locked(new_config);
-	reuse_time_update_static_key_locked(new_config);
-	mutex_unlock(&reuse_time_config_lock);
-	reuse_time_put_old_config(old_config);
-	return count;
-
-nomem_unlock:
-	mutex_unlock(&reuse_time_config_lock);
-	return -ENOMEM;
-}
-
-static const struct file_operations reuse_time_match_descendants_fops = {
-	.owner = THIS_MODULE,
-	.read = reuse_time_match_descendants_read,
-	.write = reuse_time_match_descendants_write,
 	.llseek = default_llseek,
 };
 
@@ -652,7 +505,7 @@ static ssize_t reuse_time_source_nids_write(struct file *file,
 	}
 
 	mutex_lock(&reuse_time_config_lock);
-	new_config = reuse_time_clone_config_locked(true);
+	new_config = reuse_time_clone_config_locked();
 	if (!new_config) {
 		mutex_unlock(&reuse_time_config_lock);
 		kfree(buf);
@@ -677,194 +530,6 @@ static const struct file_operations reuse_time_source_nids_fops = {
 	.llseek = default_llseek,
 };
 
-static int reuse_time_config_set_target_cgroup(struct reuse_time_config *config,
-					       struct cgroup *cgrp)
-{
-	struct cgroup_subsys_state *css;
-
-	if (!cgrp) {
-		if (config->target_memcg)
-			mem_cgroup_put(config->target_memcg);
-		config->target_memcg = NULL;
-		return 0;
-	}
-
-	css = cgroup_get_e_css(cgrp, &memory_cgrp_subsys);
-	if (!css)
-		return -ENOENT;
-
-	if (config->target_memcg)
-		mem_cgroup_put(config->target_memcg);
-	config->target_memcg = mem_cgroup_from_css(css);
-	return 0;
-}
-
-static ssize_t reuse_time_target_cgroup_id_read(struct file *file,
-						char __user *buf,
-						size_t count, loff_t *ppos)
-{
-	struct reuse_time_config snapshot;
-	char tmp[32];
-	u64 id = 0;
-	int len;
-
-	reuse_time_snapshot_config(&snapshot);
-	if (snapshot.target_memcg)
-		id = cgroup_id(snapshot.target_memcg->css.cgroup);
-	reuse_time_put_snapshot(&snapshot);
-
-	len = scnprintf(tmp, sizeof(tmp), "%llu\n", id);
-	return simple_read_from_buffer(buf, count, ppos, tmp, len);
-}
-
-static ssize_t reuse_time_target_cgroup_id_write(struct file *file,
-						 const char __user *ubuf,
-						 size_t count, loff_t *ppos)
-{
-	struct reuse_time_config *new_config;
-	struct reuse_time_config *old_config;
-	struct cgroup *cgrp = NULL;
-	u64 id;
-	int ret;
-
-	ret = kstrtou64_from_user(ubuf, count, 0, &id);
-	if (ret)
-		return ret;
-
-	if (id) {
-		cgrp = cgroup_get_from_id(id);
-		if (IS_ERR(cgrp))
-			return PTR_ERR(cgrp);
-	}
-
-	mutex_lock(&reuse_time_config_lock);
-	new_config = reuse_time_clone_config_locked(false);
-	if (!new_config) {
-		mutex_unlock(&reuse_time_config_lock);
-		if (cgrp)
-			cgroup_put(cgrp);
-		return -ENOMEM;
-	}
-
-	ret = reuse_time_config_set_target_cgroup(new_config, cgrp);
-	if (cgrp)
-		cgroup_put(cgrp);
-	if (ret) {
-		mutex_unlock(&reuse_time_config_lock);
-		reuse_time_put_config(new_config);
-		return ret;
-	}
-
-	old_config = reuse_time_publish_config_locked(new_config);
-	reuse_time_update_static_key_locked(new_config);
-	mutex_unlock(&reuse_time_config_lock);
-	reuse_time_put_old_config(old_config);
-	return count;
-}
-
-static const struct file_operations reuse_time_target_cgroup_id_fops = {
-	.owner = THIS_MODULE,
-	.read = reuse_time_target_cgroup_id_read,
-	.write = reuse_time_target_cgroup_id_write,
-	.llseek = default_llseek,
-};
-
-static ssize_t reuse_time_target_cgroup_path_read(struct file *file,
-						  char __user *buf,
-						  size_t count, loff_t *ppos)
-{
-	struct reuse_time_config snapshot;
-	char *path;
-	ssize_t ret;
-	int len;
-
-	path = kmalloc(PATH_MAX, GFP_KERNEL);
-	if (!path)
-		return -ENOMEM;
-
-	reuse_time_snapshot_config(&snapshot);
-	if (!snapshot.target_memcg) {
-		len = scnprintf(path, PATH_MAX, "<unset>\n");
-	} else if (cgroup_path(snapshot.target_memcg->css.cgroup, path,
-			       PATH_MAX) < 0) {
-		len = scnprintf(path, PATH_MAX, "<error>\n");
-	} else {
-		len = strnlen(path, PATH_MAX);
-		if (len < PATH_MAX - 1) {
-			path[len++] = '\n';
-			path[len] = '\0';
-		}
-	}
-	reuse_time_put_snapshot(&snapshot);
-
-	ret = simple_read_from_buffer(buf, count, ppos, path, len);
-	kfree(path);
-	return ret;
-}
-
-static ssize_t reuse_time_target_cgroup_path_write(struct file *file,
-						   const char __user *ubuf,
-						   size_t count, loff_t *ppos)
-{
-	struct reuse_time_config *new_config;
-	struct reuse_time_config *old_config;
-	struct cgroup *cgrp = NULL;
-	char *buf;
-	char *name;
-	int ret;
-
-	if (!count || count > PATH_MAX)
-		return -EINVAL;
-
-	buf = memdup_user_nul(ubuf, count);
-	if (IS_ERR(buf))
-		return PTR_ERR(buf);
-
-	name = strstrip(buf);
-	if (*name && strcmp(name, "0") && strcmp(name, "none") &&
-	    strcmp(name, "<unset>")) {
-		cgrp = cgroup_get_from_path(name);
-		if (IS_ERR(cgrp)) {
-			ret = PTR_ERR(cgrp);
-			kfree(buf);
-			return ret;
-		}
-	}
-
-	mutex_lock(&reuse_time_config_lock);
-	new_config = reuse_time_clone_config_locked(false);
-	if (!new_config) {
-		mutex_unlock(&reuse_time_config_lock);
-		if (cgrp)
-			cgroup_put(cgrp);
-		kfree(buf);
-		return -ENOMEM;
-	}
-
-	ret = reuse_time_config_set_target_cgroup(new_config, cgrp);
-	if (cgrp)
-		cgroup_put(cgrp);
-	kfree(buf);
-	if (ret) {
-		mutex_unlock(&reuse_time_config_lock);
-		reuse_time_put_config(new_config);
-		return ret;
-	}
-
-	old_config = reuse_time_publish_config_locked(new_config);
-	reuse_time_update_static_key_locked(new_config);
-	mutex_unlock(&reuse_time_config_lock);
-	reuse_time_put_old_config(old_config);
-	return count;
-}
-
-static const struct file_operations reuse_time_target_cgroup_path_fops = {
-	.owner = THIS_MODULE,
-	.read = reuse_time_target_cgroup_path_read,
-	.write = reuse_time_target_cgroup_path_write,
-	.llseek = default_llseek,
-};
-
 static int __init sched_reuse_time_init(void)
 {
 	struct reuse_time_config *config;
@@ -883,14 +548,8 @@ static int __init sched_reuse_time_init(void)
 
 	debugfs_create_file("enable", 0644, reuse_time_dir, NULL,
 			    &reuse_time_enable_fops);
-	debugfs_create_file("match_descendants", 0644, reuse_time_dir, NULL,
-			    &reuse_time_match_descendants_fops);
 	debugfs_create_file("source_nids", 0644, reuse_time_dir, NULL,
 			    &reuse_time_source_nids_fops);
-	debugfs_create_file("target_cgroup_id", 0644, reuse_time_dir, NULL,
-			    &reuse_time_target_cgroup_id_fops);
-	debugfs_create_file("target_cgroup_path", 0644, reuse_time_dir, NULL,
-			    &reuse_time_target_cgroup_path_fops);
 	debugfs_create_file("reset", 0200, reuse_time_dir, NULL,
 			    &reuse_time_reset_fops);
 	debugfs_create_file("hist", 0444, reuse_time_dir, NULL,

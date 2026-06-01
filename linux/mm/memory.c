@@ -5928,14 +5928,10 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 #endif
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (local_fault_refault) {
-		struct mem_cgroup *memcg;
 		unsigned long nr_pages = folio_nr_pages(folio);
 
-		memcg = get_mem_cgroup_from_folio(folio);
-		mem_cgroup_numa_account_local_fault_refault(memcg, folio,
-							    nr_pages,
-							    sample_refault_latency);
-		mem_cgroup_put(memcg);
+		numa_account_local_fault_refault(folio, nr_pages,
+						 sample_refault_latency);
 	}
 #endif
 	if (folio_nid(folio) == numa_node_id()) {
@@ -5949,18 +5945,10 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 	target_nid = mpol_misplaced(folio, vmf, addr);
 #ifdef CONFIG_NUMA_BALANCING
 	if (target_nid != NUMA_NO_NODE && folio_test_clear_demoted(folio)) {
-		struct mem_cgroup *memcg;
 		unsigned long nr_pages = folio_nr_pages(folio);
 
 		*flags |= TNF_DEMOTED;
-		memcg = get_mem_cgroup_from_folio(folio);
-		if (mem_cgroup_numa_pingpong_stat_enabled(memcg)) {
-			count_vm_numa_events(PGPROMOTE_CANDIDATE_DEMOTED,
-					     nr_pages);
-			mem_cgroup_numa_account_promote_candidate_demoted(
-				memcg, nr_pages);
-		}
-		mem_cgroup_put(memcg);
+		count_vm_numa_events(PGPROMOTE_CANDIDATE_DEMOTED, nr_pages);
 	}
 #endif
 

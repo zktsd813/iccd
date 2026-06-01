@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Shared defaults for current ICCD global NUMA / host-CXL experiments.
+# Source this file from host-side runners before assigning script defaults.
+
+ICCD_REPO_ROOT="${ICCD_REPO_ROOT:-/Serverless/iccd-git}"
+ICCD_REQUIRED_PROTOCOL_DOC="${ICCD_REQUIRED_PROTOCOL_DOC:-${ICCD_REPO_ROOT}/docs/iccd-experiment-protocol-20260601.md}"
+
+ICCD_KERNEL="${ICCD_KERNEL:-${ICCD_REPO_ROOT}/linux-global-build/arch/x86/boot/bzImage}"
+ICCD_VMCTL="${ICCD_VMCTL:-${ICCD_REPO_ROOT}/VM/vmctl.sh}"
+
+ICCD_HOST_CPUS="${ICCD_HOST_CPUS:-0-31}"
+ICCD_GUEST_CPUS="${ICCD_GUEST_CPUS:-32}"
+ICCD_GUEST_NODE0_CPUS="${ICCD_GUEST_NODE0_CPUS:-0-31}"
+ICCD_FAST_HOST_NODE="${ICCD_FAST_HOST_NODE:-0}"
+ICCD_SLOW_HOST_NODE="${ICCD_SLOW_HOST_NODE:-2}"
+ICCD_SLOW_MEMORY_MODE="${ICCD_SLOW_MEMORY_MODE:-host-cxl}"
+ICCD_NUMA_MEM_POLICY="${ICCD_NUMA_MEM_POLICY:-bind}"
+ICCD_NUMA_PREALLOC="${ICCD_NUMA_PREALLOC:-1}"
+
+ICCD_HMAT_FAST_LATENCY_NS="${ICCD_HMAT_FAST_LATENCY_NS:-80}"
+ICCD_HMAT_SLOW_LATENCY_NS="${ICCD_HMAT_SLOW_LATENCY_NS:-250}"
+ICCD_HMAT_FAST_BANDWIDTH="${ICCD_HMAT_FAST_BANDWIDTH:-40000M}"
+ICCD_HMAT_SLOW_BANDWIDTH="${ICCD_HMAT_SLOW_BANDWIDTH:-10000M}"
+
+ICCD_MGLRU_ENABLED="${ICCD_MGLRU_ENABLED:-0x0007}"
+ICCD_DEMOTION_ENABLED="${ICCD_DEMOTION_ENABLED:-true}"
+ICCD_DEMOTION_TARGET="${ICCD_DEMOTION_TARGET:-0 1}"
+ICCD_NUMA_BALANCING_ON="${ICCD_NUMA_BALANCING_ON:-2}"
+ICCD_NUMA_BALANCING_OFF="${ICCD_NUMA_BALANCING_OFF:-0}"
+ICCD_NUMA_SCAN_SIZE_MB="${ICCD_NUMA_SCAN_SIZE_MB:-4096}"
+ICCD_NUMA_SCAN_PERIOD_MIN_MS="${ICCD_NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+ICCD_LOCAL_FAULT_SCAN_PERIOD_MS="${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+
+iccd_print_required_protocol() {
+  printf '[iccd-defaults] required protocol: %s\n' "${ICCD_REQUIRED_PROTOCOL_DOC}" >&2
+}
+
+iccd_print_fixed_vm_defaults() {
+  cat <<EOF
+required_protocol_doc=${ICCD_REQUIRED_PROTOCOL_DOC}
+kernel=${ICCD_KERNEL}
+host_cpus=${ICCD_HOST_CPUS}
+guest_cpus=${ICCD_GUEST_CPUS}
+guest_node0_cpus=${ICCD_GUEST_NODE0_CPUS}
+fast_host_node=${ICCD_FAST_HOST_NODE}
+slow_host_node=${ICCD_SLOW_HOST_NODE}
+slow_memory_mode=${ICCD_SLOW_MEMORY_MODE}
+numa_mem_policy=${ICCD_NUMA_MEM_POLICY}
+numa_prealloc=${ICCD_NUMA_PREALLOC}
+hmat_fast_latency_ns=${ICCD_HMAT_FAST_LATENCY_NS}
+hmat_slow_latency_ns=${ICCD_HMAT_SLOW_LATENCY_NS}
+hmat_fast_bandwidth=${ICCD_HMAT_FAST_BANDWIDTH}
+hmat_slow_bandwidth=${ICCD_HMAT_SLOW_BANDWIDTH}
+mglru_enabled=${ICCD_MGLRU_ENABLED}
+demotion_enabled=${ICCD_DEMOTION_ENABLED}
+demotion_target=${ICCD_DEMOTION_TARGET}
+numa_balancing_on=${ICCD_NUMA_BALANCING_ON}
+numa_balancing_off=${ICCD_NUMA_BALANCING_OFF}
+numa_scan_size_mb=${ICCD_NUMA_SCAN_SIZE_MB}
+numa_scan_period_min_ms=${ICCD_NUMA_SCAN_PERIOD_MIN_MS}
+local_fault_scan_period_ms=${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS}
+EOF
+}

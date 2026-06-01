@@ -4509,7 +4509,7 @@ static void __set_numabalancing_state(bool enabled)
 void sched_numa_balancing_update_state(void)
 {
 	__set_numabalancing_state(READ_ONCE(sysctl_numa_balancing_mode) ||
-				  mem_cgroup_numa_balancing_active());
+				  numa_local_fault_sampling_enabled());
 }
 #endif
 
@@ -4560,8 +4560,6 @@ static int sysctl_numa_balancing(const struct ctl_table *table, int write,
 			numa_balancing_reset_memory_tiering();
 		WRITE_ONCE(sysctl_numa_balancing_mode, state);
 #ifdef CONFIG_NUMA_BALANCING_MT
-		if (state & NUMA_BALANCING_MEMORY_TIERING)
-			mem_cgroup_numa_reset_earlystop(root_mem_cgroup, true);
 		sched_numa_balancing_update_state();
 #else
 		__set_numabalancing_state(state);

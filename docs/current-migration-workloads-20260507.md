@@ -2,10 +2,10 @@
 
 Date: 2026-05-09
 
-Latest session handoff: `/Serverless/iccd/docs/session-handoff-20260509.md`.
+Latest session handoff: `/Serverless/iccd-git/docs/session-handoff-20260601.md`.
 
 Read this file before running or interpreting each
-`/Serverless/Migration-friendly` experiment. This is the current workload
+`/Serverless/iccd-git` experiment. This is the current workload
 catalog; older sparse/block2M unfriendly records were removed from this current
 view because the latest selected unfriendly workload is the split32 streaming
 4 KiB-stride candidate found on 2026-05-08.
@@ -16,19 +16,20 @@ Use these settings unless the user explicitly asks otherwise:
 
 | item | value |
 | --- | --- |
-| project | `/Serverless/Migration-friendly` |
-| kernel | `/Serverless/Migration-friendly/linux` |
-| outputs | `/Serverless/iccd/experiments/<name>/` |
+| project | `/Serverless/iccd-git` |
+| kernel | `/Serverless/iccd-git/linux` |
+| build | `/Serverless/iccd-git/linux-global-build` |
+| kernel image | `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage` |
+| outputs | `/Serverless/iccd-git/experiments/<name>/` |
 | vCPUs | `CPUS=32`, `HOST_CPUS=0-31`, guest node0 CPUs `0-31` |
-| fast local memory | guest node0 32G, host node0, `NUMA_NODE0_HOST_NODES=0` |
-| slow remote memory | guest node1 64G, host node2 CXL, `NUMA_NODE1_HOST_NODES=2` |
+| fast local memory | guest node0 sized directly for the experiment, host node0, `NUMA_NODE0_HOST_NODES=0` |
+| slow remote memory | guest node1 sized for the remaining workload memory, host node2 CXL, `NUMA_NODE1_HOST_NODES=2` |
 | QEMU memory | `NUMA_MEM_POLICY=bind`, `NUMA_PREALLOC=1` |
-| cgroup local cap | 16G, `CAPACITY_PAGES=4194304` |
 | arena/RSS | normally `ARENA_SIZE=64G`; standalone split32 uses a 32G active window |
 | threads | `THREADS=32` |
-| migration on | `GLOBAL_NUMA_ON=0`, `NODE_BALANCING_ON=2` |
-| demotion | `KSWAPD_DEMOTION_ON=1`, `OFF_DEMOTION_ON=1` |
-| diagnostic stop/stat | default off: `NUMA_MIGRATION_STOP_ENABLED=0`, `NUMA_PINGPONG_STAT_ENABLED=0` |
+| migration on | global `/proc/sys/kernel/numa_balancing=2` |
+| migration off | global `/proc/sys/kernel/numa_balancing=0` |
+| demotion | use global `/sys/kernel/mm/numa/demotion_enabled` and `/sys/kernel/mm/numa/demotion_target` |
 | MGLRU | guest `/sys/kernel/mm/lru_gen/enabled` must be `0x0007` |
 | scan tuning | use the experiment's requested `NUMA_SCAN_SIZE_MB`, `NUMA_SCAN_PERIOD_MIN_MS`, and `NUMA_FAST_SCAN`; do not use the old scale-knob model for new fast-scan work |
 
@@ -41,7 +42,7 @@ Before each experiment:
 
 - Re-read this file and confirm the run uses the canonical topology above.
 - Build kernels with all available CPUs, for example
-  `make -C /Serverless/Migration-friendly/linux -j$(nproc) bzImage`.
+  `make -C /Serverless/iccd-git/linux O=/Serverless/iccd-git/linux-global-build -j$(nproc) bzImage`.
 - For VM experiments after kernel changes, create and use a fresh initrd from
   the same kernel tree. Do not silently fall back to `/boot/vmlinuz-*` or an
   older `/boot/initrd.img-*`; pass `KERNEL_IMAGE` and `INITRD_IMAGE`
@@ -58,9 +59,8 @@ Every experiment result summary must state:
 - kernel image, initrd image, kernel `uname -a`, and whether KVM was used.
 - MGLRU runtime state.
 - VM CPU/memory layout and host node bindings.
-- cgroup cap, `GLOBAL_NUMA_ON`, `NODE_BALANCING_ON`, demotion knobs,
-  earlystop/pingpong-stat knobs, scan size/period/fast-scan settings, and
-  `HOT_THRESHOLD_MS`.
+- Global NUMA balancing state, global demotion knobs, scan size/period/fast-scan
+  settings, and `HOT_THRESHOLD_MS` if explicitly changed.
 - placement mode.
 - workload candidate, policy, measured throughput, promoted pages/GiB,
   demoted pages/GiB, hint faults, and PTE-update counts when available.
@@ -103,9 +103,9 @@ Meaning:
 - `window-split:0,1` first-touches the first half on node0 and second half on
   node1, then resets memory policy to default so normal NUMA balancing can scan
   and migrate the VMA.
-- The 16 GiB cgroup fast-tier cap makes migration-on churn expensive: promotion
-  and demotion repeatedly move pages for a streaming pattern that does not
-  benefit from stable hotset locality.
+- With 16 GiB guest node0 local memory, migration-on churn can be expensive:
+  promotion and demotion repeatedly move pages for a streaming pattern that does
+  not benefit from stable hotset locality.
 
 Latest validated standalone result:
 
@@ -118,8 +118,7 @@ Result:
 
 - on/off steady mean ratio: `0.358x`
 - on/off steady median ratio: `0.353x`
-- artifact:
-  `/Serverless/iccd/experiments/20260508-hss32-split16-stream4k-prefaultsplit-rerun/summaries/analysis.md`
+- artifact: historical only; do not use it for current runs.
 
 ## Current Phase Pair
 
@@ -152,8 +151,7 @@ Migration-on counters:
 - `pgpromote_success`: `7,629,886` pages (`29.11 GiB`)
 - `pgdemote_direct`: `7,420,861` pages (`28.31 GiB`)
 - NUMA hint faults: `50,155,254`
-- artifact:
-  `/Serverless/iccd/experiments/20260508-phase-move15s4g-split32-stream4k/summaries/analysis.md`
+- artifact: historical only; do not use it for current runs.
 
 ## Avoid These Mixups
 

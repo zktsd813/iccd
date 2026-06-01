@@ -1,0 +1,5 @@
+run,vm,guest_node0_mem,guest_node1_mem,host_backing,placement,numa_balancing,generate_s,build_s,trial_s,average_s,wall,max_rss_kb,max_sample_n0_gib,max_sample_n1_gib,numa_hint_faults_delta,numa_pages_migrated_delta,pgpromote_success_delta,pgdemote_total_delta,exit_status
+migration_off,local16,16G,176G,node0/node2,cpunode0_localalloc,0,107.12493,291.43800,43.85798,43.85798,8:15.09,148145908,15.155,122.824,0,0,0,1999820,0
+migration_on,local16,16G,176G,node0/node2,cpunode0_localalloc,2,103.43058,291.90445,43.46639,43.46639,8:11.60,148145460,15.225,122.779,309,95,95,1945029,0
+all_slow,local16,16G,176G,node0/node2,cpunode0_membind1,0,89.31548,297.71145,258.40936,258.40936,11:39.66,148144868,0.003,138.002,0,0,0,0,0
+all_fast,allfast,160G,4G,node0-1/node2,cpunode0_membind0,0,59.62977,166.23401,38.59033,38.59033,5:05.50,148145148,138.005,0.000,0,0,0,0,0

@@ -36,9 +36,7 @@ endif
 obj-y += core.o
 obj-y += fair.o
 ifeq ($(CONFIG_DEBUG_FS),y)
-ifeq ($(CONFIG_MEMCG),y)
 obj-$(CONFIG_NUMA_BALANCING) += reuse_time.o
-endif
 endif
 obj-y += build_policy.o
 obj-y += build_utility.o

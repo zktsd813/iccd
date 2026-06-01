@@ -98,7 +98,7 @@ struct cpuidle_state;
 
 extern __read_mostly int scheduler_running;
 
-#if defined(CONFIG_DEBUG_FS) && defined(CONFIG_MEMCG) && defined(CONFIG_NUMA_BALANCING)
+#if defined(CONFIG_DEBUG_FS) && defined(CONFIG_NUMA_BALANCING)
 DECLARE_STATIC_KEY_FALSE(sched_reuse_time_key);
 static inline bool sched_reuse_time_enabled(void)
 {

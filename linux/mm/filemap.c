@@ -1009,20 +1009,16 @@ struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 
 	if (cpuset_do_page_mem_spread()) {
 		unsigned int cpuset_mems_cookie;
-		do {
-			cpuset_mems_cookie = read_mems_allowed_begin();
-			n = cpuset_mem_spread_node();
-			n = mem_cgroup_preferred_node(n, &cpuset_current_mems_allowed,
-						      1UL << order);
-			folio = __folio_alloc_node_noprof(gfp, order, n);
-		} while (!folio && read_mems_allowed_retry(cpuset_mems_cookie));
+			do {
+				cpuset_mems_cookie = read_mems_allowed_begin();
+				n = cpuset_mem_spread_node();
+				folio = __folio_alloc_node_noprof(gfp, order, n);
+			} while (!folio && read_mems_allowed_retry(cpuset_mems_cookie));
 
 		return folio;
 	}
 
-	n = mem_cgroup_preferred_node(numa_node_id(), &cpuset_current_mems_allowed,
-				      1UL << order);
-	return __folio_alloc_node_noprof(gfp, order, n);
+	return __folio_alloc_node_noprof(gfp, order, numa_node_id());
 }
 EXPORT_SYMBOL(filemap_alloc_folio_noprof);
 #endif

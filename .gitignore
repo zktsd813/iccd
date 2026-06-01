@@ -1,13 +1,19 @@
 # Large/generated experiment artifacts
 experiments/**/qemu-logs/
+experiments/**/guest-results/
+experiments/**/host-logs/
+experiments/**/logs/
+experiments/**/images/
 *.qcow2
 *.img
 *.iso
 
 # Local kernel build outputs
 linux-build-mt/
+linux-global-build/
 vmlinux
 vmlinux.*
+vmlinux.scr
 System.map
 Module.symvers
 modules.order

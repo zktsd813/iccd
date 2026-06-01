@@ -5,9 +5,10 @@ VM harness, and workload scripts were cleaned up.
 
 ## Current Git State
 
-Use `/Serverless/iccd-git` for git operations against the real ICCD repository.
-The older `/Serverless/iccd` directory is a working area with experiment outputs
-and nested repos, but it is not itself a parent git checkout.
+Use `/Serverless/iccd-git` for all current ICCD work: git operations, kernel
+source, build outputs, workload scripts, and new experiment outputs. The older
+`/Serverless/iccd` directory is deprecated for this workflow and should not be
+used as a source of truth.
 
 Current pushed ICCD repo:
 
@@ -76,24 +77,24 @@ git submodule update --init VM
 - Clean git checkout of `zktsd813/iccd`.
 - Use this for future commits and pushes.
 - Contains `VM/` as a submodule.
+- Contains the active kernel source under `linux/`.
+- Contains the active out-of-tree kernel build under ignored directory
+  `linux-global-build/`.
 
-`/Serverless/iccd`
+`/Serverless/iccd-git/linux`
 
-- Local working area used during experiments.
-- Not a parent git checkout.
-- Contains local experiment outputs, build directories, and nested repos such as
-  `/Serverless/iccd/linux` and `/Serverless/iccd/VM`.
-- Do not assume `git -C /Serverless/iccd ...` works.
+- Active kernel source tree for current global NUMA experiments.
+- Synchronized from the previous `linux_global` implementation on 2026-06-01.
+- This is the current global NUMA baseline for implementation.
 
-`/Serverless/iccd/linux`
+`/Serverless/iccd-git/linux-global-build`
 
-- Active local kernel tree for current kernel work.
-- Last checked state:
+- Active out-of-tree build directory for `linux/`.
+- Ignored by git.
+- Last validated kernel image:
 
   ```text
-  branch: iccd-migration-friendly-20260530
-  HEAD:   9a82ac0ac mm: add cgroup-aware NUMA tiering controls
-  dirty:  no tracked changes
+  /Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage
   ```
 
 `/Serverless/iccd-git/VM`
@@ -106,6 +107,20 @@ git submodule update --init VM
 
 - Owns the current reusable workload scripts.
 - Scripts are copied into the guest by `stage_workloads_to_vm.sh`.
+
+## Required Experiment Protocol
+
+Read this before running or interpreting any new ICCD experiment:
+
+```text
+docs/iccd-experiment-protocol-20260601.md
+```
+
+Current performance experiments should use `SLOW_MEMORY_MODE=host-cxl`: guest
+node1 remains KVM RAM backed by host NUMA node2, and QEMU exposes HMAT metadata
+so the guest kernel places node1 in a lower memory tier. Use `qemu-cxl` only for
+CXL Type3 topology/driver validation because it can route memory access through
+QEMU emulation callbacks.
 
 ## Active Script Set
 
@@ -207,8 +222,10 @@ docs/pre-linux-global-results-summary-20260601.md
 docs/removed-pre-linux-global-experiments-20260601.txt
 ```
 
-The local working area `/Serverless/iccd/experiments` still contains recent
-post-cleanup outputs:
+Historical outputs under `/Serverless/iccd/experiments` may still exist, but new
+outputs should be written under `/Serverless/iccd-git/experiments`.
+
+Historical post-cleanup output names included:
 
 ```text
 20260530-linux-global-pr-onoff
@@ -229,15 +246,16 @@ post-cleanup outputs:
 20260601-script-smoke-pr
 ```
 
-Use local experiment directories for raw outputs. Do not commit VM images, logs,
-QEMU run directories, or large generated result trees unless explicitly needed.
+Use `/Serverless/iccd-git/experiments` for raw outputs. Do not commit VM images,
+logs, QEMU run directories, or large generated result trees unless explicitly
+needed.
 
 ## Known Pitfalls
 
 - Do not push workload scripts to `linux-kernel-vm`; it is the reusable VM
   harness submodule.
-- Do not treat `/Serverless/iccd` as the git parent checkout. Use
-  `/Serverless/iccd-git` for repo operations.
+- Do not use `/Serverless/iccd` for current work. Use `/Serverless/iccd-git`
+  for repo operations, kernel work, builds, scripts, and new experiment outputs.
 - `VM/` in `iccd` must remain a submodule. `git ls-tree HEAD VM` should show
   mode `160000`, not `040000 tree`.
 - If `VM/vmctl.sh` is missing after clone, run:
@@ -246,9 +264,8 @@ QEMU run directories, or large generated result trees unless explicitly needed.
   git submodule update --init VM
   ```
 
-- The local `/Serverless/iccd/VM` directory is a standalone clone of
-  `linux-kernel-vm` and was used during cleanup. The canonical relation in the
-  pushed `iccd` repo is the `VM` submodule.
+- The canonical VM harness relation in the pushed `iccd` repo is the `VM`
+  submodule under `/Serverless/iccd-git/VM`.
 
 ## Validation Already Done
 
@@ -258,6 +275,18 @@ After the latest submodule conversion:
 bash -n scripts/*.sh
 python3 -m py_compile scripts/local_util_adapt_controller.py
 git diff --cached --check
+```
+
+After copying the current global kernel implementation into this repo:
+
+```bash
+make -C /Serverless/iccd-git/linux O=/Serverless/iccd-git/linux-global-build -j$(nproc) bzImage
+```
+
+The build completed successfully and produced:
+
+```text
+/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage
 ```
 
 No QEMU or workload process was left running after the push.

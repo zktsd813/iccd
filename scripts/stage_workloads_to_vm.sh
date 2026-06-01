@@ -3,8 +3,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+ICCD_REPO_ROOT="${ICCD_REPO_ROOT:-${REPO_ROOT}}"
+ICCD_DEFAULTS="${ICCD_DEFAULTS:-${REPO_ROOT}/scripts/iccd_experiment_defaults.sh}"
+if [[ -r "${ICCD_DEFAULTS}" ]]; then
+  # shellcheck source=scripts/iccd_experiment_defaults.sh
+  source "${ICCD_DEFAULTS}"
+fi
 VM_DIR="${VM_DIR:-${REPO_ROOT}/VM}"
-VMCTL="${VMCTL:-${VM_DIR}/vmctl.sh}"
+VMCTL="${VMCTL:-${ICCD_VMCTL:-${VM_DIR}/vmctl.sh}}"
 VM_ACTION="${VM_ACTION:-stage}"
 PORT="${PORT:-10030}"
 HOST="${HOST:-127.0.0.1}"
@@ -23,19 +29,24 @@ SSH_CONTROL_PATH="${SSH_CONTROL_PATH:-/tmp/iccd-realworld-${PORT}.sock}"
 
 VM_NAME="${VM_NAME:-iccd-workload-vm}"
 QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
-KERNEL="${KERNEL:-}"
+KERNEL="${KERNEL:-${ICCD_KERNEL:-}}"
 INITRD="${INITRD:-}"
 ROOTFS="${ROOTFS:-}"
 ROOTFS_FORMAT="${ROOTFS_FORMAT:-raw}"
 ROOT_DEVICE="${ROOT_DEVICE:-}"
 ACCEL="${ACCEL:-kvm}"
-HOST_CPUS="${HOST_CPUS:-0-31}"
-GUEST_CPUS="${GUEST_CPUS:-32}"
-GUEST_NODE0_CPUS="${GUEST_NODE0_CPUS:-0-31}"
-FAST_HOST_NODE="${FAST_HOST_NODE:-0}"
-SLOW_HOST_NODE="${SLOW_HOST_NODE:-2}"
+HOST_CPUS="${HOST_CPUS:-${ICCD_HOST_CPUS:-0-31}}"
+GUEST_CPUS="${GUEST_CPUS:-${ICCD_GUEST_CPUS:-32}}"
+GUEST_NODE0_CPUS="${GUEST_NODE0_CPUS:-${ICCD_GUEST_NODE0_CPUS:-0-31}}"
+FAST_HOST_NODE="${FAST_HOST_NODE:-${ICCD_FAST_HOST_NODE:-0}}"
+SLOW_HOST_NODE="${SLOW_HOST_NODE:-${ICCD_SLOW_HOST_NODE:-2}}"
 FAST_MEM="${FAST_MEM:-8G}"
 SLOW_MEM="${SLOW_MEM:-160G}"
+SLOW_MEMORY_MODE="${SLOW_MEMORY_MODE:-${ICCD_SLOW_MEMORY_MODE:-host-cxl}}"
+HMAT_FAST_LATENCY_NS="${HMAT_FAST_LATENCY_NS:-${ICCD_HMAT_FAST_LATENCY_NS:-80}}"
+HMAT_SLOW_LATENCY_NS="${HMAT_SLOW_LATENCY_NS:-${ICCD_HMAT_SLOW_LATENCY_NS:-250}}"
+HMAT_FAST_BANDWIDTH="${HMAT_FAST_BANDWIDTH:-${ICCD_HMAT_FAST_BANDWIDTH:-40000M}}"
+HMAT_SLOW_BANDWIDTH="${HMAT_SLOW_BANDWIDTH:-${ICCD_HMAT_SLOW_BANDWIDTH:-10000M}}"
 VERIFY_PLACEMENT="${VERIFY_PLACEMENT:-1}"
 STOP_VM_ON_SUCCESS="${STOP_VM_ON_SUCCESS:-0}"
 GUEST_OUTROOT="${GUEST_OUTROOT:-/root/script-smoke-pr}"
@@ -120,10 +131,16 @@ boot_vm_if_requested() {
     --slow-host-node "${SLOW_HOST_NODE}"
     --fast-mem "${FAST_MEM}"
     --slow-mem "${SLOW_MEM}"
+    --slow-memory-mode "${SLOW_MEMORY_MODE}"
     --accel "${ACCEL}"
   )
   [[ -z "${INITRD}" ]] || args+=(--initrd "${INITRD}")
   [[ -z "${ROOT_DEVICE}" ]] || args+=(--root-device "${ROOT_DEVICE}")
+  args+=(--hmat-fast-latency-ns "${HMAT_FAST_LATENCY_NS}")
+  args+=(--hmat-slow-latency-ns "${HMAT_SLOW_LATENCY_NS}")
+  args+=(--hmat-fast-bandwidth "${HMAT_FAST_BANDWIDTH}")
+  args+=(--hmat-slow-bandwidth "${HMAT_SLOW_BANDWIDTH}")
+  [[ -z "${CXL_FMW_SIZE:-}" ]] || args+=(--cxl-fmw-size "${CXL_FMW_SIZE}")
 
   vmctl_cmd "${args[@]}"
   wait_for_vm_ssh

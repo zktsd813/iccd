@@ -1,0 +1,50 @@
+What:		/sys/kernel/mm/numa_balancing/local_fault_rate
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write percentage controlling local-fault sampling for
+		NUMA memory tiering diagnostics. A value of 0 disables local
+		fault sampling. Values from 1 to 100 enable sampling at the
+		requested PFN selection rate.
+
+		When non-zero, the local-fault sampler is active even if
+		kernel.numa_balancing is 0. In that state regular NUMA balancing
+		migration remains disabled, but the local-fault probe/refault
+		accounting path can still run.
+
+What:		/sys/kernel/mm/numa_balancing/local_fault_scan_period_ms
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write scan period, in milliseconds, used by the global
+		local-fault sampling scan.
+
+What:		/sys/kernel/mm/numa_balancing/local_fault_scan_size_mb
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write maximum local-fault scan size, in megabytes, for one
+		task NUMA scan period.
+
+What:		/sys/kernel/mm/numa_balancing/local_fault_refault_hit_ms
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write latency threshold, in milliseconds. Local-fault
+		refaults no later than this threshold are counted as hits.
+
+What:		/sys/kernel/mm/numa_balancing/local_fault_window
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write sampling window sequence. Reading returns the current
+		window sequence. Writing any value advances the window and resets
+		the newly selected per-window bucket.
+
+What:		/sys/kernel/mm/numa_balancing/local_fault_stats
+Date:		May 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-only flat-keyed diagnostic file showing global local-fault
+		sampling counters, current knob values, and current-window
+		PTE/refault/lost-page counters.

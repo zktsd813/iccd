@@ -78,6 +78,107 @@
 
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+struct local_tiering_probe_arg {
+	struct mm_struct *mm;
+	bool installed;
+};
+
+static bool local_tiering_probe_invalid_vma(struct vm_area_struct *vma,
+					    void *arg)
+{
+	struct local_tiering_probe_arg *probe = arg;
+
+	if (vma->vm_mm != probe->mm)
+		return true;
+	if (!vma_migratable(vma))
+		return true;
+	if (is_vm_hugetlb_page(vma) || (vma->vm_flags & VM_MIXEDMAP))
+		return true;
+	if (!vma_is_accessible(vma))
+		return true;
+	if (vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == VM_READ)
+		return true;
+
+	return false;
+}
+
+static bool local_tiering_probe_one(struct folio *folio,
+				    struct vm_area_struct *vma,
+				    unsigned long addr, void *arg)
+{
+	struct local_tiering_probe_arg *probe = arg;
+	DEFINE_FOLIO_VMA_WALK(pvmw, folio, vma, addr, PVMW_SYNC);
+
+	while (page_vma_mapped_walk(&pvmw)) {
+		struct mmu_notifier_range range;
+		unsigned long address = pvmw.address;
+		pte_t oldpte, newpte;
+
+		if (!pvmw.pte)
+			continue;
+
+		oldpte = ptep_get(pvmw.pte);
+		if (!pte_present(oldpte) || pte_protnone(oldpte))
+			continue;
+		if (pfn_folio(pte_pfn(oldpte)) != folio)
+			continue;
+		if (folio_test_local_tiering_sampled(folio))
+			continue;
+
+		folio_set_local_tiering_sampled(folio);
+		folio_xchg_access_time(folio, jiffies_to_msecs(jiffies));
+		numa_account_local_fault_pte(folio, 1);
+
+		mmu_notifier_range_init(&range, MMU_NOTIFY_PROTECTION_PAGE, 0,
+					vma->vm_mm, address, address + PAGE_SIZE);
+		mmu_notifier_invalidate_range_start(&range);
+		flush_cache_page(vma, address, pte_pfn(oldpte));
+		oldpte = ptep_clear_flush(vma, address, pvmw.pte);
+		newpte = pte_modify(oldpte, PAGE_NONE);
+		set_pte_at(vma->vm_mm, address, pvmw.pte, newpte);
+		mmu_notifier_invalidate_range_end(&range);
+		update_mmu_cache(vma, address, pvmw.pte);
+
+		probe->installed = true;
+		page_vma_mapped_walk_done(&pvmw);
+		return false;
+	}
+
+	return true;
+}
+
+bool folio_try_install_local_tiering_probe(struct folio *folio,
+					   struct mm_struct *mm)
+{
+	struct local_tiering_probe_arg probe = {
+		.mm = mm,
+		.installed = false,
+	};
+	struct rmap_walk_control rwc = {
+		.arg = &probe,
+		.try_lock = true,
+		.rmap_one = local_tiering_probe_one,
+		.invalid_vma = local_tiering_probe_invalid_vma,
+	};
+
+	if (!folio || !mm)
+		return false;
+	if (folio_nr_pages(folio) != 1 || !folio_mapped(folio))
+		return false;
+	if (folio_is_zone_device(folio) || folio_test_ksm(folio))
+		return false;
+	if (folio_is_file_lru(folio) && folio_test_dirty(folio))
+		return false;
+	if (folio_test_local_tiering_sampled(folio))
+		return false;
+
+	rmap_walk(folio, &rwc);
+
+	return probe.installed;
+}
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/migrate.h>
 
@@ -1778,17 +1879,12 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 #ifdef CONFIG_NUMA_BALANCING_MT
 static void folio_account_local_tiering_sample_unmap(struct folio *folio)
 {
-	struct mem_cgroup *memcg;
-
 	if (folio_nr_pages(folio) != 1 || folio_mapped(folio))
 		return;
 	if (!folio_test_clear_local_tiering_sampled(folio))
 		return;
 
-	memcg = get_mem_cgroup_from_folio(folio);
-	mem_cgroup_numa_account_local_fault_lost(memcg, folio,
-						 folio_nr_pages(folio));
-	mem_cgroup_put(memcg);
+	numa_account_local_fault_lost(folio, folio_nr_pages(folio));
 }
 #else
 static void folio_account_local_tiering_sample_unmap(struct folio *folio)

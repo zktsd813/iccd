@@ -437,13 +437,9 @@ static bool remove_migration_pte(struct folio *folio,
 #ifdef CONFIG_NUMA_BALANCING_MT
 			if (!rmap_walk_arg->local_tiering_sample_armed &&
 			    folio_test_local_tiering_sampled(folio)) {
-				struct mem_cgroup *memcg;
-
 				pte = pte_modify(pte, PAGE_NONE);
-				memcg = get_mem_cgroup_from_folio(folio);
-				mem_cgroup_numa_account_local_fault_pte(
-					memcg, folio, folio_nr_pages(folio));
-				mem_cgroup_put(memcg);
+				numa_account_local_fault_pte(
+					folio, folio_nr_pages(folio));
 				rmap_walk_arg->local_tiering_sample_armed = true;
 			}
 #endif
@@ -489,11 +485,7 @@ void remove_migration_ptes(struct folio *src, struct folio *dst, int flags)
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (folio_test_local_tiering_sampled(dst) &&
 	    !rmap_walk_arg.local_tiering_sample_armed) {
-		struct mem_cgroup *memcg = get_mem_cgroup_from_folio(dst);
-
-		mem_cgroup_numa_account_local_fault_lost(
-			memcg, dst, folio_nr_pages(dst));
-		mem_cgroup_put(memcg);
+		numa_account_local_fault_lost(dst, folio_nr_pages(dst));
 		folio_clear_local_tiering_sampled(dst);
 	}
 #endif
@@ -813,12 +805,7 @@ void folio_migrate_flags(struct folio *newfolio, struct folio *folio)
 
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (folio_test_clear_local_tiering_sampled(folio)) {
-		struct mem_cgroup *memcg = get_mem_cgroup_from_folio(folio);
-
-		mem_cgroup_numa_account_local_fault_lost(memcg,
-							 folio,
-							 folio_nr_pages(folio));
-		mem_cgroup_put(memcg);
+		numa_account_local_fault_lost(folio, folio_nr_pages(folio));
 	}
 #endif
 
@@ -1384,9 +1371,7 @@ out:
 static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
 				     enum migrate_reason reason,
 				     bool demote_promoted,
-				     bool demote_promoted_referenced,
-				     struct mem_cgroup *demote_memcg,
-				     bool was_mapped)
+				     bool demote_promoted_referenced)
 {
 	unsigned long nr_pages;
 	bool promote;
@@ -1402,15 +1387,11 @@ static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
 		folio_set_demoted(dst);
 		if (!demote_promoted)
 			return;
-		if (!mem_cgroup_numa_pingpong_stat_enabled(demote_memcg))
-			return;
 
 		nr_pages = folio_nr_pages(src);
 		count_vm_events(PGDEMOTE_PROMOTED, nr_pages);
 		if (demote_promoted_referenced)
 			count_vm_events(PGDEMOTE_PROMOTED_REFERENCED, nr_pages);
-		mem_cgroup_numa_account_demote_promoted(demote_memcg, nr_pages,
-							demote_promoted_referenced);
 		return;
 	}
 
@@ -1429,9 +1410,7 @@ static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
 static void numa_note_migrated_folio(struct folio *src, struct folio *dst,
 				     enum migrate_reason reason,
 				     bool demote_promoted,
-				     bool demote_promoted_referenced,
-				     struct mem_cgroup *demote_memcg,
-				     bool was_mapped)
+				     bool demote_promoted_referenced)
 {
 }
 #endif
@@ -1445,7 +1424,6 @@ static int migrate_folio_move(free_folio_t put_new_folio, unsigned long private,
 	int old_page_state = 0;
 	struct anon_vma *anon_vma = NULL;
 	struct list_head *prev;
-	struct mem_cgroup *demote_memcg = NULL;
 	bool demote_promoted = false;
 	bool demote_promoted_referenced = false;
 
@@ -1462,14 +1440,8 @@ static int migrate_folio_move(free_folio_t put_new_folio, unsigned long private,
 
 #ifdef CONFIG_NUMA_BALANCING
 	if (reason == MR_DEMOTION && folio_test_promoted(src)) {
-		demote_memcg = get_mem_cgroup_from_folio(src);
-		if (mem_cgroup_numa_pingpong_stat_enabled(demote_memcg)) {
-			demote_promoted = true;
-			demote_promoted_referenced = folio_test_referenced(src);
-		} else {
-			mem_cgroup_put(demote_memcg);
-			demote_memcg = NULL;
-		}
+		demote_promoted = true;
+		demote_promoted_referenced = folio_test_referenced(src);
 	}
 #endif
 
@@ -1478,12 +1450,7 @@ static int migrate_folio_move(free_folio_t put_new_folio, unsigned long private,
 		goto out;
 
 	numa_note_migrated_folio(src, dst, reason, demote_promoted,
-				 demote_promoted_referenced, demote_memcg,
-				 old_page_state & PAGE_WAS_MAPPED);
-	if (demote_memcg) {
-		mem_cgroup_put(demote_memcg);
-		demote_memcg = NULL;
-	}
+				 demote_promoted_referenced);
 
 	/*
 	 * When successful, push dst to LRU immediately: so that if it
@@ -1504,20 +1471,16 @@ static int migrate_folio_move(free_folio_t put_new_folio, unsigned long private,
 	    memory_tiering_enabled(dst) &&
 	    node_is_promotion_target(folio_nid(src), folio_nid(dst))) {
 		unsigned long nr_pages = folio_nr_pages(dst);
-		struct mem_cgroup *memcg;
 
-		memcg = get_mem_cgroup_from_folio(dst);
 		/*
 		 * The sample identity is a folio flag while the forced fault is
 		 * attached to one mapping. Keep sampling to order-0 folios until
 		 * split-time accounting has per-subfolio state.
 		 */
-		if (nr_pages == 1 &&
-		    mem_cgroup_numa_should_sample_local_fault(memcg, dst)) {
+		if (nr_pages == 1 && numa_should_sample_local_fault(dst)) {
 			folio_set_local_tiering_sampled(dst);
 			folio_xchg_access_time(dst, jiffies_to_msecs(jiffies));
 		}
-		mem_cgroup_put(memcg);
 	}
 #endif
 
@@ -1547,9 +1510,6 @@ out_unlock_both:
 
 	return rc;
 out:
-	if (demote_memcg)
-		mem_cgroup_put(demote_memcg);
-
 	/*
 	 * A folio that has not been migrated will be restored to
 	 * right list unless we want to retry.
@@ -2772,15 +2732,8 @@ static bool migrate_balanced_pgdat(struct pglist_data *pgdat,
 	return false;
 }
 
-enum numa_promote_fail_reason {
-	NUMA_PROMOTE_FAIL_NONE,
-	NUMA_PROMOTE_FAIL_OVER_HIGH,
-	NUMA_PROMOTE_FAIL_ALLOC,
-};
-
 struct numa_misplaced_migrate {
 	int nid;
-	enum numa_promote_fail_reason promote_fail;
 };
 
 static struct folio *alloc_misplaced_dst_folio(struct folio *src,
@@ -2788,31 +2741,9 @@ static struct folio *alloc_misplaced_dst_folio(struct folio *src,
 {
 	struct numa_misplaced_migrate *mtc =
 		(struct numa_misplaced_migrate *)data;
-	struct mem_cgroup *memcg;
-	struct folio *dst;
 	int nid = mtc->nid;
-	int src_nid = folio_nid(src);
 	int order = folio_order(src);
-	unsigned long nr_pages = folio_nr_pages(src);
-	bool promoted;
 	gfp_t gfp = __GFP_THISNODE;
-
-	memcg = get_mem_cgroup_from_folio(src);
-	promoted = memory_tiering_enabled(src) &&
-		   node_is_promotion_target(src_nid, nid);
-	if (promoted)
-		mtc->promote_fail = NUMA_PROMOTE_FAIL_NONE;
-	if (promoted) {
-		bool over_high = mem_cgroup_node_over_high(memcg, nid,
-							   nr_pages);
-
-		if (over_high && memcg)
-			mtc->promote_fail = NUMA_PROMOTE_FAIL_OVER_HIGH;
-		if (over_high) {
-			mem_cgroup_put(memcg);
-			return ERR_PTR(-EAGAIN);
-		}
-	}
 
 	if (order > 0)
 		gfp |= GFP_TRANSHUGE_LIGHT;
@@ -2821,11 +2752,7 @@ static struct folio *alloc_misplaced_dst_folio(struct folio *src,
 			__GFP_NOWARN;
 		gfp &= ~__GFP_RECLAIM;
 	}
-	dst = __folio_alloc_node(gfp, order, nid);
-	if (!dst && promoted && memcg)
-		mtc->promote_fail = NUMA_PROMOTE_FAIL_ALLOC;
-	mem_cgroup_put(memcg);
-	return dst;
+	return __folio_alloc_node(gfp, order, nid);
 }
 
 /*
@@ -2902,11 +2829,9 @@ int migrate_misplaced_folio(struct folio *folio, int node)
 	pg_data_t *pgdat = NODE_DATA(node);
 	struct numa_misplaced_migrate mtc = {
 		.nid = node,
-		.promote_fail = NUMA_PROMOTE_FAIL_NONE,
 	};
 	int nr_remaining;
 	int src_nid = folio_nid(folio);
-	int nr_pages = folio_nr_pages(folio);
 	unsigned int nr_succeeded;
 	LIST_HEAD(migratepages);
 	struct mem_cgroup *memcg = get_mem_cgroup_from_folio(folio);
@@ -2920,32 +2845,9 @@ int migrate_misplaced_folio(struct folio *folio, int node)
 				     MR_NUMA_MISPLACED, &nr_succeeded);
 	if (nr_remaining && !list_empty(&migratepages))
 		putback_movable_pages(&migratepages);
-#ifdef CONFIG_NUMA_BALANCING_MT
-	if (nr_remaining && promoted && memcg) {
-		if (mtc.promote_fail == NUMA_PROMOTE_FAIL_OVER_HIGH)
-			atomic64_add(nr_pages,
-				     &memcg->numa_migrate_fail_promotion_over_high);
-		else if (mtc.promote_fail == NUMA_PROMOTE_FAIL_ALLOC)
-			atomic64_add(nr_pages,
-				     &memcg->numa_migrate_fail_promotion_alloc);
-	}
-#endif
 	if (nr_succeeded) {
 		count_vm_numa_events(NUMA_PAGE_MIGRATE, nr_succeeded);
 		count_memcg_events(memcg, NUMA_PAGE_MIGRATE, nr_succeeded);
-#ifdef CONFIG_NUMA_BALANCING_MT
-		if (memcg) {
-			atomic64_add(nr_succeeded,
-				     &memcg->numa_migrate_success_total);
-			if (promoted) {
-				atomic64_add(nr_succeeded,
-					     &memcg->numa_migrate_success_promotion);
-			} else {
-				atomic64_add(nr_succeeded,
-					     &memcg->numa_migrate_success_other);
-			}
-		}
-#endif
 		if (promoted) {
 			mod_lruvec_state(lruvec, PGPROMOTE_SUCCESS, nr_succeeded);
 		}
