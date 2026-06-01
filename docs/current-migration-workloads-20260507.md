@@ -4,11 +4,11 @@ Date: 2026-05-09
 
 Latest session handoff: `/Serverless/iccd-git/docs/session-handoff-20260601.md`.
 
-Read this file before running or interpreting each
-`/Serverless/iccd-git` experiment. This is the current workload
-catalog; older sparse/block2M unfriendly records were removed from this current
-view because the latest selected unfriendly workload is the split32 streaming
-4 KiB-stride candidate found on 2026-05-08.
+This is an optional workload catalog. Read it when choosing or interpreting
+the migration-friendly/unfriendly workload candidates; it is not a required
+pre-read for every experiment. Older sparse/block2M unfriendly records were
+removed from this current view because the latest selected unfriendly workload
+is the split32 streaming 4 KiB-stride candidate found on 2026-05-08.
 
 ## Canonical Topology
 
@@ -36,11 +36,15 @@ Use these settings unless the user explicitly asks otherwise:
 Results without host node0/node2 memory binding are not valid for local-vs-CXL
 interpretation.
 
+Default workload placement is configured repo-wide in
+`scripts/iccd_experiment_defaults.sh` as `ICCD_WORKLOAD_CPU_NODE=0`, which maps
+to `numactl --cpunodebind=0`.
+
 ## Required Build And VM Checklist
 
 Before each experiment:
 
-- Re-read this file and confirm the run uses the canonical topology above.
+- Confirm the run uses the canonical topology above.
 - Build kernels with all available CPUs, for example
   `make -C /Serverless/iccd-git/linux O=/Serverless/iccd-git/linux-global-build -j$(nproc) bzImage`.
 - For VM experiments after kernel changes, create and use a fresh initrd from

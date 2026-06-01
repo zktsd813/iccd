@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ICCD_DEFAULTS="${ICCD_DEFAULTS:-${SCRIPT_DIR}/iccd_experiment_defaults.sh}"
+if [[ -r "${ICCD_DEFAULTS}" ]]; then
+  # shellcheck source=scripts/iccd_experiment_defaults.sh
+  source "${ICCD_DEFAULTS}"
+fi
+
 OUTROOT="${OUTROOT:-/root/pr-g29-global-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUNS="${RUNS:-migration_off migration_on}"
 PR_BIN="${PR_BIN:-/root/pr}"
@@ -11,14 +18,14 @@ PR_TRIALS="${PR_TRIALS:-1}"
 OMP_THREADS="${OMP_THREADS:-32}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-21600}"
 SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-5}"
-CPU_NODE="${CPU_NODE:-0}"
-MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
-DEMOTION_ENABLED="${DEMOTION_ENABLED:-true}"
-DEMOTION_TARGET="${DEMOTION_TARGET:-0 1}"
-NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-4096}"
-NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+CPU_NODE="${CPU_NODE:-${ICCD_WORKLOAD_CPU_NODE:-${ICCD_PR_CPU_NODE:-0}}}"
+MGLRU_ENABLED="${MGLRU_ENABLED:-${ICCD_MGLRU_ENABLED:-0x0007}}"
+DEMOTION_ENABLED="${DEMOTION_ENABLED:-${ICCD_DEMOTION_ENABLED:-true}}"
+DEMOTION_TARGET="${DEMOTION_TARGET:-${ICCD_DEMOTION_TARGET:-0 1}}"
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-${ICCD_NUMA_SCAN_SIZE_MB:-4096}}"
+NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-${ICCD_NUMA_SCAN_PERIOD_MIN_MS:-1000}}"
 LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-${NUMA_SCAN_SIZE_MB}}"
-LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}}"
 
 mkdir -p "${OUTROOT}"
 
@@ -69,7 +76,11 @@ policy_numa_value() {
 placement_args() {
   case "$1" in
     migration_on|migration_off)
-      printf '%s\0' numactl "--cpunodebind=${CPU_NODE}" --localalloc
+      if declare -F iccd_workload_placement_args >/dev/null; then
+        iccd_workload_placement_args "${CPU_NODE}"
+      else
+        printf '%s\0' numactl "--cpunodebind=${CPU_NODE}"
+      fi
       ;;
     all_fast)
       printf '%s\0' numactl "--cpunodebind=${CPU_NODE}" --membind=0
@@ -166,6 +177,8 @@ run_one() {
     printf 'placement='
     printf '%q ' "${place[@]}"
     printf '\n'
+    printf 'workload_cpu_node=%s\n' "${CPU_NODE}"
+    printf 'workload_placement=numactl --cpunodebind=%s\n' "${CPU_NODE}"
     printf 'command='
     printf '%q ' "${cmd[@]}"
     printf '\n'

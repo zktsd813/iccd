@@ -31,6 +31,15 @@ ICCD_NUMA_SCAN_SIZE_MB="${ICCD_NUMA_SCAN_SIZE_MB:-4096}"
 ICCD_NUMA_SCAN_PERIOD_MIN_MS="${ICCD_NUMA_SCAN_PERIOD_MIN_MS:-1000}"
 ICCD_LOCAL_FAULT_SCAN_PERIOD_MS="${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
 
+ICCD_WORKLOAD_CPU_NODE="${ICCD_WORKLOAD_CPU_NODE:-0}"
+ICCD_PR_CPU_NODE="${ICCD_PR_CPU_NODE:-${ICCD_WORKLOAD_CPU_NODE}}"
+
+iccd_workload_placement_args() {
+  local cpu_node="${1:-${ICCD_WORKLOAD_CPU_NODE}}"
+
+  printf '%s\0' numactl "--cpunodebind=${cpu_node}"
+}
+
 iccd_print_required_protocol() {
   printf '[iccd-defaults] required protocol: %s\n' "${ICCD_REQUIRED_PROTOCOL_DOC}" >&2
 }
@@ -59,5 +68,7 @@ numa_balancing_off=${ICCD_NUMA_BALANCING_OFF}
 numa_scan_size_mb=${ICCD_NUMA_SCAN_SIZE_MB}
 numa_scan_period_min_ms=${ICCD_NUMA_SCAN_PERIOD_MIN_MS}
 local_fault_scan_period_ms=${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS}
+workload_cpu_node=${ICCD_WORKLOAD_CPU_NODE}
+workload_placement=numactl --cpunodebind=${ICCD_WORKLOAD_CPU_NODE}
 EOF
 }

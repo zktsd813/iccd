@@ -114,7 +114,10 @@ run_guest_matrix() {
   "${VMCTL}" verify-placement --name "${name}" --ssh-key "${SSH_KEY}" --ssh-port "${port}" \
     > "${EXP_ROOT}/host-logs/${name}.placement.log" 2>&1 || true
   ssh_vm "${port}" "mkdir -p /root/scripts"
-  copy_to_vm "${port}" "${REPO_ROOT}/scripts/run_pr_g29_global_guest.sh" /root/scripts/
+  copy_to_vm "${port}" \
+    "${REPO_ROOT}/scripts/run_pr_g29_global_guest.sh" \
+    "${REPO_ROOT}/scripts/iccd_experiment_defaults.sh" \
+    /root/scripts/
   ssh_vm "${port}" "chmod +x /root/scripts/run_pr_g29_global_guest.sh"
 
   log "running ${name}: ${runs}"
@@ -169,6 +172,8 @@ main() {
     printf 'hmat_slow_latency_ns=%s\n' "${HMAT_SLOW_LATENCY_NS}"
     printf 'hmat_fast_bandwidth=%s\n' "${HMAT_FAST_BANDWIDTH}"
     printf 'hmat_slow_bandwidth=%s\n' "${HMAT_SLOW_BANDWIDTH}"
+    printf 'workload_cpu_node=%s\n' "${ICCD_WORKLOAD_CPU_NODE:-}"
+    printf 'workload_placement=numactl --cpunodebind=%s\n' "${ICCD_WORKLOAD_CPU_NODE:-0}"
     [[ -z "${CXL_FMW_SIZE:-}" ]] || printf 'cxl_fmw_size=%s\n' "${CXL_FMW_SIZE}"
     numactl -H
   } > "${EXP_ROOT}/host-logs/host-config.log"

@@ -308,12 +308,19 @@ No QEMU or workload process was left running after the push.
    cd iccd
    ```
 
-3. Re-read workload context before interpreting experiments:
+3. For a top-level map, read:
+
+   ```text
+   PROJECT_OVERVIEW.md
+   ```
+
+4. Read workload context only when selecting workload candidates or interpreting
+   historical workload-specific results:
 
    ```text
    docs/current-migration-workloads-20260507.md
    docs/pre-linux-global-results-summary-20260601.md
    ```
 
-4. For a quick script sanity check, use `VM_ACTION=pr-smoke` with local kernel,
+5. For a quick script sanity check, use `VM_ACTION=pr-smoke` with local kernel,
    initrd, rootfs, SSH key, and benchmark paths.

@@ -344,6 +344,8 @@ stage_common_scripts() {
     /root/scripts/run_ours_experiment.sh
   copy_file "${SCRIPT_DIR}/local_util_adapt_controller.py" \
     /root/scripts/local_util_adapt_controller.py
+  copy_file "${SCRIPT_DIR}/iccd_experiment_defaults.sh" \
+    /root/scripts/iccd_experiment_defaults.sh
   copy_file "${SCRIPT_DIR}/run_workload_suite_guest.sh" \
     /root/scripts/run_workload_suite_guest.sh
   copy_file "${SCRIPT_DIR}/run_workload_case_guest.sh" \

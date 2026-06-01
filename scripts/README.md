@@ -17,6 +17,15 @@ Before running current ICCD experiments, read:
 docs/iccd-experiment-protocol-20260601.md
 ```
 
+Shared defaults live in:
+
+```text
+scripts/iccd_experiment_defaults.sh
+```
+
+The repo-wide workload placement is `ICCD_WORKLOAD_CPU_NODE=0`, which maps to
+`numactl --cpunodebind=0`.
+
 Current performance runs should use `SLOW_MEMORY_MODE=host-cxl`, which binds the
 guest slow node to the real host CXL NUMA node and exposes HMAT metadata. The
 `qemu-cxl` mode is for CXL Type3 topology/driver validation, not throughput or

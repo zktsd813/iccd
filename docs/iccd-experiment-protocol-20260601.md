@@ -3,6 +3,25 @@
 This document is the required pre-read before running or interpreting current
 ICCD experiments in `/Serverless/iccd-git`.
 
+## Pre-Run Summary
+
+Read this section before every experiment:
+
+- Use `/Serverless/iccd-git` only. Do not use `/Serverless/iccd`.
+- Do not use cgroup or memcg NUMA controls for the current baseline.
+- Boot `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage` through
+  `/Serverless/iccd-git/VM/vmctl.sh`.
+- Use `host-cxl`, not no-HMAT `numa`, for local-vs-CXL performance results.
+- Bind guest node0 memory to host node0 and guest node1 memory to host node2.
+- Preallocate QEMU memory with host NUMA bind policy.
+- Verify guest memory tiers split node0 and node1 before interpreting results.
+- Keep MGLRU at `0x0007`.
+- Use global NUMA balancing: `2` for migration on, `0` for migration off.
+- Enable global demotion and verify `demotion_target` contains `0 1`.
+- Run workloads with the shared default placement: `numactl --cpunodebind=0`.
+- For all-fast/all-slow controls, change VM memory sizing and use explicit
+  `numactl --membind` for the control node.
+
 ## Source Of Truth
 
 - Repo root: `/Serverless/iccd-git`
@@ -10,7 +29,8 @@ ICCD experiments in `/Serverless/iccd-git`.
 - Kernel build: `/Serverless/iccd-git/linux-global-build`
 - Kernel image: `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage`
 - VM helper: `/Serverless/iccd-git/VM/vmctl.sh`
-- Shared defaults: `/Serverless/iccd-git/scripts/iccd_experiment_defaults.sh`
+- Shared defaults and workload placement:
+  `/Serverless/iccd-git/scripts/iccd_experiment_defaults.sh`
 
 Do not use `/Serverless/iccd` for current work. Do not use cgroup or memcg NUMA
 controls as part of the current implementation or experiment baseline.
@@ -40,20 +60,17 @@ Interpretation:
 - QEMU must preallocate and bind memory so backing pages are actually allocated
   from the intended host NUMA nodes.
 
-For PR `-g29` local-memory experiments:
+Run workloads with the shared default placement unless an experiment explicitly
+states a control placement:
 
 ```text
-LOCAL16_FAST_MEM=16G
-LOCAL16_SLOW_MEM=176G
+numactl --cpunodebind=0 /root/pr ...
 ```
 
-For all-fast PR `-g29`, use enough fast memory for the graph and bind the VM's
-fast memory to host DRAM:
+This is encoded globally in `scripts/iccd_experiment_defaults.sh`:
 
 ```text
-ALLFAST_FAST_MEM=160G
-ALLFAST_SLOW_MEM=4G
-ALLFAST_HOST_NODE=0-1
+ICCD_WORKLOAD_CPU_NODE=0
 ```
 
 ## Slow Memory Modes

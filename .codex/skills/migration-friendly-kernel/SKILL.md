@@ -23,7 +23,20 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Do not use `/Serverless/iccd` for current work.
 - Treat `/Serverless/Migration-friendly/linux` as an upstream/reference tree only. Do not patch it, build it, or boot it for current ICCD experiments unless the user explicitly asks.
 - Before running or interpreting any experiment, read `/Serverless/iccd-git/docs/iccd-experiment-protocol-20260601.md`. This is the current VM topology, host-CXL, HMAT, and kernel-runtime source of truth.
-- Also read `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` before workload experiments. It contains the current workload candidates and the notes needed to avoid confusing older sparse-64 cases with the block2M sparse candidate.
+- Use `/Serverless/iccd-git/PROJECT_OVERVIEW.md` for a high-level map of the repo and references.
+- Read `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` only when selecting or interpreting the current workload candidates; it is not a mandatory pre-read for every experiment.
+
+## Required pre-experiment summary
+
+- Use `/Serverless/iccd-git` only; do not use `/Serverless/iccd`.
+- Do not use cgroup or memcg NUMA controls for the current baseline.
+- Boot `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage` with `/Serverless/iccd-git/VM/vmctl.sh`.
+- Use `SLOW_MEMORY_MODE=host-cxl` for performance experiments and verify guest memory tiers split node0/node1.
+- Bind guest node0 memory to host node0 and guest node1 memory to host node2 with QEMU preallocation and host NUMA bind policy.
+- Verify guest MGLRU is `0x0007`, global demotion is enabled, and `demotion_target` contains `0 1`.
+- Use global NUMA balancing only: `2` for migration on, `0` for migration off.
+- Use the repo-wide workload placement `numactl --cpunodebind=0`.
+- For all-fast/all-slow controls, size the VM appropriately and use explicit `numactl --membind` for the control node.
 
 ## Experiment outputs
 
@@ -36,15 +49,11 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Keep raw outputs, VM run directories, logs, and large generated result trees out of `/Serverless/iccd-git` unless the user explicitly asks to commit a summarized artifact.
 - Put reusable host/guest workload changes in `/Serverless/iccd-git/scripts`; put paper/repo summaries in `/Serverless/iccd-git/docs`.
 
-## Current workload labels
+## Optional workload references
 
-- Current workload catalog: `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md`.
-- Current phase baseline candidate: `phase_mulshift4g_block2m_sparse64_localft`, alternating friendly `mulshift-hotset-4g-fixed` with unfriendly `sparse-stride-read-64g-block2m` under local-first-touch placement.
-- Current friendly phase: `mulshift-hotset-4g-fixed`.
-- Current primary unfriendly phase: `sparse_stride_read_64g_block2m_localft`, a local-first-touch 64G fixed sparse read with `--bw-stride 512` and `--bw-block 2M`.
-- Current secondary unfriendly phase: `sparse_stride_read_64g`, a local-first-touch 64G fixed sparse read with `--bw-stride 512` and `--bw-block 4K`.
-- The older `sparse_stride_read_64g_block2m_remoteft` label is not a validated negative case under the current 256MB scan setup after the reclaimd balanced-accounting fix; migration on improved that remote-firsttouch run.
-- Do not confuse `sparse_stride_read_64g_block2m_remoteft` with the older `sparse_stride_read_64g_remoteft` or the built-in sparse phase of `phase_mulshift4g_sparse64`; those older cases use the 4 KiB block sparse shape, while the block2M candidate uses `--bw-block 2M`.
+- Workload catalog: `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md`.
+- Read it when a task asks for workload selection, candidate interpretation, phase-pair details, or historical workload comparison.
+- Do not treat it as a required pre-read for every kernel, VM, or PR run.
 
 ## Required experiment VM topology
 
@@ -53,15 +62,11 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Bind guest NUMA node1 memory to host NUMA node2 CXL memory: `NUMA_NODE1_HOST_NODES=2`. Treat this as the slow/remote node.
 - Use host NUMA memory policy `NUMA_MEM_POLICY=bind` and preallocate with `NUMA_PREALLOC=1` so QEMU memory backing is actually allocated from the intended host NUMA nodes.
 - Use VM slow-memory mode `host-cxl` for performance experiments. This keeps guest node1 as KVM RAM backed by host NUMA node2 and exposes HMAT so the guest kernel separates node0/node1 memory tiers. Do not use QEMU Type3 `qemu-cxl`/`cxl` mode for performance results unless explicitly measuring QEMU CXL emulation overhead.
-- For current 16G local-memory experiments, size the VM fast node directly as guest node0 `NUMA_NODE0_MEM=16G`; put the remaining workload memory on guest node1.
+- Run workloads with the repo-wide default placement from `scripts/iccd_experiment_defaults.sh`: `ICCD_WORKLOAD_CPU_NODE=0`, or `numactl --cpunodebind=0`.
 - Do not force a NUMA hot threshold unless an experiment explicitly asks for it. Use the kernel default hot threshold.
 - Use the default NUMA scan size `NUMA_SCAN_SIZE_MB=4096` unless an experiment explicitly asks for a different scan size.
 - Use the default NUMA scan period minimum `NUMA_SCAN_PERIOD_MIN_MS=1000` unless an experiment explicitly asks for a different scan cadence. Do not use old `SCAN_PERIOD_SCALE` reasoning for current runs.
-- Current requested placement mode is local-first-touch before measurement. For friendly validation, use hotset/window-only remote first-touch and report the initial node0/node1 residency.
-- Current microbenchmark placement default is local-first-touch first. Do not use `_remoteft` candidates or global remote-firsttouch unless the user explicitly asks for a remote-firsttouch diagnostic.
-- For alternating friendly/unfriendly phase experiments, prefer `phase_mulshift4g_block2m_sparse64_localft`. Do not use `phase_mulshift4g_block2m_sparse64` unless remote-firsttouch is intentionally requested, because that older label sets `CANDIDATE_REMOTE_FIRSTTOUCH=1`.
-- For local-first-touch microbench runs, use `PREFAULT_PHASE_GATE=1`, `PREFAULT_SETTLE_RECLAIMD=0`, `LOCAL_NODE=0`, `REMOTE_NODE=1`, `NUMA_SCAN_SIZE_MB=4096`, and `NUMA_SCAN_PERIOD_MIN_MS=1000`. Report `remote_firsttouch=0` or the equivalent candidate metadata in the summary.
-- For FRIENDLY validation, keep the arena local-first-touch and place only the friendly hotset/window on remote node1 before measurement; then reset the workload memory policy before touching the rest of the arena. Report initial node0/node1 residency so this is visible.
+- For workload candidate-specific placement, phase-pair, or first-touch rules, consult `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` only when needed.
 - Results without these host bindings are not valid for local-vs-CXL interpretation, even if guest NUMA placement appears correct.
 
 ## Required VM Memory-Management State
@@ -97,7 +102,7 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Default QEMU tree: `/Serverless/Migration-friendly/qemu`
 - Phase microbench output override: `EXP_NAME=<experiment-name>; mkdir -p /Serverless/iccd-git/experiments/${EXP_NAME}/{qemu-logs/phase_candidate_microbench,summaries,graphs,notes}; OUTDIR=/Serverless/iccd-git/experiments/${EXP_NAME}/qemu-logs/phase_candidate_microbench /Serverless/Migration-friendly/scripts/kernel/run_qemu_phase_candidate_microbench.sh`
 - Required VM binding variables for phase experiments: `HOST_CPUS=0-31 GUEST_CPUS=32 GUEST_NODE0_CPUS=0-31 FAST_HOST_NODE=0 SLOW_HOST_NODE=2 SLOW_MEMORY_MODE=host-cxl NUMA_MEM_POLICY=bind NUMA_PREALLOC=1 NUMA_SCAN_SIZE_MB=4096 NUMA_SCAN_PERIOD_MIN_MS=1000`.
-- Before every experiment, re-read `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md`.
+- Read `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` only when workload candidate details are needed.
 - After every experiment, include the kernel image, initrd image, KVM status, VM CPU/memory/node binding, global NUMA/demotion knobs, scan tuning, workload, on/off throughput, promoted pages/GiB, and demoted pages/GiB in the result summary. Report demotion as `pgdemote_direct + pgdemote_kswapd` when both counters are available.
 
 ## Git discipline
