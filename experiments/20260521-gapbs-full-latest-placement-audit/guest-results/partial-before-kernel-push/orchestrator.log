@@ -1,5 +1,0 @@
-[2026-05-21T05:18:20Z] start workload=pr cap=8g case=off
-[2026-05-21T05:21:22Z] done workload=pr cap=8g case=off rc=0
-[2026-05-21T05:21:22Z] start workload=pr cap=8g case=on
-[2026-05-21T05:29:08Z] done workload=pr cap=8g case=on rc=0
-[2026-05-21T05:29:09Z] start workload=pr cap=8g case=oneshot-w5

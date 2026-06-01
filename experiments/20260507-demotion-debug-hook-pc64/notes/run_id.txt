@@ -1,2 +1,0 @@
-EXP=20260507-demotion-debug-hook-pc64
-RUN_ID=demotion_debug_pc64_20260507T113332Z

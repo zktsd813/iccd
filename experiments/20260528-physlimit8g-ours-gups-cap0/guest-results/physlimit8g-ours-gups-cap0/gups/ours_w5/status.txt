@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=645
-controller_csv=/root/physlimit8g-ours-gups-cap0/gups/ours_w5/controller.csv
-stdout=/root/physlimit8g-ours-gups-cap0/gups/ours_w5/workload.stdout.log
-stderr=/root/physlimit8g-ours-gups-cap0/gups/ours_w5/workload.stderr.log

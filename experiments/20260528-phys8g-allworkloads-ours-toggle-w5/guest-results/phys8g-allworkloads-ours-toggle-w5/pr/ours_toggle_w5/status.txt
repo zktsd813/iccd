@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=234
-controller_csv=/root/phys8g-allworkloads-ours-toggle-w5/pr/ours_toggle_w5/controller.csv
-stdout=/root/phys8g-allworkloads-ours-toggle-w5/pr/ours_toggle_w5/workload.stdout.log
-stderr=/root/phys8g-allworkloads-ours-toggle-w5/pr/ours_toggle_w5/workload.stderr.log

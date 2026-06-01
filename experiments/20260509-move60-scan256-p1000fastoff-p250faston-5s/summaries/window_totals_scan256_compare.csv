@@ -1,7 +1,0 @@
-case,period_ms,fast_scan,phase,promote_gib,hint_faults,demote_gib,first_promo_gt1k_s,promo_1gib_s,promo_2gib_s,promo_4gib_s,first_1gops_w2_s,first_1p5gops_w2_s,first_1p8gops_w2_s
-1000ms-fastoff-scan256,1000,0,window1,0.0,0,0.0,,,,,,,
-1000ms-fastoff-scan256,1000,0,window2,0.0,0,0.0,,,,,,,
-1000ms-fastoff-scan256,1000,0,post,5.340576171875e-05,18,0.0,,,,,,,
-250ms-faston-scan256,250,1,window1,4.0,1153445,4.00146484375,5.093,10.115,10.115,20.162,,,
-250ms-faston-scan256,250,1,window2,0.0,1048576,0.0,,,,,,,
-250ms-faston-scan256,250,1,post,4.9591064453125e-05,13,0.0,,,,,,,

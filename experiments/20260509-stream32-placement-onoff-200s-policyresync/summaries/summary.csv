@@ -1,7 +1,0 @@
-placement,placement_label,candidate,policy,avg_mops_s,median_mops_s,steady_MBps,promote_pages,promote_gib,demote_pages,demote_gib,hint_faults,pte_updates_pages,pte_updates_gib,returncode
-remote,0G local / 32G remote,stream_read_32g_remote_4kstride,off,65.027441,65.011712,496.111654,0,0.000000,0,0.000000,0,0,0.000000,0
-remote,0G local / 32G remote,stream_read_32g_remote_4kstride,on,214.524232,198.443008,1635.993954,6691149,25.524708,2710731,10.340618,18146815,17477701,66.672138,0
-split8,8G local / 24G remote,stream_read_32g_split8_4kstride,off,280.946184,280.231936,2143.543620,0,0.000000,0,0.000000,0,0,0.000000,0
-split8,8G local / 24G remote,stream_read_32g_split8_4kstride,on,231.998751,241.696768,1771.611585,4288849,16.360661,2404864,9.173828,15664042,15235158,58.117516,0
-split16,16G local / 16G remote,stream_read_32g_split16_4kstride,off,563.368428,563.347456,4298.252939,0,0.000000,0,0.000000,0,0,0.000000,0
-split16,16G local / 16G remote,stream_read_32g_split16_4kstride,on,218.477363,199.229440,1638.819804,3027814,11.550194,2872539,10.957867,14072061,13769277,52.525623,0

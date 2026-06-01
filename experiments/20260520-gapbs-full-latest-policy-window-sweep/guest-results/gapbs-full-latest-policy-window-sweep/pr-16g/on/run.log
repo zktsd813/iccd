@@ -1,3 +1,0 @@
-[2026-05-20T08:03:25Z] controller disabled for policy=on
-[2026-05-20T08:03:25Z] running workload
-[2026-05-20T08:08:46Z] done rc=0 elapsed_s=320 outdir=/root/gapbs-full-latest-policy-window-sweep/pr-16g/on

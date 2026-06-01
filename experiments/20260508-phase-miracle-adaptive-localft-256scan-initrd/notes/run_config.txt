@@ -1,8 +1,0 @@
-candidate=phase_mulshift4g_block2m_sparse64_localft
-policy=oracle_cgroup_global0
-interpretation=miracle adaptive: phase-boundary-aware cgroup migration on for friendly, off for sparse
-friendly=mulshift-hotset-4g-fixed
-unfriendly=sparse-stride-read-64g-block2m
-placement=local-first-touch, remote_firsttouch=0
-phase_ms=60000
-phase_repeat=3

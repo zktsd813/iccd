@@ -1,4 +1,0 @@
-placement,placement_label,off_mops_s,on_mops_s,on_off_ratio,on_promote_gib,on_demote_gib,on_hint_faults,on_pte_updates_gib
-remote,0G local / 32G remote,65.019251,265.592504,4.084829,43.766338,28.242020,25461906,92.752861
-split8,8G local / 24G remote,280.554373,267.896750,0.954884,35.551346,27.902355,23435666,85.844875
-split16,16G local / 16G remote,563.812762,258.282619,0.458100,30.084560,29.042603,22819726,84.042049

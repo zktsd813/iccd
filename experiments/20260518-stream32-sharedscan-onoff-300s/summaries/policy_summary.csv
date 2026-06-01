@@ -1,3 +1,0 @@
-policy,final_avg_mib_s,sample_mean_mib_s,sample_median_mib_s,promote_gib,demote_gib,hint_faults,pte_updates
-off,5271.0,5269.3,5312.0,0.00,0.00,0,0
-on,517.8,522.9,0.0,60.47,60.24,47481507,39415456

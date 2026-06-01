@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=197
-controller_csv=/root/gapbs-full-latest-policy-window-sweep/pr-16g/oneshot-w10/controller.csv
-stdout=/root/gapbs-full-latest-policy-window-sweep/pr-16g/oneshot-w10/workload.stdout.log
-stderr=/root/gapbs-full-latest-policy-window-sweep/pr-16g/oneshot-w10/workload.stderr.log

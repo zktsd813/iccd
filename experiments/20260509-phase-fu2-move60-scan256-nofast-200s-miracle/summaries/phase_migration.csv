@@ -1,7 +1,0 @@
-policy,label,phase_id,phase_kind,phase_name,sample_start_ms,sample_end_ms,hint_faults,pte_updates_pages,pte_updates_gib,promote_pages,promote_gib,demote_direct_pages,demote_kswapd_pages,demote_pages,demote_gib,migrate_pages,migrate_gib
-off,off,1,friendly,move60s-hotset-4g-remote,56,196480,0,0,0.0,0,0.0,0,0,0,0.0,0,0.0
-off,off,2,unfriendly,stream-read-32g-split16-4k,201508,397374,0,0,0.0,0,0.0,0,0,0,0.0,0,0.0
-on,on,1,friendly,move60s-hotset-4g-remote,57,196216,8778792,20343943,77.60598373413086,3959813,15.105487823486328,4024773,0,4024773,15.353290557861328,3959813,15.105487823486328
-on,on,2,unfriendly,stream-read-32g-split16-4k,201238,397576,24344544,25426933,96.99605178833008,5988648,22.844879150390625,5557427,0,5557427,21.199901580810547,5988648,22.844879150390625
-oracle_cgroup_global0,Miracle,1,friendly,move60s-hotset-4g-remote,59,196266,8845102,20499434,78.19913482666016,4069333,15.523273468017578,3916805,0,3916805,14.941425323486328,4069333,15.523273468017578
-oracle_cgroup_global0,Miracle,2,unfriendly,stream-read-32g-split16-4k,201289,397183,0,0,0.0,0,0.0,0,0,0,0.0,0,0.0

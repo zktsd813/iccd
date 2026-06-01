@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=551
-controller_csv=/root/physlimit-gups-ours-toggle-w5/16g/toggle_w5/controller.csv
-stdout=/root/physlimit-gups-ours-toggle-w5/16g/toggle_w5/workload.stdout.log
-stderr=/root/physlimit-gups-ours-toggle-w5/16g/toggle_w5/workload.stderr.log

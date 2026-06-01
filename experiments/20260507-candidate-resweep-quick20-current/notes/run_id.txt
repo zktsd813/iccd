@@ -1,2 +1,0 @@
-EXP=20260507-candidate-resweep-quick20-current
-RUN_ID=quick20_current_20260507T110328Z

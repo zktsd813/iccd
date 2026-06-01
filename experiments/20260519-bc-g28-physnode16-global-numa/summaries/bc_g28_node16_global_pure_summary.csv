@@ -1,3 +1,0 @@
-case,global_numa_balancing,demotion_enabled,demotion_target,read_time_s,avg_trial_time_s,elapsed_s,trial1_s,trial2_s,trial3_s,trial4_s,trial5_s,trial6_s,trial7_s,trial8_s,numa_hint_faults,numa_pte_updates,numa_pages_migrated,pgpromote_success,pgdemote_direct,pgdemote_kswapd,pgmigrate_success,pgmigrate_fail,pgscan_kswapd,pgsteal_kswapd
-off,0,false,"0 -1;1 -1",27.95439,46.42319,401,53.10129,47.48541,40.59316,51.56669,47.60861,46.55481,39.41550,45.06008,0,0,0,0,0,0,0,3,2857716,2855292
-global2,2,true,"0 1;1 -1",23.68597,44.43432,380,53.18716,46.39577,39.62242,47.20928,44.37167,45.33825,37.19298,42.15707,0,0,0,0,0,2376392,2376392,1,2376400,2376392

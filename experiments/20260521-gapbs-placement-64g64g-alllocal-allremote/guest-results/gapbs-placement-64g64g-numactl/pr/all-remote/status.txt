@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=733
-controller_csv=/root/gapbs-placement-64g64g-numactl/pr/all-remote/controller.csv
-stdout=/root/gapbs-placement-64g64g-numactl/pr/all-remote/workload.stdout.log
-stderr=/root/gapbs-placement-64g64g-numactl/pr/all-remote/workload.stderr.log

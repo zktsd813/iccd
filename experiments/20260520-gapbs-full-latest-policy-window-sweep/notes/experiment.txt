@@ -1,5 +1,0 @@
-Full latest-kernel GAPBS comparison.
-Kernel/initrd: /Serverless/Migration-friendly/linux #179 6.18.0modified and matching initramfs-6.18.0modified.img.
-Workloads: PR and BC with prebuilt -g28 serialized graph loaded via -f.
-Cases: workload={pr,bc}, local cap={8G,16G}, policies={off,on,oneshot windows 5/10/20,toggle windows 5/10/20}.
-Trials: 8.

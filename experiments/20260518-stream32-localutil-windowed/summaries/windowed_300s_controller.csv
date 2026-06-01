@@ -1,6 +1,0 @@
-event,elapsed_s,window,window_seq,pte_delta,refault_delta,hit_delta,lost_delta,access_pct,fast_pct,consecutive,node_balancing
-start,0.0,0,1,0,0,0,0,0.00,0.00,0,2
-sample,71.2,1,2,422177,422177,422177,0,100.00,100.00,1,2
-sample,141.4,2,3,458078,416476,415086,36358,90.91,90.61,2,2
-sample,211.6,3,4,381378,350750,350770,29197,91.96,91.97,3,2
-off,211.7,3,4,381378,350750,350770,29197,91.96,91.97,3,0

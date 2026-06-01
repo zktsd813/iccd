@@ -1,3 +1,0 @@
-policy,mean_mops_s,median_mops_s,cv,ops_total,promote_gib,migrate_gib,hint_faults,promote_pages,blocked,sampled_refault,sampled_refault_avg_us,sampled_refault_total_ms,max_anon_n0_gib,max_anon_n1_gib,max_usage_pages,cap_pages,low_pages,high_pages,cap_gib,low_gib,high_gib
-off,119.401990,119.406592,0.001188,7164067840,0.000000,0.000000,0,0,0,0,0,0,1.423038,62.577374,373045,4194304,3984588,4110417,16.000000,15.199997,15.679996
-on,97.321350,93.782016,0.138623,5924192256,21.777267,21.777267,247778487,5708780,1167601,570879,1,1044,15.617538,62.529343,4094046,4194304,3984588,4110417,16.000000,15.199997,15.679996

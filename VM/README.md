@@ -1,113 +1,260 @@
-# ICCD VM Experiment Scripts
+# Migration-Friendly VM Harness
 
-This directory collects the VM launch and guest-side workload scripts currently
-used for the ICCD physical-limit experiments.  The files here are a curated
-snapshot from the active experiment paths so the VM setup is easier to find and
-reuse.
+This directory is a small standalone VM setup repo for the NUMA/CXL experiments.
+It keeps only portable host-side VM orchestration. Large rootfs images, overlays,
+ISOs, and generated logs are intentionally ignored.
 
-## Current VM Setup
+## Selected Inputs
 
-The latest physical 8G workload runs use this topology:
+The script distills the reusable parts from the existing experiment tree:
 
-| item | value |
-| --- | --- |
-| kernel image | `/Serverless/iccd/linux-build-mt/arch/x86/boot/bzImage` |
-| initrd | `/Serverless/Migration-friendly/scripts/kernel/kernel-artifacts/initramfs-6.18.0modified.img` |
-| QEMU binary | `/Serverless/Migration-friendly/qemu/build/qemu-system-x86_64` |
-| rootfs | `/Serverless/Migration-friendly/qemu/build/ubuntu.img` |
-| launcher | `/Serverless/Migration-friendly/scripts/kernel/launch_kernel_qemu.sh` |
-| acceleration | KVM |
-| vCPUs | 32 |
-| host CPU pinning | `0-31` |
-| guest node0 | CPUs `0-31`, memory `8G`, host NUMA node `0` |
-| guest node1 | memory `160G`, host NUMA node `2` |
-| total guest memory | `168G` |
-| QEMU memory policy | `bind`, `prealloc=on` |
-| MGLRU runtime state | `0x0007` |
+- `scripts/kernel/launch_kernel_qemu.sh`: QEMU boot flow, kernel/rootfs/initrd options, SSH port forwarding.
+- `reuse_time/docs/cxl-hotset-perf-analysis-20260506.md`: corrected CXL-backed placement, where guest node0 is host node0 DRAM and guest node1 is host node2 CXL.
+- `reuse_time/vm/prepare_vm.sh`: guest-side debugfs/module preparation assumptions.
 
-Node0 is the local/fast tier.  Node1 is the remote/slow tier.  For the current
-physical-limit experiments, the local capacity is enforced by the VM topology
-itself: guest node0 is physically sized to 8G and the local-util runner uses
-`--capacity-pages 0`.
+The ICCD workload runners are kept under `scripts/` as a small reusable set.
+Do not add per-experiment one-off runners; boot and stage through this
+directory, then select workloads with environment variables.
 
-## Directory Layout
+## Quick Start
 
-| path | role |
-| --- | --- |
-| `host/` | Host-side wrappers that launch QEMU, stage binaries into the guest, run the guest workload script, and collect results. |
-| `guest/` | Guest-side workload orchestrators used by recent physical on/off and ours-toggle experiments. |
-| `scripts/` | Reusable controller and workload helper scripts staged into the guest by host wrappers. |
+Check host dependencies and NUMA topology:
 
-## Important Files
-
-| file | purpose |
-| --- | --- |
-| `host/run_phys8g_allworkloads_ours_toggle_w5.sh` | Full host wrapper for the physical 8G all-workload `ours-toggle w5` run. |
-| `host/resume_phys8g_allworkloads_ours_toggle_w5.sh` | Resume variant for the same experiment. |
-| `guest/run_all_workloads_phys8g_ours_toggle_w5_guest.sh` | Runs PR, BC, Silo, Liblinear, NAS FT/LU/SP, GUPS, Graph500, BTree, and XSBench under the local-util controller. |
-| `guest/run_single_workload_physical_limit_guest.sh` | Guest runner used for physical-limit migration `off` and `on` baselines. |
-| `scripts/run_local_util_adapt_experiment.sh` | Workload-agnostic wrapper that creates the cgroup, applies NUMA/tiering knobs, launches the controller, and runs one benchmark command. |
-| `scripts/local_util_adapt_controller.py` | Userspace controller that samples local-fault windows and toggles cgroup migration. |
-| `scripts/stage_single_workloads_to_vm.sh` | Helper for staging benchmark binaries and inputs into the guest. |
-
-## Policy Settings
-
-Physical on/off baseline:
-
-| policy | global NUMA balancing | demotion | cgroup node balancing |
-| --- | ---: | ---: | ---: |
-| `off` | `0` | `0` | `0` |
-| `on` | `2` | `1` | `2` |
-
-The latest physical on/off guest runner also sets:
-
-- `scan_size_mb=256`
-- `scan_period_min_ms=1000`
-- `fast_scan=0`
-- `demotion_target="0 1"`
-- `cpuset.cpus=0-31`
-- `cpuset.mems=0,1`
-
-Ours-toggle w5:
-
-- Starts with migration enabled for the workload cgroup.
-- Uses `local_fault_rate=10`.
-- Uses `window_sec=5`.
-- Turns migration off after either local-access or remote-ratio conditions hold
-  for three consecutive windows.
-- Re-enables migration when the stop condition does not hold for two consecutive
-  windows (`reenable_consecutive=2`).
-- Keeps `capacity_pages=0`, so physical node0 size is the local-memory limit.
-
-## Workload Inputs
-
-Host wrappers stage benchmark files from `/Serverless/benchmark` into the guest.
-For GAPBS PR/BC, the measured run uses a prebuilt graph:
-
-```text
-/root/gapbs_graphs/kron_g28.sg
+```bash
+./vmctl.sh check
 ```
 
-The graph is copied from:
+Create a small writable overlay from an existing rootfs image:
 
-```text
-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g28.sg
+```bash
+./vmctl.sh create-image \
+  --overlay-from /path/to/base-ubuntu.qcow2 \
+  --output images/ubuntu.overlay.qcow2
 ```
 
-PR/BC should use `-f /root/gapbs_graphs/kron_g28.sg` in measured runs, not
-`-g28`, so graph generation and build time are excluded.
+Boot the corrected DRAM/CXL layout used in the latest experiments:
 
-## Source Snapshot
+```bash
+./vmctl.sh boot \
+  --kernel /Serverless/Migration-friendly/linux/arch/x86/boot/bzImage \
+  --initrd /boot/initrd.img-6.18.0modified \
+  --rootfs images/ubuntu.overlay.qcow2 \
+  --rootfs-format qcow2 \
+  --ssh-key /tmp/reuse_vm_g28/id_rsa \
+  --ssh-port 10023 \
+  --host-cpus 0-31 \
+  --guest-cpus 32 \
+  --guest-node0-cpus 0-31 \
+  --fast-host-node 0 \
+  --slow-host-node 2 \
+  --fast-mem 64G \
+  --slow-mem 64G
+```
 
-These files were copied from:
+Wait for SSH and verify placement:
 
-| VM copy | source |
-| --- | --- |
-| `host/run_phys8g_allworkloads_ours_toggle_w5.sh` | `experiments/20260528-phys8g-allworkloads-ours-toggle-w5/notes/run_phys8g_allworkloads_ours_toggle_w5.sh` |
-| `host/resume_phys8g_allworkloads_ours_toggle_w5.sh` | `experiments/20260528-phys8g-allworkloads-ours-toggle-w5/notes/resume_phys8g_allworkloads_ours_toggle_w5.sh` |
-| `guest/run_all_workloads_phys8g_ours_toggle_w5_guest.sh` | `experiments/20260528-phys8g-allworkloads-ours-toggle-w5/guest/run_all_workloads_phys8g_ours_toggle_w5_guest.sh` |
-| `guest/run_single_workload_physical_limit_guest.sh` | `experiments/20260527-physlimit-cgfix-8g-global02-onoff/guest/run_single_workload_physical_limit_guest.sh` |
-| `scripts/*` | `/Serverless/iccd/scripts/*` |
+```bash
+./vmctl.sh wait-ssh --ssh-key /tmp/reuse_vm_g28/id_rsa --ssh-port 10023
+./vmctl.sh verify-placement --ssh-key /tmp/reuse_vm_g28/id_rsa --ssh-port 10023
+```
 
-The canonical active kernel source remains `/Serverless/iccd/linux`; the
-reference Migration-friendly tree should not be patched for current ICCD runs.
+Stop the VM:
+
+```bash
+./vmctl.sh stop
+```
+
+## QEMU Source Policy
+
+QEMU source is not copied into this repo by default. The experiments used
+standard QEMU features:
+
+- `memory-backend-ram`
+- `host-nodes=...,policy=bind`
+- guest NUMA nodes
+- KVM acceleration
+- user-mode SSH forwarding
+
+Those are available in normal distro QEMU builds. If a host does not have a
+suitable QEMU, build one locally without committing it:
+
+```bash
+./vmctl.sh build-qemu --ref v9.2.2
+./vmctl.sh boot --qemu-bin ./qemu-build/bin/qemu-system-x86_64 ...
+```
+
+Generated QEMU source/build directories are ignored by git.
+
+## Supported Feature Matrix
+
+| Feature | Supported | Command |
+| --- | --- | --- |
+| Dependency and NUMA topology check | yes | `check` |
+| Empty qcow2 creation | yes | `create-image --size` |
+| Overlay qcow2 from a base image | yes | `create-image --overlay-from` |
+| Ubuntu cloud image download | yes | `create-image --download` |
+| Local QEMU source clone/build | yes | `build-qemu` |
+| Kernel/module build and dracut initrd creation | yes | `build-initrd` |
+| KVM/TCG selection | yes | `boot --accel` |
+| Kernel/initrd/direct rootfs boot | yes | `boot --kernel --initrd --rootfs` |
+| Corrected host DRAM/CXL binding | yes | `boot --fast-host-node --slow-host-node` |
+| QEMU CPU pinning | yes | `boot --host-cpus` |
+| QMP socket, pidfile, serial log | yes | `boot`, `status` |
+| SSH wait and login | yes | `wait-ssh`, `ssh` |
+| Guest debugfs/cgroup/demotion prep | yes | `prepare-guest` |
+| Upload/download helper | yes | `copy-to`, `copy-from` |
+| Guest tmux background command | yes | `tmux-run` |
+| ICCD workload matrix sweeps | yes | `scripts/run_workload_suite_guest.sh` |
+| Large rootfs/ISO storage | no | generated or supplied locally |
+
+## ICCD Ours Scripts
+
+The active workload-side entrypoints are:
+
+- `scripts/stage_workloads_to_vm.sh`: host-side staging into a live VM
+- `scripts/run_workload_suite_guest.sh`: guest-side matrix/calibration runner
+- `scripts/run_ours_experiment.sh`: one workload under `off`, `on`, or `ours`
+- `scripts/run_workload_case_guest.sh`: real-world workload commands/profiles
+- `scripts/local_util_adapt_controller.py`: local-fault controller
+
+Example staging and run:
+
+```bash
+PORT=10064 WORKLOADS=scalable ./scripts/stage_workloads_to_vm.sh
+
+./vmctl.sh tmux-run --ssh-port 10064 --session rss60 -- \
+  'OUTROOT=/root/rss60-8g WORKLOADS=scalable POLICIES="off on ours" MODE=matrix /root/scripts/run_workload_suite_guest.sh'
+```
+
+The intent is that VM placement and workload policy are both reusable here,
+with workload selection controlled through environment variables.
+
+## ICCD PR Smoke Test
+
+From a fresh `iccd` clone, use `VM/` as the VM harness directory and point these
+variables at local artifacts. The rootfs, kernel, initrd, SSH key, and benchmark
+cache are supplied locally and are intentionally not committed.
+
+```bash
+cd VM
+
+export QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+export KERNEL=/path/to/bzImage
+export INITRD=/path/to/initramfs.img
+export ROOTFS=/path/to/ubuntu.img
+export SSH_KEY=/path/to/id_rsa
+export BENCHMARK_DIR=/Serverless/benchmark
+export PORT=10084
+
+./vmctl.sh boot \
+  --qemu-bin "$QEMU_BIN" \
+  --kernel "$KERNEL" \
+  --initrd "$INITRD" \
+  --rootfs "$ROOTFS" \
+  --rootfs-format raw \
+  --ssh-port "$PORT" \
+  --name iccd-pr-script-smoke \
+  --host-cpus 0-31 \
+  --guest-cpus 32 \
+  --guest-node0-cpus 0-31 \
+  --fast-host-node 0 \
+  --slow-host-node 2 \
+  --fast-mem 8G \
+  --slow-mem 160G \
+  --accel kvm
+
+./vmctl.sh wait-ssh --ssh-key "$SSH_KEY" --ssh-port "$PORT"
+./vmctl.sh verify-placement --ssh-key "$SSH_KEY" --ssh-port "$PORT" \
+  --name iccd-pr-script-smoke
+
+PORT="$PORT" SSH_KEY="$SSH_KEY" WORKLOADS=pr \
+  BENCHMARK_DIR="$BENCHMARK_DIR" ./scripts/stage_workloads_to_vm.sh
+
+./vmctl.sh ssh --ssh-key "$SSH_KEY" --ssh-port "$PORT" -- \
+  'OUTROOT=/root/script-smoke-pr WORKLOADS=pr POLICIES="off ours" \
+   CAPS=physical:0 MODE=matrix PR_ITERATIONS=1 PR_TRIALS=1 \
+   TIMEOUT_SEC=1200 OMP_THREADS=32 WINDOW_SEC=2 MIN_ARM_WINDOWS=1 \
+   MAX_ARM_WINDOWS=2 OBSERVE_WINDOWS=1 \
+   /root/scripts/run_workload_suite_guest.sh'
+
+./vmctl.sh ssh --ssh-key "$SSH_KEY" --ssh-port "$PORT" -- \
+  'cat /root/script-smoke-pr/summary.csv'
+
+./vmctl.sh stop --name iccd-pr-script-smoke
+```
+
+For full PR runs, use the same flow with `POLICIES="off on ours"`,
+`PR_ITERATIONS=20`, and the desired `--fast-mem` value such as `8G`, `16G`, or
+`32G`. The GAPBS graph should already exist at
+`${BENCHMARK_DIR}/gapbs/benchmark/graphs/kron_g28.sg`; the staging script copies
+it into the guest as `/root/gapbs_graphs/kron_g28.sg`.
+
+## Corrected Default Topology
+
+The default `boot` topology is:
+
+```text
+host CPU affinity: 0-31
+guest node0: CPUs 0-31, 64G memory, host node0 bind, DRAM fast tier
+guest node1: no CPUs, 64G memory, host node2 bind, CXL slow tier
+QEMU memory backends: host-nodes=0/2, policy=bind, prealloc=on
+```
+
+This avoids the earlier invalid setup where the guest remote node was not bound
+to host CXL memory.
+
+## Image Policy
+
+No large image is committed. `vmctl.sh create-image` can:
+
+- create an empty qcow2 disk,
+- create a qcow2 overlay from an existing base image,
+- download an Ubuntu cloud image on demand.
+
+Downloaded/generated images stay under `images/` by default and are ignored.
+
+## Useful Commands
+
+For the full operational manual, including command options and an end-to-end
+experiment flow, see [USAGE.md](USAGE.md).
+
+Print the QEMU command without running it:
+
+```bash
+./vmctl.sh boot --dry-run --kernel /path/bzImage --rootfs /path/rootfs.qcow2
+```
+
+Open SSH into the guest:
+
+```bash
+./vmctl.sh ssh --ssh-key /tmp/reuse_vm_g28/id_rsa --ssh-port 10023
+```
+
+Run a command in the guest:
+
+```bash
+./vmctl.sh ssh --ssh-key /tmp/reuse_vm_g28/id_rsa --ssh-port 10023 -- 'numactl -H'
+```
+
+Prepare common guest knobs:
+
+```bash
+./vmctl.sh prepare-guest \
+  --ssh-key /tmp/reuse_vm_g28/id_rsa \
+  --ssh-port 10023 \
+  --global-numa-balancing 2 \
+  --demotion-enabled true \
+  --demotion-target '0 1' \
+  --scan-size-mb 256
+```
+
+Run a long guest command under tmux:
+
+```bash
+./vmctl.sh tmux-run \
+  --ssh-key /tmp/reuse_vm_g28/id_rsa \
+  --ssh-port 10023 \
+  --session perf_cap_sweep \
+  --log /tmp/perf_cap_sweep_tmux.log \
+  -- 'bash /root/run_perf_cap_sweep_inner.sh'
+```

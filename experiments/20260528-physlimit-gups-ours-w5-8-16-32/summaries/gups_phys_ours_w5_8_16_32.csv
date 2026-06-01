@@ -1,4 +1,0 @@
-cap_gb,node0_size_mb,node1_size_mb,took_s,elapsed_s,off_elapsed_ms,off_window,off_reason,off_access_pct,off_remote_ratio_pct,numa_hint_faults,pgpromote_success,pgdemote_kswapd,pgdemote_direct,pgdemote_total,pgmigrate_success,local_fault_pte_updates,local_fault_refault,local_fault_refault_hit
-8,7958,161276,649.809,653,55025,11,local_access,100.00,24.38,15627013,1170340,2217855,0,2217855,3588956,521933,422306,306165
-16,16022,153212,526.18446744073709551109,529,45020,9,local_access,99.08,85.41,13972474,907755,1682297,0,1682297,2591627,867553,796562,496246
-32,32150,137084,316.18446744073709551381,318,45023,9,local_access,100.00,96.42,9387072,614077,629170,0,629170,1553814,1628620,1628613,1000360

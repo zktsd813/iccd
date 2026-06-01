@@ -1,3 +1,0 @@
-phase,phase_name,start_s,end_s,mean_mops_s,median_mops_s,mean_mb_s,local_fault_sampled,local_fault_pte_updates,local_fault_refault,local_fault_refault_hit_1000ms,local_fault_hit_ratio_pct,local_fault_refault_avg_us,local_fault_lost,hint_faults,pte_updates,promote_pages,demote_pages
-1,Friendly fixed8g-hotset-remote,0,60,957.6886458135509,388.4926846846847,61292.07333206726,1055749,1055749,771358,186027,24.11681735329121,25214326.3180002,265000,8870972,17355538,2053177,1738532
-2,Unfriendly stream-read-32g-split16-4k,60,120,459.2615683134513,432.275456,5427.858826201598,826070,826070,836658,701119,83.79995171264723,310703.5419490401,8803,12012690,11791195,1940275,2004538

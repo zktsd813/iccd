@@ -1,4 +1,0 @@
-policy,effective_samples,running_zero_while_effective_samples,stop_observed,first_stop_elapsed_ms,first_stop_phase,first_current_positive_ms,first_current_positive_phase,max_current_demote_promoted_pages,max_current_elapsed_ms,max_current_phase,max_earlystop_cnt,max_earlystop_cnt_elapsed_ms,restart_cnt_final,running_final,effective_final,total_hint_faults,total_pte_updates,total_promoted_pages,total_demoted_pages
-off,0,0,no,,,,,0,50,fixed8g-hotset-remote,0,50,0,1,0,0,0,0,0
-on,121,0,no,,,29086,fixed8g-hotset-remote,1482686,123090,stream-read-32g-split16-4k,2,92010,0,1,1,21589794,29545373,4330304,4527964
-adaptive_cgroup,59,0,no,,,,,0,60,fixed8g-hotset-remote,0,60,0,1,0,5694701,16490477,2097158,1960897

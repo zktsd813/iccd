@@ -1,5 +1,0 @@
-returncode=0
-elapsed_s=364
-controller_csv=/root/bc-ours179-window10-20/bc-8g-w20/ours/controller.csv
-stdout=/root/bc-ours179-window10-20/bc-8g-w20/ours/workload.stdout.log
-stderr=/root/bc-ours179-window10-20/bc-8g-w20/ours/workload.stderr.log

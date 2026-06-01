@@ -1,9 +1,0 @@
-[2026-05-21T01:56:43Z] start workload=pr placement=all-local cpuset.mems=0
-[2026-05-21T02:00:21Z] done workload=pr placement=all-local rc=0
-[2026-05-21T02:00:21Z] start workload=pr placement=all-remote cpuset.mems=1
-[2026-05-21T02:03:17Z] done workload=pr placement=all-remote rc=0
-[2026-05-21T02:03:17Z] start workload=bc placement=all-local cpuset.mems=0
-[2026-05-21T02:07:43Z] done workload=bc placement=all-local rc=0
-[2026-05-21T02:07:43Z] start workload=bc placement=all-remote cpuset.mems=1
-[2026-05-21T02:12:45Z] done workload=bc placement=all-remote rc=0
-[2026-05-21T02:12:45Z] summary=/root/gapbs-placement-alllocal-allremote/summary.csv

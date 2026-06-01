@@ -1,3 +1,0 @@
-GAPBS PR/BC -g28 serialized graph, toggle local-util controller.
-Policy starts with migration on, turns migration off after normal local-util stop condition, then re-enables migration when the stop condition is not satisfied for 2 consecutive windows.
-Cases: workloads pr/bc, caps 8G/16G, windows 5s/10s/20s, trials 8.
