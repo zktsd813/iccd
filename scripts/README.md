@@ -4,6 +4,13 @@ The active script set is intentionally small. Do not add per-experiment
 `run_*.sh` files under `experiments/`; use these scripts with environment
 variables instead.
 
+`VM/` is a git submodule that provides the reusable VM lifecycle harness
+(`vmctl.sh`). Initialize it before using host-side VM actions:
+
+```bash
+git submodule update --init VM
+```
+
 ## Files
 
 - `run_ours_experiment.sh`: one workload execution wrapper. It creates a
@@ -18,9 +25,24 @@ variables instead.
   calibration runs. Configure with `WORKLOADS`, `POLICIES`, `CAPS`, `OUTROOT`,
   and `MODE`.
 - `stage_workloads_to_vm.sh`: host-side staging helper. It copies the active
-  scripts and selected workload payloads into a live VM.
+  scripts and selected workload payloads into a live VM. With `VM_ACTION` set,
+  it also calls `VM/vmctl.sh` from the submodule for boot, wait, verify, run,
+  and stop operations.
 
 ## Examples
+
+Boot an 8G/160G PR smoke VM through the `VM` submodule, stage PR, run `off` and
+`ours`, and print the guest summary:
+
+```bash
+VM_ACTION=pr-smoke WORKLOADS=pr PORT=10084 \
+KERNEL=/path/to/bzImage \
+INITRD=/path/to/initramfs.img \
+ROOTFS=/path/to/ubuntu.img \
+SSH_KEY=/path/to/id_rsa \
+BENCHMARK_DIR=/Serverless/benchmark \
+./scripts/stage_workloads_to_vm.sh
+```
 
 Stage scalable RSS60 workloads:
 

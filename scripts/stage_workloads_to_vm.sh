@@ -2,6 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+VM_DIR="${VM_DIR:-${REPO_ROOT}/VM}"
+VMCTL="${VMCTL:-${VM_DIR}/vmctl.sh}"
+VM_ACTION="${VM_ACTION:-stage}"
 PORT="${PORT:-10030}"
 HOST="${HOST:-127.0.0.1}"
 SSH_KEY="${SSH_KEY:-}"
@@ -16,6 +20,32 @@ STAGE_DLRM_VENV="${STAGE_DLRM_VENV:-1}"
 STAGE_FRAMEWORKS="${STAGE_FRAMEWORKS:-0}"
 SSH_CONTROL_MASTER="${SSH_CONTROL_MASTER:-1}"
 SSH_CONTROL_PATH="${SSH_CONTROL_PATH:-/tmp/iccd-realworld-${PORT}.sock}"
+
+VM_NAME="${VM_NAME:-iccd-workload-vm}"
+QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+KERNEL="${KERNEL:-}"
+INITRD="${INITRD:-}"
+ROOTFS="${ROOTFS:-}"
+ROOTFS_FORMAT="${ROOTFS_FORMAT:-raw}"
+ROOT_DEVICE="${ROOT_DEVICE:-}"
+ACCEL="${ACCEL:-kvm}"
+HOST_CPUS="${HOST_CPUS:-0-31}"
+GUEST_CPUS="${GUEST_CPUS:-32}"
+GUEST_NODE0_CPUS="${GUEST_NODE0_CPUS:-0-31}"
+FAST_HOST_NODE="${FAST_HOST_NODE:-0}"
+SLOW_HOST_NODE="${SLOW_HOST_NODE:-2}"
+FAST_MEM="${FAST_MEM:-8G}"
+SLOW_MEM="${SLOW_MEM:-160G}"
+VERIFY_PLACEMENT="${VERIFY_PLACEMENT:-1}"
+STOP_VM_ON_SUCCESS="${STOP_VM_ON_SUCCESS:-0}"
+GUEST_OUTROOT="${GUEST_OUTROOT:-/root/script-smoke-pr}"
+GUEST_POLICIES="${GUEST_POLICIES:-off ours}"
+GUEST_CAPS="${GUEST_CAPS:-physical:0}"
+GUEST_MODE="${GUEST_MODE:-matrix}"
+GUEST_TIMEOUT_SEC="${GUEST_TIMEOUT_SEC:-1200}"
+GUEST_OMP_THREADS="${GUEST_OMP_THREADS:-32}"
+PR_ITERATIONS="${PR_ITERATIONS:-1}"
+PR_TRIALS="${PR_TRIALS:-1}"
 
 SSH_OPTS=(-p "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 SCP_OPTS=(-P "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -38,6 +68,96 @@ if [[ "${SSH_CONTROL_MASTER}" == "1" ]]; then
   )
   trap 'ssh -p "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ControlPath="${SSH_CONTROL_PATH}" -O exit "root@${HOST}" >/dev/null 2>&1 || true; rm -f "${SSH_CONTROL_PATH}"' EXIT
 fi
+
+die() {
+  echo "error: $*" >&2
+  exit 2
+}
+
+require_vm_submodule() {
+  if [[ ! -x "${VMCTL}" ]]; then
+    cat >&2 <<EOF
+error: VM submodule is not initialized or vmctl.sh is not executable: ${VMCTL}
+
+Run this from the iccd repo first:
+  git submodule update --init VM
+
+Or override VM_DIR/VMCTL explicitly.
+EOF
+    exit 2
+  fi
+}
+
+vm_ssh_args() {
+  VM_SSH_ARGS=(--ssh-port "${PORT}" --host "${HOST}" --name "${VM_NAME}")
+  if [[ -n "${SSH_KEY}" ]]; then
+    VM_SSH_ARGS+=(--ssh-key "${SSH_KEY}")
+  fi
+}
+
+vmctl_cmd() {
+  require_vm_submodule
+  "${VMCTL}" "$@"
+}
+
+boot_vm_if_requested() {
+  [[ "${VM_ACTION}" == "boot-stage" || "${VM_ACTION}" == "pr-smoke" ]] || return 0
+  [[ -n "${KERNEL}" ]] || die "KERNEL is required when VM_ACTION=${VM_ACTION}"
+  [[ -n "${ROOTFS}" ]] || die "ROOTFS is required when VM_ACTION=${VM_ACTION}"
+
+  local -a args=(
+    boot
+    --qemu-bin "${QEMU_BIN}"
+    --kernel "${KERNEL}"
+    --rootfs "${ROOTFS}"
+    --rootfs-format "${ROOTFS_FORMAT}"
+    --ssh-port "${PORT}"
+    --name "${VM_NAME}"
+    --host-cpus "${HOST_CPUS}"
+    --guest-cpus "${GUEST_CPUS}"
+    --guest-node0-cpus "${GUEST_NODE0_CPUS}"
+    --fast-host-node "${FAST_HOST_NODE}"
+    --slow-host-node "${SLOW_HOST_NODE}"
+    --fast-mem "${FAST_MEM}"
+    --slow-mem "${SLOW_MEM}"
+    --accel "${ACCEL}"
+  )
+  [[ -z "${INITRD}" ]] || args+=(--initrd "${INITRD}")
+  [[ -z "${ROOT_DEVICE}" ]] || args+=(--root-device "${ROOT_DEVICE}")
+
+  vmctl_cmd "${args[@]}"
+  wait_for_vm_ssh
+  if [[ "${VERIFY_PLACEMENT}" == "1" ]]; then
+    verify_vm_placement
+  fi
+}
+
+wait_for_vm_ssh() {
+  vm_ssh_args
+  vmctl_cmd wait-ssh "${VM_SSH_ARGS[@]}"
+}
+
+verify_vm_placement() {
+  vm_ssh_args
+  vmctl_cmd verify-placement "${VM_SSH_ARGS[@]}"
+}
+
+run_guest_suite() {
+  vm_ssh_args
+  local guest_cmd
+  printf -v guest_cmd \
+    'OUTROOT=%q WORKLOADS=%q POLICIES=%q CAPS=%q MODE=%q PR_ITERATIONS=%q PR_TRIALS=%q TIMEOUT_SEC=%q OMP_THREADS=%q WINDOW_SEC=2 MIN_ARM_WINDOWS=1 MAX_ARM_WINDOWS=2 OBSERVE_WINDOWS=1 /root/scripts/run_workload_suite_guest.sh' \
+    "${GUEST_OUTROOT}" "${WORKLOADS}" "${GUEST_POLICIES}" "${GUEST_CAPS}" \
+    "${GUEST_MODE}" "${PR_ITERATIONS}" "${PR_TRIALS}" \
+    "${GUEST_TIMEOUT_SEC}" "${GUEST_OMP_THREADS}"
+  vmctl_cmd ssh "${VM_SSH_ARGS[@]}" -- "${guest_cmd}"
+  vmctl_cmd ssh "${VM_SSH_ARGS[@]}" -- "cat $(printf '%q' "${GUEST_OUTROOT}")/summary.csv"
+}
+
+stop_vm_if_requested() {
+  [[ "${STOP_VM_ON_SUCCESS}" == "1" ]] || return 0
+  vmctl_cmd stop --name "${VM_NAME}"
+}
 
 remote() {
   ssh "${SSH_OPTS[@]}" "root@${HOST}" "$@"
@@ -456,33 +576,61 @@ stage_workload() {
   esac
 }
 
-if [[ "${CLEAN}" == "1" ]]; then
-  remote "rm -rf /root/benchmark /root/tools/dotnet7 /root/tools/dlrm-venv /root/realworld-work && mkdir -p /root/benchmark /root/tools /root/realworld-work"
-fi
-
-mapfile -t workload_list < <(expand_workloads ${WORKLOADS})
-
-stage_common_scripts
-
-for w in "${workload_list[@]}"; do
-  if needs_jdk "${w}"; then
-    if [[ "${STAGE_JDK}" == "1" || "${STAGE_JDK}" == "auto" ]]; then
-      stage_jdk8
-    fi
+stage_selected_workloads() {
+  if [[ "${CLEAN}" == "1" ]]; then
+    remote "rm -rf /root/benchmark /root/tools/dotnet7 /root/tools/dlrm-venv /root/realworld-work && mkdir -p /root/benchmark /root/tools /root/realworld-work"
   fi
-  if needs_dotnet "${w}"; then
-    if [[ "${STAGE_DOTNET}" == "1" || "${STAGE_DOTNET}" == "auto" ]]; then
-      stage_dotnet7
-    fi
-  fi
-  if needs_jdk17 "${w}"; then
-    if [[ "${STAGE_JDK17}" == "1" || "${STAGE_JDK17}" == "auto" ]]; then
-      stage_jdk17
-    fi
-  fi
-  stage_workload "${w}"
-done
 
-remote "printf '%s\n' /usr/local/lib/iccd-realworld-deps > /etc/ld.so.conf.d/iccd-realworld-deps.conf 2>/dev/null || true; ldconfig 2>/dev/null || true"
+  mapfile -t workload_list < <(expand_workloads ${WORKLOADS})
 
-remote "df -h / /root 2>/dev/null || true; du -sh /root/benchmark /root/tools /root/realworld-work 2>/dev/null || true; find /root/scripts -maxdepth 1 -type f -printf '%p\n' | sort"
+  stage_common_scripts
+
+  for w in "${workload_list[@]}"; do
+    if needs_jdk "${w}"; then
+      if [[ "${STAGE_JDK}" == "1" || "${STAGE_JDK}" == "auto" ]]; then
+        stage_jdk8
+      fi
+    fi
+    if needs_dotnet "${w}"; then
+      if [[ "${STAGE_DOTNET}" == "1" || "${STAGE_DOTNET}" == "auto" ]]; then
+        stage_dotnet7
+      fi
+    fi
+    if needs_jdk17 "${w}"; then
+      if [[ "${STAGE_JDK17}" == "1" || "${STAGE_JDK17}" == "auto" ]]; then
+        stage_jdk17
+      fi
+    fi
+    stage_workload "${w}"
+  done
+
+  remote "printf '%s\n' /usr/local/lib/iccd-realworld-deps > /etc/ld.so.conf.d/iccd-realworld-deps.conf 2>/dev/null || true; ldconfig 2>/dev/null || true"
+
+  remote "df -h / /root 2>/dev/null || true; du -sh /root/benchmark /root/tools /root/realworld-work 2>/dev/null || true; find /root/scripts -maxdepth 1 -type f -printf '%p\n' | sort"
+}
+
+case "${VM_ACTION}" in
+  stage|boot-stage|pr-smoke)
+    boot_vm_if_requested
+    if [[ "${VM_ACTION}" == "stage" && "${VERIFY_PLACEMENT}" == "1" && -x "${VMCTL}" ]]; then
+      verify_vm_placement || true
+    fi
+    stage_selected_workloads
+    if [[ "${VM_ACTION}" == "pr-smoke" ]]; then
+      run_guest_suite
+      stop_vm_if_requested
+    fi
+    ;;
+  wait)
+    wait_for_vm_ssh
+    ;;
+  verify)
+    verify_vm_placement
+    ;;
+  stop)
+    vmctl_cmd stop --name "${VM_NAME}"
+    ;;
+  *)
+    die "unknown VM_ACTION=${VM_ACTION}; expected stage, boot-stage, pr-smoke, wait, verify, or stop"
+    ;;
+esac
