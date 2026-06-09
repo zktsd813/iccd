@@ -5929,9 +5929,11 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (local_fault_refault) {
 		unsigned long nr_pages = folio_nr_pages(folio);
+		unsigned long vma_size = vma->vm_end - vma->vm_start;
 
 		numa_account_local_fault_refault(folio, nr_pages,
-						 sample_refault_latency);
+						 sample_refault_latency,
+						 vma_size);
 	}
 #endif
 	if (folio_nid(folio) == numa_node_id()) {

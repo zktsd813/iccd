@@ -1977,10 +1977,10 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 
 		pgdat = NODE_DATA(dst_nid);
 		reuse_time_enabled = sched_reuse_time_enabled();
-		if (reuse_time_enabled) {
-			latency = numa_hint_fault_latency(folio);
+		latency = numa_hint_fault_latency(folio);
+		numa_account_remote_fault_latency(folio, nr, latency);
+		if (reuse_time_enabled)
 			sched_reuse_time_record(p, folio, src_nid, latency);
-		}
 
 		if (pgdat_free_space_enough(pgdat)) {
 			/* workload changed, reset hot threshold */
@@ -1999,8 +1999,6 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			th = pgdat->nbp_threshold ? : def_th;
 		}
 
-		if (!reuse_time_enabled)
-			latency = numa_hint_fault_latency(folio);
 		if (latency >= th)
 			return false;
 

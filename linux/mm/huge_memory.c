@@ -2432,9 +2432,11 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		    toptier)
 			goto unlock;
 
-		if (folio_use_access_time(folio))
+		if (folio_use_access_time(folio)) {
 			folio_xchg_access_time(folio,
 					       jiffies_to_msecs(jiffies));
+			numa_account_remote_fault_pte(folio, HPAGE_PMD_NR);
+		}
 	}
 	/*
 	 * In case prot_numa, we are under mmap_read_lock(mm). It's critical

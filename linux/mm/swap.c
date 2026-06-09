@@ -37,8 +37,11 @@
 #include <linux/page_idle.h>
 #include <linux/local_lock.h>
 #include <linux/buffer_head.h>
+#include <linux/ktime.h>
 
 #include "internal.h"
+
+#include <trace/events/migrate.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/pagemap.h>
@@ -901,6 +904,22 @@ void lru_add_drain_all(void)
 
 atomic_t lru_disable_count = ATOMIC_INIT(0);
 
+static u64 lru_disable_stage_start(void)
+{
+	if (!trace_mm_migrate_stage_enabled())
+		return 0;
+	return ktime_get_ns();
+}
+
+static void lru_disable_stage_finish(u64 start, enum migrate_stage stage)
+{
+	if (!start)
+		return;
+	trace_mm_migrate_stage(stage, MIGRATE_SYNC, MR_SYSCALL, 0,
+			       NUMA_NO_NODE, NUMA_NO_NODE, 1,
+			       ktime_get_ns() - start, 0);
+}
+
 /*
  * lru_cache_disable() needs to be called before we start compiling
  * a list of folios to be migrated using folio_isolate_lru().
@@ -911,7 +930,12 @@ atomic_t lru_disable_count = ATOMIC_INIT(0);
  */
 void lru_cache_disable(void)
 {
+	u64 stage_start;
+
+	stage_start = lru_disable_stage_start();
 	atomic_inc(&lru_disable_count);
+	lru_disable_stage_finish(stage_start,
+				 MIGRATE_STAGE_LRU_DISABLE_ATOMIC_INC);
 	/*
 	 * Readers of lru_disable_count are protected by either disabling
 	 * preemption or rcu_read_lock:
@@ -925,12 +949,18 @@ void lru_cache_disable(void)
 	 * lru_disable_count = 0 will have exited the critical
 	 * section when synchronize_rcu() returns.
 	 */
+	stage_start = lru_disable_stage_start();
 	synchronize_rcu_expedited();
+	lru_disable_stage_finish(stage_start, MIGRATE_STAGE_LRU_DISABLE_RCU_SYNC);
 #ifdef CONFIG_SMP
+	stage_start = lru_disable_stage_start();
 	__lru_add_drain_all(true);
 #else
+	stage_start = lru_disable_stage_start();
 	lru_add_and_bh_lrus_drain();
 #endif
+	lru_disable_stage_finish(stage_start,
+				 MIGRATE_STAGE_LRU_DISABLE_DRAIN_ALL);
 }
 
 /**

@@ -174,8 +174,6 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 		goto skip;
 
 	ret = false;
-	if (folio_use_access_time(folio))
-		folio_xchg_access_time(folio, jiffies_to_msecs(jiffies));
 
 skip:
 	return ret;
@@ -330,6 +328,11 @@ static long change_pte_range(struct mmu_gather *tlb,
 			}
 
 			nr_ptes = mprotect_folio_pte_batch(folio, pte, oldpte, max_nr_ptes, flags);
+			if (prot_numa && folio && folio_use_access_time(folio)) {
+				folio_xchg_access_time(folio,
+						       jiffies_to_msecs(jiffies));
+				numa_account_remote_fault_pte(folio, nr_ptes);
+			}
 
 			oldpte = modify_prot_start_ptes(vma, addr, pte, nr_ptes);
 			ptent = pte_modify(oldpte, newprot);

@@ -763,9 +763,15 @@ bool numa_should_sample_local_fault(struct folio *folio);
 void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages);
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms);
+				      unsigned int latency_ms,
+				      unsigned long vma_size);
 void numa_account_local_fault_lost(struct folio *folio,
 				   unsigned long nr_pages);
+void numa_account_remote_fault_pte(struct folio *folio,
+				   unsigned long nr_pages);
+void numa_account_remote_fault_latency(struct folio *folio,
+				       unsigned long nr_pages,
+				       unsigned int latency_ms);
 unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
 unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
 unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
@@ -793,12 +799,24 @@ static inline void numa_account_local_fault_pte(struct folio *folio,
 
 static inline void numa_account_local_fault_refault(struct folio *folio,
 						   unsigned long nr_pages,
-						   unsigned int latency_ms)
+						   unsigned int latency_ms,
+						   unsigned long vma_size)
 {
 }
 
 static inline void numa_account_local_fault_lost(struct folio *folio,
 						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_remote_fault_pte(struct folio *folio,
+						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_remote_fault_latency(struct folio *folio,
+						    unsigned long nr_pages,
+						    unsigned int latency_ms)
 {
 }
 
@@ -1344,9 +1362,15 @@ bool numa_should_sample_local_fault(struct folio *folio);
 void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages);
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms);
+				      unsigned int latency_ms,
+				      unsigned long vma_size);
 void numa_account_local_fault_lost(struct folio *folio,
 				   unsigned long nr_pages);
+void numa_account_remote_fault_pte(struct folio *folio,
+				   unsigned long nr_pages);
+void numa_account_remote_fault_latency(struct folio *folio,
+				       unsigned long nr_pages,
+				       unsigned int latency_ms);
 unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
 unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
 unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
@@ -1374,12 +1398,24 @@ static inline void numa_account_local_fault_pte(struct folio *folio,
 
 static inline void numa_account_local_fault_refault(struct folio *folio,
 						   unsigned long nr_pages,
-						   unsigned int latency_ms)
+						   unsigned int latency_ms,
+						   unsigned long vma_size)
 {
 }
 
 static inline void numa_account_local_fault_lost(struct folio *folio,
 						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_remote_fault_pte(struct folio *folio,
+						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_remote_fault_latency(struct folio *folio,
+						    unsigned long nr_pages,
+						    unsigned int latency_ms)
 {
 }
 

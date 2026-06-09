@@ -21,9 +21,14 @@
 #define NUMA_LOCAL_FAULT_SCAN_PERIOD_MS_DEF	1000U
 #define NUMA_LOCAL_FAULT_SCAN_SIZE_MB_DEF	256U
 #define NUMA_LOCAL_FAULT_WINDOW_BUCKETS		64
+#define NUMA_FAULT_LATENCY_HIST_BUCKETS		8
+#define NUMA_FAULT_LATENCY_LE_BUCKETS		\
+	(NUMA_FAULT_LATENCY_HIST_BUCKETS - 1)
+#define NUMA_LOCAL_FAULT_LARGE_VMA_BYTES	(1UL << 30)
 
 struct numa_local_fault_page_ext {
-	atomic64_t state;
+	atomic64_t local_state;
+	atomic64_t remote_state;
 };
 
 struct numa_local_fault_window_bucket {
@@ -32,6 +37,14 @@ struct numa_local_fault_window_bucket {
 	atomic64_t refault;
 	atomic64_t refault_hit;
 	atomic64_t lost;
+	atomic64_t local_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
+	atomic64_t local_large_vma_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
+	atomic64_t local_small_vma_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
+	atomic64_t remote_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
+};
+
+static const unsigned int numa_fault_latency_bounds_ms[] = {
+	128, 256, 512, 1024, 2048, 4096, 8192,
 };
 
 static u32 numa_local_fault_rate;
@@ -128,6 +141,33 @@ numa_local_fault_bucket(u32 seq)
 	return &numa_local_fault_buckets[seq % NUMA_LOCAL_FAULT_WINDOW_BUCKETS];
 }
 
+static unsigned int numa_fault_latency_bucket(unsigned int latency_ms)
+{
+	unsigned int i;
+
+	for (i = 0; i < NUMA_FAULT_LATENCY_LE_BUCKETS; i++) {
+		if (latency_ms <= numa_fault_latency_bounds_ms[i])
+			return i;
+	}
+	return NUMA_FAULT_LATENCY_HIST_BUCKETS - 1;
+}
+
+static void numa_fault_latency_hist_reset(atomic64_t *hist)
+{
+	unsigned int i;
+
+	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
+		atomic64_set(&hist[i], 0);
+}
+
+static void numa_fault_latency_hist_add(atomic64_t *hist,
+					unsigned int latency_ms,
+					unsigned long nr_pages)
+{
+	atomic64_add(nr_pages,
+		     &hist[numa_fault_latency_bucket(latency_ms)]);
+}
+
 static void numa_local_fault_bucket_reset(u32 seq)
 {
 	struct numa_local_fault_window_bucket *bucket;
@@ -141,6 +181,10 @@ static void numa_local_fault_bucket_reset(u32 seq)
 	atomic64_set(&bucket->refault, 0);
 	atomic64_set(&bucket->refault_hit, 0);
 	atomic64_set(&bucket->lost, 0);
+	numa_fault_latency_hist_reset(bucket->local_latency);
+	numa_fault_latency_hist_reset(bucket->local_large_vma_latency);
+	numa_fault_latency_hist_reset(bucket->local_small_vma_latency);
+	numa_fault_latency_hist_reset(bucket->remote_latency);
 	smp_wmb();
 	atomic_set(&bucket->seq, seq);
 }
@@ -213,7 +257,27 @@ static u64 numa_local_fault_read_state(struct folio *folio)
 		return 0;
 
 	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
-	state = atomic64_read(&lf_ext->state);
+	state = atomic64_read(&lf_ext->local_state);
+	page_ext_put(page_ext);
+
+	return state;
+}
+
+static u64 numa_remote_fault_read_state(struct folio *folio)
+{
+	struct numa_local_fault_page_ext *lf_ext;
+	struct page_ext *page_ext;
+	u64 state;
+
+	if (!folio)
+		return 0;
+
+	page_ext = page_ext_get(&folio->page);
+	if (!page_ext)
+		return 0;
+
+	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
+	state = atomic64_read(&lf_ext->remote_state);
 	page_ext_put(page_ext);
 
 	return state;
@@ -238,7 +302,25 @@ static void numa_local_fault_mark_seen(struct folio *folio)
 		return;
 
 	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
-	atomic64_set(&lf_ext->state, numa_local_fault_window_seq_read());
+	atomic64_set(&lf_ext->local_state, numa_local_fault_window_seq_read());
+	page_ext_put(page_ext);
+}
+
+static void numa_remote_fault_mark_seen(struct folio *folio)
+{
+	struct numa_local_fault_page_ext *lf_ext;
+	struct page_ext *page_ext;
+
+	if (!folio)
+		return;
+
+	page_ext = page_ext_get(&folio->page);
+	if (!page_ext)
+		return;
+
+	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
+	atomic64_set(&lf_ext->remote_state,
+		     numa_local_fault_window_seq_read());
 	page_ext_put(page_ext);
 }
 
@@ -283,7 +365,8 @@ void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages)
 
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms)
+				      unsigned int latency_ms,
+				      unsigned long vma_size)
 {
 	unsigned int hit_ms;
 	u32 seq;
@@ -299,6 +382,22 @@ void numa_account_local_fault_refault(struct folio *folio,
 	if (hit)
 		atomic64_add(nr_pages, &numa_local_fault_refault_hit);
 	numa_local_fault_bucket_add_refault(seq, nr_pages, hit);
+	if (numa_local_fault_bucket_valid(seq)) {
+		struct numa_local_fault_window_bucket *bucket =
+			numa_local_fault_bucket(seq);
+
+		numa_fault_latency_hist_add(
+			bucket->local_latency, latency_ms, nr_pages);
+		if (vma_size >= NUMA_LOCAL_FAULT_LARGE_VMA_BYTES) {
+			numa_fault_latency_hist_add(
+				bucket->local_large_vma_latency,
+				latency_ms, nr_pages);
+		} else {
+			numa_fault_latency_hist_add(
+				bucket->local_small_vma_latency,
+				latency_ms, nr_pages);
+		}
+	}
 }
 
 void numa_account_local_fault_lost(struct folio *folio, unsigned long nr_pages)
@@ -307,6 +406,31 @@ void numa_account_local_fault_lost(struct folio *folio, unsigned long nr_pages)
 
 	atomic64_add(nr_pages, &numa_local_fault_lost);
 	numa_local_fault_bucket_add_lost(seq, nr_pages);
+}
+
+void numa_account_remote_fault_pte(struct folio *folio, unsigned long nr_pages)
+{
+	if (!folio || !nr_pages || !folio_use_access_time(folio))
+		return;
+
+	numa_remote_fault_mark_seen(folio);
+}
+
+void numa_account_remote_fault_latency(struct folio *folio,
+				       unsigned long nr_pages,
+				       unsigned int latency_ms)
+{
+	u32 seq;
+
+	if (!folio || !nr_pages || !folio_use_access_time(folio))
+		return;
+
+	seq = (u32)numa_remote_fault_read_state(folio);
+	if (numa_local_fault_bucket_valid(seq)) {
+		numa_fault_latency_hist_add(
+			numa_local_fault_bucket(seq)->remote_latency,
+			latency_ms, nr_pages);
+	}
 }
 
 static unsigned long local_fault_max_pfn_scan(unsigned long max_pte_updates,
@@ -629,6 +753,54 @@ static ssize_t local_fault_stats_show(struct kobject *kobj,
 static struct kobj_attribute local_fault_stats_attr =
 	__ATTR_RO(local_fault_stats);
 
+static ssize_t fault_latency_histograms_show(struct kobject *kobj,
+					     struct kobj_attribute *attr,
+					     char *buf)
+{
+	u32 seq = numa_local_fault_window_seq_read();
+	struct numa_local_fault_window_bucket *bucket =
+		numa_local_fault_bucket(seq);
+	u64 local[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
+	u64 local_large[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
+	u64 local_small[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
+	u64 remote[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
+	ssize_t len = 0;
+	unsigned int i;
+
+	if (numa_local_fault_bucket_valid(seq)) {
+		for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++) {
+			local[i] = atomic64_read(&bucket->local_latency[i]);
+			local_large[i] =
+				atomic64_read(&bucket->local_large_vma_latency[i]);
+			local_small[i] =
+				atomic64_read(&bucket->local_small_vma_latency[i]);
+			remote[i] = atomic64_read(&bucket->remote_latency[i]);
+		}
+	}
+
+	len += sysfs_emit_at(buf, len, "window_seq %u\n", seq);
+	len += sysfs_emit_at(buf, len,
+			     "bucket_ms le_128 le_256 le_512 le_1024 le_2048 le_4096 le_8192 gt_8192\n");
+	len += sysfs_emit_at(buf, len, "local_pages");
+	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
+		len += sysfs_emit_at(buf, len, " %llu", local[i]);
+	len += sysfs_emit_at(buf, len, "\nlocal_large_vma_pages");
+	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
+		len += sysfs_emit_at(buf, len, " %llu", local_large[i]);
+	len += sysfs_emit_at(buf, len, "\nlocal_small_vma_pages");
+	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
+		len += sysfs_emit_at(buf, len, " %llu", local_small[i]);
+	len += sysfs_emit_at(buf, len, "\nremote_pages");
+	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
+		len += sysfs_emit_at(buf, len, " %llu", remote[i]);
+	len += sysfs_emit_at(buf, len, "\n");
+
+	return len;
+}
+
+static struct kobj_attribute fault_latency_histograms_attr =
+	__ATTR_RO(fault_latency_histograms);
+
 static struct attribute *numa_balancing_attrs[] = {
 	&local_fault_rate_attr.attr,
 	&local_fault_scan_period_ms_attr.attr,
@@ -636,6 +808,7 @@ static struct attribute *numa_balancing_attrs[] = {
 	&local_fault_refault_hit_ms_attr.attr,
 	&local_fault_window_attr.attr,
 	&local_fault_stats_attr.attr,
+	&fault_latency_histograms_attr.attr,
 	NULL,
 };
 
