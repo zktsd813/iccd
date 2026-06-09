@@ -915,6 +915,8 @@ void try_to_migrate(struct folio *folio, enum ttu_flags flags);
 void try_to_unmap(struct folio *, enum ttu_flags flags);
 bool folio_try_install_local_tiering_probe(struct folio *folio,
 					   struct mm_struct *mm);
+bool folio_try_install_remote_tiering_probe(struct folio *folio,
+					    struct mm_struct *mm);
 
 struct page *make_device_exclusive(struct mm_struct *mm, unsigned long addr,
 		void *owner, struct folio **foliop);

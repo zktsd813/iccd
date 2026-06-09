@@ -766,12 +766,22 @@ struct vma_numab_state {
 };
 
 #ifdef CONFIG_NUMA_BALANCING_MT
+struct numa_local_fault_node_state {
+	unsigned long scan_pfn;
+	unsigned long remote_scan_pfn;
+	unsigned int scan_bias;
+	unsigned int remote_scan_bias;
+};
+
 struct numa_local_fault_mm_state {
 	spinlock_t lock;
 	unsigned long next_scan;
+	unsigned long remote_next_scan;
 	unsigned int misses;
+	unsigned int sampler_rr;
 	int target_nid;
-	unsigned long scan_pfn[];
+	int remote_target_nid;
+	struct numa_local_fault_node_state node[];
 };
 #endif
 
