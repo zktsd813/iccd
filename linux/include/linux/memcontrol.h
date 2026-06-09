@@ -763,8 +763,7 @@ bool numa_should_sample_local_fault(struct folio *folio);
 void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages);
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms,
-				      unsigned long vma_size);
+				      unsigned int latency_ms);
 void numa_account_local_fault_lost(struct folio *folio,
 				   unsigned long nr_pages);
 void numa_account_remote_fault_pte(struct folio *folio,
@@ -772,10 +771,14 @@ void numa_account_remote_fault_pte(struct folio *folio,
 void numa_account_remote_fault_latency(struct folio *folio,
 				       unsigned long nr_pages,
 				       unsigned int latency_ms);
+void numa_account_local_fault_scan(int nid, unsigned long nr_pages);
+void numa_account_local_fault_target_miss(int nid);
+void numa_account_local_fault_retarget(int from_nid, int to_nid);
 unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
 unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
 unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
-					  unsigned long max_pte_updates);
+					  unsigned long max_pte_updates,
+					  unsigned long *scan_pfn);
 #else
 static inline bool numa_local_fault_sampling_enabled(void)
 {
@@ -799,8 +802,7 @@ static inline void numa_account_local_fault_pte(struct folio *folio,
 
 static inline void numa_account_local_fault_refault(struct folio *folio,
 						   unsigned long nr_pages,
-						   unsigned int latency_ms,
-						   unsigned long vma_size)
+						   unsigned int latency_ms)
 {
 }
 
@@ -820,6 +822,19 @@ static inline void numa_account_remote_fault_latency(struct folio *folio,
 {
 }
 
+static inline void numa_account_local_fault_scan(int nid,
+						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_local_fault_target_miss(int nid)
+{
+}
+
+static inline void numa_account_local_fault_retarget(int from_nid, int to_nid)
+{
+}
+
 static inline unsigned int task_numa_local_fault_scan_period_ms(
 	struct task_struct *p)
 {
@@ -834,7 +849,8 @@ static inline unsigned int task_numa_local_fault_scan_size_mb(
 
 static inline unsigned long task_numa_scan_local_faults(struct task_struct *p,
 							int nid,
-							unsigned long max_pte_updates)
+							unsigned long max_pte_updates,
+							unsigned long *scan_pfn)
 {
 	return 0;
 }
@@ -1362,8 +1378,7 @@ bool numa_should_sample_local_fault(struct folio *folio);
 void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages);
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms,
-				      unsigned long vma_size);
+				      unsigned int latency_ms);
 void numa_account_local_fault_lost(struct folio *folio,
 				   unsigned long nr_pages);
 void numa_account_remote_fault_pte(struct folio *folio,
@@ -1371,10 +1386,14 @@ void numa_account_remote_fault_pte(struct folio *folio,
 void numa_account_remote_fault_latency(struct folio *folio,
 				       unsigned long nr_pages,
 				       unsigned int latency_ms);
+void numa_account_local_fault_scan(int nid, unsigned long nr_pages);
+void numa_account_local_fault_target_miss(int nid);
+void numa_account_local_fault_retarget(int from_nid, int to_nid);
 unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
 unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
 unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
-					  unsigned long max_pte_updates);
+					  unsigned long max_pte_updates,
+					  unsigned long *scan_pfn);
 #else
 static inline bool numa_local_fault_sampling_enabled(void)
 {
@@ -1398,8 +1417,7 @@ static inline void numa_account_local_fault_pte(struct folio *folio,
 
 static inline void numa_account_local_fault_refault(struct folio *folio,
 						   unsigned long nr_pages,
-						   unsigned int latency_ms,
-						   unsigned long vma_size)
+						   unsigned int latency_ms)
 {
 }
 
@@ -1419,6 +1437,19 @@ static inline void numa_account_remote_fault_latency(struct folio *folio,
 {
 }
 
+static inline void numa_account_local_fault_scan(int nid,
+						 unsigned long nr_pages)
+{
+}
+
+static inline void numa_account_local_fault_target_miss(int nid)
+{
+}
+
+static inline void numa_account_local_fault_retarget(int from_nid, int to_nid)
+{
+}
+
 static inline unsigned int task_numa_local_fault_scan_period_ms(
 	struct task_struct *p)
 {
@@ -1433,7 +1464,8 @@ static inline unsigned int task_numa_local_fault_scan_size_mb(
 
 static inline unsigned long task_numa_scan_local_faults(struct task_struct *p,
 							int nid,
-							unsigned long max_pte_updates)
+							unsigned long max_pte_updates,
+							unsigned long *scan_pfn)
 {
 	return 0;
 }

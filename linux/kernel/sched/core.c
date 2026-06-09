@@ -4555,8 +4555,8 @@ static int sysctl_numa_balancing(const struct ctl_table *table, int write,
 	if (err < 0)
 		return err;
 	if (write) {
-		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING) &&
-		    (state & NUMA_BALANCING_MEMORY_TIERING))
+		if (!numa_balancing_mode_tiering(sysctl_numa_balancing_mode) &&
+		    numa_balancing_mode_tiering(state))
 			numa_balancing_reset_memory_tiering();
 		WRITE_ONCE(sysctl_numa_balancing_mode, state);
 #ifdef CONFIG_NUMA_BALANCING_MT

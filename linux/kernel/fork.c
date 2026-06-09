@@ -689,6 +689,9 @@ void __mmdrop(struct mm_struct *mm)
 	mm_pasid_drop(mm);
 	mm_destroy_cid(mm);
 	percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
+#ifdef CONFIG_NUMA_BALANCING_MT
+	kfree(mm->numa_local_fault_state);
+#endif
 
 	free_mm(mm);
 }
@@ -1042,6 +1045,9 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->locked_vm = 0;
 	atomic64_set(&mm->pinned_vm, 0);
 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
+#ifdef CONFIG_NUMA_BALANCING_MT
+	mm->numa_local_fault_state = NULL;
+#endif
 	spin_lock_init(&mm->page_table_lock);
 	spin_lock_init(&mm->arg_lock);
 	mm_init_cpumask(mm);

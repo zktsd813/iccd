@@ -704,12 +704,13 @@ numa_balancing
 
 Enables/disables and configures automatic page fault based NUMA memory
 balancing.  Memory is moved automatically to nodes that access it often.
-The value to set can be the result of ORing the following:
+The supported values include:
 
 = =================================
 0 NUMA_BALANCING_DISABLED
 1 NUMA_BALANCING_NORMAL
 2 NUMA_BALANCING_MEMORY_TIERING
+4 NUMA_BALANCING_TPP
 = =================================
 
 Or NUMA_BALANCING_NORMAL to optimize page placement among different
@@ -729,6 +730,12 @@ Or NUMA_BALANCING_MEMORY_TIERING to optimize page placement among
 different types of memory (represented as different NUMA nodes) to
 place the hot pages in the fast memory.  This is implemented based on
 unmapping and page fault too.
+
+Or NUMA_BALANCING_TPP to use Transparent Page Placement style promotion
+for tiered-memory systems.  It uses the same tiering scan and demotion
+infrastructure, skips scanning top-tier memory when normal NUMA balancing
+is disabled, and promotes only non-top-tier folios that are already on an
+active LRU.
 
 numa_balancing_promote_rate_limit_MBps
 ======================================

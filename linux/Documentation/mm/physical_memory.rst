@@ -384,12 +384,12 @@ General
   When the amount of free pages in a zone is below the low watermark, kswapd is
   woken up. When the amount of free pages in a zone is above the high watermark,
   kswapd stops reclaiming (a zone is balanced) when the
-  ``NUMA_BALANCING_MEMORY_TIERING`` bit of ``sysctl_numa_balancing_mode`` is not
-  set. The promo watermark is used for memory tiering and NUMA balancing. When
+  memory tiering bits of ``sysctl_numa_balancing_mode`` are not set. The promo
+  watermark is used for memory tiering and NUMA balancing. When
   the amount of free pages in a zone is above the promo watermark, kswapd stops
-  reclaiming when the ``NUMA_BALANCING_MEMORY_TIERING`` bit of
-  ``sysctl_numa_balancing_mode`` is set. The watermarks are set by
-  ``__setup_per_zone_wmarks()``. The min watermark is calculated according to
+  reclaiming when ``NUMA_BALANCING_MEMORY_TIERING`` or ``NUMA_BALANCING_TPP`` is
+  set. The watermarks are set by ``__setup_per_zone_wmarks()``. The min
+  watermark is calculated according to
   ``vm.min_free_kbytes`` sysctl. The other three watermarks are set according
   to the distance between two watermarks. The distance itself is calculated
   taking ``vm.watermark_scale_factor`` sysctl into account.

@@ -4894,7 +4894,7 @@ static bool should_abort_scan(struct lruvec *lruvec, struct scan_control *sc)
 	if (!current_is_kswapd() || sc->order)
 		return false;
 
-	mark = sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING ?
+	mark = numa_balancing_mode_tiering(sysctl_numa_balancing_mode) ?
 	       WMARK_PROMO : WMARK_HIGH;
 
 	for (i = 0; i <= sc->reclaim_idx; i++) {
@@ -6896,8 +6896,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 	for_each_managed_zone_pgdat(zone, pgdat, i, highest_zoneidx) {
 		enum zone_stat_item item;
 		unsigned long free_pages;
-		//TODO
-		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING)
+		if (numa_balancing_mode_tiering(sysctl_numa_balancing_mode))
 			mark = promo_wmark_pages(zone);
 		else
 			mark = high_wmark_pages(zone);

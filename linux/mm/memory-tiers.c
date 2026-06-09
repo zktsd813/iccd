@@ -1103,6 +1103,6 @@ subsys_initcall(numa_init_sysfs);
 #endif /* CONFIG_SYSFS */
 bool memory_tiering_enabled(struct folio *folio)
 {
-	return folio_numa_balancing_mode(folio) & NUMA_BALANCING_MEMORY_TIERING;
+	return numa_balancing_mode_tiering(folio_numa_balancing_mode(folio));
 }
 #endif

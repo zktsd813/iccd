@@ -24,7 +24,6 @@
 #define NUMA_FAULT_LATENCY_HIST_BUCKETS		8
 #define NUMA_FAULT_LATENCY_LE_BUCKETS		\
 	(NUMA_FAULT_LATENCY_HIST_BUCKETS - 1)
-#define NUMA_LOCAL_FAULT_LARGE_VMA_BYTES	(1UL << 30)
 
 struct numa_local_fault_page_ext {
 	atomic64_t local_state;
@@ -38,8 +37,6 @@ struct numa_local_fault_window_bucket {
 	atomic64_t refault_hit;
 	atomic64_t lost;
 	atomic64_t local_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
-	atomic64_t local_large_vma_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
-	atomic64_t local_small_vma_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
 	atomic64_t remote_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
 };
 
@@ -58,7 +55,6 @@ static atomic_long_t numa_local_fault_policy_seq = ATOMIC_LONG_INIT(1);
 static atomic_t numa_local_fault_window_seq = ATOMIC_INIT(1);
 static struct numa_local_fault_window_bucket
 	numa_local_fault_buckets[NUMA_LOCAL_FAULT_WINDOW_BUCKETS];
-static unsigned long numa_local_fault_scan_pfn[MAX_NUMNODES];
 
 static atomic64_t numa_local_fault_pfn_candidates;
 static atomic64_t numa_local_fault_pfn_selected;
@@ -68,6 +64,11 @@ static atomic64_t numa_local_fault_refault;
 static atomic64_t numa_local_fault_refault_hit;
 static atomic64_t numa_local_fault_lost;
 static atomic64_t numa_local_fault_refault_total_ms;
+static atomic64_t numa_local_fault_node_scan_attempts[MAX_NUMNODES];
+static atomic64_t numa_local_fault_node_pte_updates[MAX_NUMNODES];
+static atomic64_t numa_local_fault_node_target_misses[MAX_NUMNODES];
+static atomic64_t numa_local_fault_retargets;
+static atomic_t numa_local_fault_last_target_nid = ATOMIC_INIT(NUMA_NO_NODE);
 
 static bool numa_local_fault_page_ext_need(void)
 {
@@ -182,8 +183,6 @@ static void numa_local_fault_bucket_reset(u32 seq)
 	atomic64_set(&bucket->refault_hit, 0);
 	atomic64_set(&bucket->lost, 0);
 	numa_fault_latency_hist_reset(bucket->local_latency);
-	numa_fault_latency_hist_reset(bucket->local_large_vma_latency);
-	numa_fault_latency_hist_reset(bucket->local_small_vma_latency);
 	numa_fault_latency_hist_reset(bucket->remote_latency);
 	smp_wmb();
 	atomic_set(&bucket->seq, seq);
@@ -365,8 +364,7 @@ void numa_account_local_fault_pte(struct folio *folio, unsigned long nr_pages)
 
 void numa_account_local_fault_refault(struct folio *folio,
 				      unsigned long nr_pages,
-				      unsigned int latency_ms,
-				      unsigned long vma_size)
+				      unsigned int latency_ms)
 {
 	unsigned int hit_ms;
 	u32 seq;
@@ -382,22 +380,10 @@ void numa_account_local_fault_refault(struct folio *folio,
 	if (hit)
 		atomic64_add(nr_pages, &numa_local_fault_refault_hit);
 	numa_local_fault_bucket_add_refault(seq, nr_pages, hit);
-	if (numa_local_fault_bucket_valid(seq)) {
-		struct numa_local_fault_window_bucket *bucket =
-			numa_local_fault_bucket(seq);
-
+	if (numa_local_fault_bucket_valid(seq))
 		numa_fault_latency_hist_add(
-			bucket->local_latency, latency_ms, nr_pages);
-		if (vma_size >= NUMA_LOCAL_FAULT_LARGE_VMA_BYTES) {
-			numa_fault_latency_hist_add(
-				bucket->local_large_vma_latency,
-				latency_ms, nr_pages);
-		} else {
-			numa_fault_latency_hist_add(
-				bucket->local_small_vma_latency,
-				latency_ms, nr_pages);
-		}
-	}
+			numa_local_fault_bucket(seq)->local_latency,
+			latency_ms, nr_pages);
 }
 
 void numa_account_local_fault_lost(struct folio *folio, unsigned long nr_pages)
@@ -426,11 +412,39 @@ void numa_account_remote_fault_latency(struct folio *folio,
 		return;
 
 	seq = (u32)numa_remote_fault_read_state(folio);
-	if (numa_local_fault_bucket_valid(seq)) {
+	if (numa_local_fault_bucket_valid(seq))
 		numa_fault_latency_hist_add(
 			numa_local_fault_bucket(seq)->remote_latency,
 			latency_ms, nr_pages);
-	}
+}
+
+void numa_account_local_fault_scan(int nid, unsigned long nr_pages)
+{
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		return;
+
+	atomic_set(&numa_local_fault_last_target_nid, nid);
+	atomic64_inc(&numa_local_fault_node_scan_attempts[nid]);
+	if (nr_pages)
+		atomic64_add(nr_pages,
+			     &numa_local_fault_node_pte_updates[nid]);
+}
+
+void numa_account_local_fault_target_miss(int nid)
+{
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		return;
+
+	atomic_set(&numa_local_fault_last_target_nid, nid);
+	atomic64_inc(&numa_local_fault_node_target_misses[nid]);
+}
+
+void numa_account_local_fault_retarget(int from_nid, int to_nid)
+{
+	if (to_nid >= 0 && to_nid < MAX_NUMNODES)
+		atomic_set(&numa_local_fault_last_target_nid, to_nid);
+
+	atomic64_inc(&numa_local_fault_retargets);
 }
 
 static unsigned long local_fault_max_pfn_scan(unsigned long max_pte_updates,
@@ -457,14 +471,15 @@ static unsigned long local_fault_max_pfn_scan(unsigned long max_pte_updates,
 }
 
 unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
-					  unsigned long max_pte_updates)
+					  unsigned long max_pte_updates,
+					  unsigned long *scan_pfn)
 {
 	unsigned long start_pfn, end_pfn, pfn;
 	unsigned long installed = 0, scanned = 0, max_scan;
 	u32 rate;
 
 	if (!p || !p->mm || nid < 0 || nid >= nr_node_ids ||
-	    !node_state(nid, N_MEMORY) || !max_pte_updates)
+	    !node_state(nid, N_MEMORY) || !max_pte_updates || !scan_pfn)
 		return 0;
 
 	rate = READ_ONCE(numa_local_fault_rate);
@@ -476,7 +491,7 @@ unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
 	if (start_pfn >= end_pfn)
 		return 0;
 
-	pfn = READ_ONCE(numa_local_fault_scan_pfn[nid]);
+	pfn = READ_ONCE(*scan_pfn);
 	if (pfn < start_pfn || pfn >= end_pfn)
 		pfn = start_pfn;
 
@@ -491,6 +506,8 @@ unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
 
 		page = pfn_to_online_page(pfn++);
 		scanned++;
+		if ((scanned & 0x3ff) == 0)
+			cond_resched();
 		if (!page || page_to_nid(page) != nid || !PageLRU(page))
 			continue;
 
@@ -513,7 +530,7 @@ put_folio:
 		folio_put(folio);
 	}
 
-	WRITE_ONCE(numa_local_fault_scan_pfn[nid], pfn);
+	WRITE_ONCE(*scan_pfn, pfn);
 	return installed;
 }
 
@@ -699,6 +716,7 @@ static ssize_t local_fault_stats_show(struct kobject *kobj,
 	u64 window_refault_hit = 0;
 	u64 window_lost = 0;
 	ssize_t len = 0;
+	int nid;
 
 	if (numa_local_fault_bucket_valid(seq)) {
 		window_pte_updates = atomic64_read(&bucket->pte_updates);
@@ -746,6 +764,24 @@ static ssize_t local_fault_stats_show(struct kobject *kobj,
 			     window_refault_hit);
 	len += sysfs_emit_at(buf, len, "local_fault_window_lost %llu\n",
 			     window_lost);
+	len += sysfs_emit_at(buf, len, "local_fault_rr_last_target_nid %d\n",
+			     atomic_read(&numa_local_fault_last_target_nid));
+	len += sysfs_emit_at(buf, len, "local_fault_rr_retargets %lld\n",
+			     atomic64_read(&numa_local_fault_retargets));
+	for_each_online_node(nid) {
+		len += sysfs_emit_at(buf, len,
+				     "local_fault_node%d_scan_attempts %lld\n",
+				     nid,
+				     atomic64_read(&numa_local_fault_node_scan_attempts[nid]));
+		len += sysfs_emit_at(buf, len,
+				     "local_fault_node%d_pte_updates %lld\n",
+				     nid,
+				     atomic64_read(&numa_local_fault_node_pte_updates[nid]));
+		len += sysfs_emit_at(buf, len,
+				     "local_fault_node%d_target_misses %lld\n",
+				     nid,
+				     atomic64_read(&numa_local_fault_node_target_misses[nid]));
+	}
 
 	return len;
 }
@@ -761,8 +797,6 @@ static ssize_t fault_latency_histograms_show(struct kobject *kobj,
 	struct numa_local_fault_window_bucket *bucket =
 		numa_local_fault_bucket(seq);
 	u64 local[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
-	u64 local_large[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
-	u64 local_small[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
 	u64 remote[NUMA_FAULT_LATENCY_HIST_BUCKETS] = { 0 };
 	ssize_t len = 0;
 	unsigned int i;
@@ -770,10 +804,6 @@ static ssize_t fault_latency_histograms_show(struct kobject *kobj,
 	if (numa_local_fault_bucket_valid(seq)) {
 		for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++) {
 			local[i] = atomic64_read(&bucket->local_latency[i]);
-			local_large[i] =
-				atomic64_read(&bucket->local_large_vma_latency[i]);
-			local_small[i] =
-				atomic64_read(&bucket->local_small_vma_latency[i]);
 			remote[i] = atomic64_read(&bucket->remote_latency[i]);
 		}
 	}
@@ -784,12 +814,6 @@ static ssize_t fault_latency_histograms_show(struct kobject *kobj,
 	len += sysfs_emit_at(buf, len, "local_pages");
 	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
 		len += sysfs_emit_at(buf, len, " %llu", local[i]);
-	len += sysfs_emit_at(buf, len, "\nlocal_large_vma_pages");
-	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
-		len += sysfs_emit_at(buf, len, " %llu", local_large[i]);
-	len += sysfs_emit_at(buf, len, "\nlocal_small_vma_pages");
-	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
-		len += sysfs_emit_at(buf, len, " %llu", local_small[i]);
 	len += sysfs_emit_at(buf, len, "\nremote_pages");
 	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
 		len += sysfs_emit_at(buf, len, " %llu", remote[i]);

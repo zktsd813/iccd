@@ -765,6 +765,16 @@ struct vma_numab_state {
 	int prev_scan_seq;
 };
 
+#ifdef CONFIG_NUMA_BALANCING_MT
+struct numa_local_fault_mm_state {
+	spinlock_t lock;
+	unsigned long next_scan;
+	unsigned int misses;
+	int target_nid;
+	unsigned long scan_pfn[];
+};
+#endif
+
 #ifdef __HAVE_PFNMAP_TRACKING
 struct pfnmap_track_ctx {
 	struct kref kref;
@@ -1156,18 +1166,21 @@ struct mm_struct {
 		pgtable_t pmd_huge_pte; /* protected by page_table_lock */
 #endif
 #ifdef CONFIG_NUMA_BALANCING
-		/*
-		 * numa_next_scan is the next time that PTEs will be remapped
-		 * PROT_NONE to trigger NUMA hinting faults; such faults gather
-		 * statistics and migrate pages to new nodes if necessary.
-		 */
-		unsigned long numa_next_scan;
+	/*
+	 * numa_next_scan is the next time that PTEs will be remapped
+	 * PROT_NONE to trigger NUMA hinting faults; such faults gather
+	 * statistics and migrate pages to new nodes if necessary.
+	 */
+	unsigned long numa_next_scan;
 
-		/* Restart point for scanning and remapping PTEs. */
-		unsigned long numa_scan_offset;
+	/* Restart point for scanning and remapping PTEs. */
+	unsigned long numa_scan_offset;
 
-		/* numa_scan_seq prevents two threads remapping PTEs. */
-		int numa_scan_seq;
+	/* numa_scan_seq prevents two threads remapping PTEs. */
+	int numa_scan_seq;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	struct numa_local_fault_mm_state *numa_local_fault_state;
+#endif
 #endif
 		/*
 		 * An operation with batched TLB flushing is going on. Anything
