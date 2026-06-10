@@ -1,0 +1,5 @@
+variant,source,elapsed_s,ratio_vs_baseline_off,mops,user_cpu_s,system_cpu_s,numa_hint_faults,numa_pages_migrated,pgpromote_success,demoted_gib,pgfault
+baseline_off,motivation/2_microbenchmark/varying_local/raw/local-16G/summaries/summary.csv,261.022519,1.000,168.400,8986.14,30.44,0,0,0,1.189,9449725
+baseline_migration_on,motivation/2_microbenchmark/varying_local/raw/local-16G/summaries/summary.csv,699.074203,2.678,62.974,18500.58,4189.66,63077572,2740008,2740008,11.361,478585176
+fault_only_off,motivation/2_microbenchmark/fault_only_allfast16/raw/local-16G/summaries/summary.csv,265.278708,1.016,165.699,9096.22,31.38,0,0,0,0.925,9440780
+fault_only_on,motivation/2_microbenchmark/fault_only_allfast16/raw/local-16G/summaries/summary.csv,302.211244,1.158,145.449,8294.94,2033.35,36398651,0,0,0.925,271320994
