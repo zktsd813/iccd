@@ -20,7 +20,7 @@
 #define NUMA_LOCAL_FAULT_SCAN_PERIOD_MS_DEF	1000U
 #define NUMA_LOCAL_FAULT_SCAN_SIZE_MB_DEF	256U
 #define NUMA_LOCAL_FAULT_WINDOW_BUCKETS		64
-#define NUMA_FAULT_LATENCY_HIST_BUCKETS		8
+#define NUMA_FAULT_LATENCY_HIST_BUCKETS		11
 #define NUMA_FAULT_LATENCY_LE_BUCKETS		\
 	(NUMA_FAULT_LATENCY_HIST_BUCKETS - 1)
 
@@ -39,8 +39,9 @@ struct numa_local_fault_window_bucket {
 	atomic64_t remote_latency[NUMA_FAULT_LATENCY_HIST_BUCKETS];
 };
 
-static const unsigned int numa_fault_latency_bounds_ms[] = {
-	128, 256, 512, 1024, 2048, 4096, 8192,
+static const unsigned int
+numa_fault_latency_bounds_ms[NUMA_FAULT_LATENCY_LE_BUCKETS] = {
+	1, 16, 64, 128, 256, 512, 1024, 2048, 4096, 8192,
 };
 
 static u32 numa_local_fault_rate;
@@ -1164,7 +1165,7 @@ static ssize_t fault_latency_histograms_show(struct kobject *kobj,
 
 	len += sysfs_emit_at(buf, len, "window_seq %u\n", seq);
 	len += sysfs_emit_at(buf, len,
-			     "bucket_ms le_128 le_256 le_512 le_1024 le_2048 le_4096 le_8192 gt_8192\n");
+			     "bucket_ms le_1 le_16 le_64 le_128 le_256 le_512 le_1024 le_2048 le_4096 le_8192 gt_8192\n");
 	len += sysfs_emit_at(buf, len, "local_pages");
 	for (i = 0; i < NUMA_FAULT_LATENCY_HIST_BUCKETS; i++)
 		len += sysfs_emit_at(buf, len, " %llu", local[i]);

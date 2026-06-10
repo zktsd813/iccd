@@ -48,44 +48,67 @@ Stop behavior:
 Buckets are indexed as:
 
 ```text
-0 <=128ms
-1 <=256ms
-2 <=512ms
-3 <=1024ms
-4 <=2048ms
-5 <=4096ms
-6 <=8192ms
-7 >8192ms
+0 <=1ms
+1 <=16ms
+2 <=64ms
+3 <=128ms
+4 <=256ms
+5 <=512ms
+6 <=1024ms
+7 <=2048ms
+8 <=4096ms
+9 <=8192ms
+10 >8192ms
 ```
 
-For each valid window:
+For each valid window while migration is on:
 
 1. Compute `local_p80_idx` from `local_pages`.
 2. Compute `remote_p20_idx` from `remote_pages`.
-3. If `local_p80_idx < remote_p20_idx`, count this as `effective`.
-4. If `effective` continues for 2 valid windows, stop migration.
-5. Otherwise compute `gap = local_p80_idx - remote_p20_idx`.
-6. If the next valid window's `gap` shrinks, migration is improving and the
-   no-improve counter resets.
-7. If `gap` stays the same or grows, increment the no-improve counter.
-8. If no-improve reaches 2, stop migration.
+3. Compute `gap = local_p80_idx - remote_p20_idx`.
+4. The first valid window is skipped and is not used for a decision.
+5. If `gap < 0`, local P80 is faster than remote P20. This is the
+   migration-unnecessary region. The controller also computes
+   `effective_gap = remote_p20_idx - local_p80_idx`. The first valid window in
+   this region establishes an effective baseline. If `effective_gap` increases,
+   migration may still be changing the distribution and the stop counter is not
+   incremented. If `effective_gap` stays the same or decreases, increment the
+   effective stop counter. If the counter reaches 2, stop migration with
+   `stop_reason=effective`.
+6. If `gap >= 0`, migration is still needed. The first such valid window
+   establishes a baseline gap. If later `gap` shrinks, migration is improving
+   and stays enabled. If `gap` stays the same or grows, stop migration
+   immediately with `stop_reason=no_improve`.
 
-Invalid windows are recorded but reset the consecutive stop decision state. A
-window is invalid if either local or remote histogram total is below the
-configured minimum page count. The default minimum is 1024 pages for each side.
+Invalid windows are recorded but reset the stop decision baseline. A window is
+invalid when either local or remote histogram total is below the configured
+minimum page count, or when either percentile is unavailable. The default
+minimum is 1024 pages for each side. Low-sample sides are not mapped to the
+final bucket.
+
+After the controller has observed the first valid remote histogram in the
+current on-state, a later on-state window with remote samples below the remote
+minimum stops migration with `stop_reason=remote_low_sample`.
 
 ## Restart Policy
 
-When migration is stopped, the controller records a remote-side baseline:
+Restart depends on why migration was stopped.
 
-1. Let `n = remote_p20_idx` at the stop window.
-2. Let `compare_idx = min(n, last_bucket - 1)`.
+If migration was stopped with `stop_reason=effective`, the controller treats a
+new `gap >= 0` valid off-state window as migration-needed again and immediately
+restarts migration.
+
+If migration was stopped with `stop_reason=no_improve`, the controller keeps
+the existing remote-share restart policy. The stop window is not used as the
+restart baseline. Instead, the first valid off-state protected window arms the
+restart baseline:
+
+1. Let `n = remote_p20_idx` at the protected window.
+2. Let `compare_idx = n`.
 3. Record `baseline_share = sum(remote_pages[0:compare_idx+1]) /
    sum(remote_pages)`.
-
-The `last_bucket - 1` clamp avoids a degenerate case. If `remote_p20_idx` is
-the final `>8192ms` bucket, summing through `n` would always produce 100%, so a
-20% relative increase could never trigger.
+Invalid protected windows reset the protected count, so the baseline is taken
+from one valid off-state window.
 
 During off-state monitoring, the controller recomputes the same relative
 prefix share:
@@ -96,13 +119,15 @@ current_share = sum(remote_pages[0:compare_idx+1]) / sum(remote_pages)
 
 If `current_share >= baseline_share * 1.20` for 2 consecutive valid windows,
 the controller writes `/proc/sys/kernel/numa_balancing=2` and resets the stop
-state. The threshold is always compared against the stop-time baseline; it does
-not compound as `1.20`, then `1.20 * 1.20`. Invalid off-state windows reset the
-restart consecutive count. After restart, it skips stop decisions for 1 grace
-window while still recording histogram rows.
+state. The threshold is always compared against the protected-window baseline;
+it does not compound as `1.20`, then `1.20 * 1.20`. Invalid off-state windows
+reset the restart consecutive count. After restart, it skips stop decisions for
+1 grace window while still recording histogram rows.
 
-The restart signal is remote-only by design. Local histograms continue to be
-recorded for diagnosis, but they are not used to restart migration.
+The `no_improve` restart signal is remote-only by design. Local histograms
+continue to be recorded for diagnosis. The `effective` restart signal uses both
+local and remote percentiles, because it is checking whether the workload has
+returned to the migration-needed region.
 
 ## Files
 

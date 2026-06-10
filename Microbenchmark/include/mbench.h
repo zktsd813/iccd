@@ -142,6 +142,7 @@ struct mbench_thread_config {
 
 struct mbench_request_config {
     uint64_t ops_per_pass;
+    uint64_t target_ops;
     uint64_t pause_ns;
 };
 

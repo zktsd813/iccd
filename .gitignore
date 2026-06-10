@@ -13,6 +13,9 @@ linux-build-mt/
 linux-global-build/
 vmlinux
 vmlinux.*
+!linux/arch/x86/kernel/vmlinux.lds.S
+!linux/arch/x86/boot/compressed/vmlinux.lds.S
+!linux/include/asm-generic/vmlinux.lds.h
 vmlinux.scr
 System.map
 Module.symvers
@@ -33,6 +36,7 @@ modules.order
 *.tgz
 *.xz
 *.zst
+experiments/**/keys/
 
 # Python/cache noise
 __pycache__/
