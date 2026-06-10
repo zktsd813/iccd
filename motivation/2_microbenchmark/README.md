@@ -115,6 +115,36 @@ Default output is `motivation/2_microbenchmark/interleave` with raw per-run
 results under `interleave/raw/<mode>/local-*G/`. The experiment name does not
 mean Linux `MPOL_INTERLEAVE`; placement is first-touch based.
 
+## 16G Random-Page Hotset
+
+The random-page hotset run uses `skewed-hotset` instead of the deterministic
+4 KiB stride BW kernel. It keeps RSS at 32G, makes the active hotset/window 16G,
+and starts exactly half of that hotset on local memory:
+
+```bash
+./motivation/2_microbenchmark/run_hotset16_random_page.sh
+```
+
+Defaults:
+
+```text
+FAST_MEM=24G, SLOW_MEM=64G
+ARENA_SIZE=32G, WINDOW_SIZE=16G, WINDOW_SPLIT_LOCAL=8G
+MBENCH_MODE=skewed-hotset
+HOTSET_PAGES=4194304
+HOT_PROB_PCT=100
+HOTSET_READ_PCT=100, HOTSET_WRITE_PCT=0, HOTSET_RMW_PCT=0
+HOTSET_INDEX_MODE=xorshift
+CASES="off on"
+TARGET_OPS=43686414250
+USE_KERNEL_DEFAULT_NUMA_SCAN=1
+```
+
+Default output is
+`motivation/2_microbenchmark/hotset16_rss32_local24_hotset_half_random_page`.
+The wrapper refuses to overwrite an existing completed raw run; set `EXP_ROOT`
+or remove the old raw directory before rerunning.
+
 ## Cases
 
 - `off`: global NUMA balancing `0`, ftrace disabled.

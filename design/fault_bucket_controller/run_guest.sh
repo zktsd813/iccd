@@ -22,6 +22,7 @@ REMOTE_FAULT_SCAN_PERIOD_MS="${REMOTE_FAULT_SCAN_PERIOD_MS:-${LOCAL_FAULT_SCAN_P
 REMOTE_FAULT_SCAN_SIZE_MB="${REMOTE_FAULT_SCAN_SIZE_MB:-${LOCAL_FAULT_SCAN_SIZE_MB}}"
 MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
 MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
+BASELINE_SKIP_WINDOWS="${BASELINE_SKIP_WINDOWS:-1}"
 CONSECUTIVE_EFFECTIVE="${CONSECUTIVE_EFFECTIVE:-2}"
 CONSECUTIVE_NO_IMPROVE="${CONSECUTIVE_NO_IMPROVE:-2}"
 RESTART_REMOTE_SHARE_THRESHOLD="${RESTART_REMOTE_SHARE_THRESHOLD:-1.2}"
@@ -240,6 +241,7 @@ write_config() {
 		printf 'remote_fault_scan_size_mb=%s\n' "${REMOTE_FAULT_SCAN_SIZE_MB}"
 		printf 'min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
 		printf 'min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
+		printf 'baseline_skip_windows=%s\n' "${BASELINE_SKIP_WINDOWS}"
 		printf 'consecutive_effective=%s\n' "${CONSECUTIVE_EFFECTIVE}"
 		printf 'consecutive_no_improve=%s\n' "${CONSECUTIVE_NO_IMPROVE}"
 		printf 'restart_remote_share_threshold=%s\n' "${RESTART_REMOTE_SHARE_THRESHOLD}"
@@ -284,6 +286,7 @@ main() {
 		--remote-rate "${REMOTE_RATE}" \
 		--min-local-pages "${MIN_LOCAL_PAGES}" \
 		--min-remote-pages "${MIN_REMOTE_PAGES}" \
+		--baseline-skip-windows "${BASELINE_SKIP_WINDOWS}" \
 		--consecutive-effective "${CONSECUTIVE_EFFECTIVE}" \
 		--consecutive-no-improve "${CONSECUTIVE_NO_IMPROVE}" \
 		--restart-remote-share-threshold "${RESTART_REMOTE_SHARE_THRESHOLD}" \

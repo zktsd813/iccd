@@ -6,6 +6,9 @@ from pathlib import Path
 
 
 BUCKET_LABELS = [
+    "<=1",
+    "<=16",
+    "<=64",
     "<=128",
     "<=256",
     "<=512",
@@ -31,7 +34,10 @@ def parse_histogram(path):
             data["window_seq"] = parts[1]
         elif parts[0] in {"local_pages", "remote_pages"}:
             values = [int(value) for value in parts[1:]]
-            data[parts[0]] = values[: len(BUCKET_LABELS)]
+            values = values[: len(BUCKET_LABELS)]
+            if len(values) < len(BUCKET_LABELS):
+                values.extend([0] * (len(BUCKET_LABELS) - len(values)))
+            data[parts[0]] = values
     return data
 
 

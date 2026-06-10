@@ -22,6 +22,9 @@ from typing import Iterable, Optional, TextIO
 
 
 BUCKET_LABELS = (
+    "<=1",
+    "<=16",
+    "<=64",
     "<=128",
     "<=256",
     "<=512",
@@ -40,6 +43,17 @@ class Histogram:
     window_seq: int
     local_pages: list[int]
     remote_pages: list[int]
+
+
+@dataclass
+class BucketSignals:
+    local_total: int
+    remote_total: int
+    local_p80_index: int
+    local_p80_label: str
+    remote_p20_index: int
+    remote_p20_label: str
+    valid: bool
 
 
 @dataclass
@@ -67,17 +81,29 @@ class RestartObservation:
 
 
 class DecisionState:
-    def __init__(self, consecutive_effective: int, consecutive_no_improve: int):
+    def __init__(
+        self,
+        consecutive_effective: int,
+        consecutive_no_improve: int,
+        baseline_skip_windows: int = 1,
+    ):
         self.consecutive_effective = consecutive_effective
         self.consecutive_no_improve = consecutive_no_improve
+        self.baseline_skip_windows = baseline_skip_windows
+        self.skipped_valid_windows = 0
         self.effective_count = 0
         self.no_improve_count = 0
-        self.previous_need_gap: Optional[int] = None
+        self.previous_gap: Optional[int] = None
+        self.previous_region: Optional[str] = None
+        self.seen_remote_valid = False
 
     def reset(self) -> None:
+        self.skipped_valid_windows = 0
         self.effective_count = 0
         self.no_improve_count = 0
-        self.previous_need_gap = None
+        self.previous_gap = None
+        self.previous_region = None
+        self.seen_remote_valid = False
 
     def evaluate(
         self,
@@ -89,12 +115,32 @@ class DecisionState:
         min_local_pages: int,
         min_remote_pages: int,
     ) -> Decision:
-        if (
-            local_total < min_local_pages
-            or remote_total < min_remote_pages
-            or local_p80_index < 0
-            or remote_p20_index < 0
-        ):
+        remote_valid = remote_total >= min_remote_pages and remote_p20_index >= 0
+        if remote_valid:
+            self.seen_remote_valid = True
+        if self.seen_remote_valid and not remote_valid:
+            self.effective_count = 0
+            self.no_improve_count = 0
+            self.previous_gap = None
+            self.previous_region = None
+            return Decision(
+                valid=False,
+                decision="stop_remote_low_sample",
+                stop_reason="remote_low_sample",
+                gap=None,
+                effective_count=self.effective_count,
+                no_improve_count=self.no_improve_count,
+            )
+
+        valid, local_p80_index, remote_p20_index = validate_bucket_pair(
+            local_total=local_total,
+            remote_total=remote_total,
+            local_p80_index=local_p80_index,
+            remote_p20_index=remote_p20_index,
+            min_local_pages=min_local_pages,
+            min_remote_pages=min_remote_pages,
+        )
+        if not valid:
             self.reset()
             return Decision(
                 valid=False,
@@ -106,18 +152,49 @@ class DecisionState:
             )
 
         gap = local_p80_index - remote_p20_index
-        if local_p80_index < remote_p20_index:
-            self.effective_count += 1
+        if self.skipped_valid_windows < self.baseline_skip_windows:
+            self.skipped_valid_windows += 1
+            self.effective_count = 0
             self.no_improve_count = 0
-            self.previous_need_gap = None
-            stop_reason = (
-                "effective"
-                if self.effective_count >= self.consecutive_effective
-                else ""
-            )
+            self.previous_gap = None
+            self.previous_region = None
             return Decision(
                 valid=True,
-                decision="effective" if not stop_reason else "stop_effective",
+                decision="baseline_skip",
+                stop_reason="",
+                gap=gap,
+                effective_count=self.effective_count,
+                no_improve_count=self.no_improve_count,
+            )
+
+        if gap < 0:
+            effective_gap = remote_p20_index - local_p80_index
+            previous_effective_gap = (
+                -self.previous_gap
+                if self.previous_gap is not None
+                else None
+            )
+            self.no_improve_count = 0
+            if self.previous_region != "effective" or self.previous_gap is None:
+                self.effective_count = 0
+                decision = "effective_baseline"
+                stop_reason = ""
+            elif previous_effective_gap is not None and effective_gap > previous_effective_gap:
+                decision = "effective_improving"
+                stop_reason = ""
+            else:
+                self.effective_count += 1
+                if self.effective_count >= self.consecutive_effective:
+                    decision = "stop_effective"
+                    stop_reason = "effective"
+                else:
+                    decision = "effective_candidate"
+                    stop_reason = ""
+            self.previous_gap = gap
+            self.previous_region = "effective"
+            return Decision(
+                valid=True,
+                decision=decision,
                 stop_reason=stop_reason,
                 gap=gap,
                 effective_count=self.effective_count,
@@ -125,25 +202,24 @@ class DecisionState:
             )
 
         self.effective_count = 0
-        if self.previous_need_gap is None:
+        if self.previous_region != "need" or self.previous_gap is None:
             self.no_improve_count = 0
             decision = "need_baseline"
-        elif gap < self.previous_need_gap:
+            stop_reason = ""
+        elif gap < self.previous_gap:
             self.no_improve_count = 0
             decision = "improving"
+            stop_reason = ""
         else:
-            self.no_improve_count += 1
-            decision = "no_improve"
+            self.no_improve_count = 1
+            decision = "stop_no_improve"
+            stop_reason = "no_improve"
 
-        self.previous_need_gap = gap
-        stop_reason = (
-            "no_improve"
-            if self.no_improve_count >= self.consecutive_no_improve
-            else ""
-        )
+        self.previous_gap = gap
+        self.previous_region = "need"
         return Decision(
             valid=True,
-            decision=decision if not stop_reason else "stop_no_improve",
+            decision=decision,
             stop_reason=stop_reason,
             gap=gap,
             effective_count=self.effective_count,
@@ -152,15 +228,27 @@ class DecisionState:
 
 
 class RestartState:
-    def __init__(self, threshold: float, consecutive_windows: int):
+    def __init__(
+        self,
+        threshold: float,
+        consecutive_windows: int,
+        protected_windows: int = 1,
+    ):
         self.threshold = threshold
         self.consecutive_windows = consecutive_windows
+        self.protected_windows = protected_windows
+        self.protecting = False
+        self.protected_count = 0
+        self.stop_reason = ""
         self.stop_remote_p20_index: Optional[int] = None
         self.compare_bucket_index: Optional[int] = None
         self.baseline_share: Optional[float] = None
         self.consecutive_count = 0
 
     def reset(self) -> None:
+        self.protecting = False
+        self.protected_count = 0
+        self.stop_reason = ""
         self.stop_remote_p20_index = None
         self.compare_bucket_index = None
         self.baseline_share = None
@@ -170,6 +258,18 @@ class RestartState:
         return self._observation(
             valid=False,
             decision="",
+            current_share=None,
+            ratio=None,
+            restart=False,
+        )
+
+    def begin_protection(self, stop_reason: str) -> RestartObservation:
+        self.reset()
+        self.stop_reason = stop_reason
+        self.protecting = stop_reason != "effective"
+        return self._observation(
+            valid=False,
+            decision="restart_protect_start",
             current_share=None,
             ratio=None,
             restart=False,
@@ -186,8 +286,7 @@ class RestartState:
                 restart=False,
             )
 
-        last_index = len(remote_pages) - 1
-        compare_index = min(remote_p20_index, max(0, last_index - 1))
+        compare_index = remote_p20_index
         baseline = prefix_share(remote_pages, compare_index)
         if baseline is None:
             return self._observation(
@@ -209,7 +308,62 @@ class RestartState:
             restart=False,
         )
 
-    def observe(self, remote_pages: list[int], min_remote_pages: int) -> RestartObservation:
+    def observe(
+        self,
+        remote_pages: list[int],
+        min_remote_pages: int,
+        remote_p20_index: Optional[int] = None,
+        *,
+        need_migration: Optional[bool] = None,
+    ) -> RestartObservation:
+        if self.stop_reason == "effective":
+            if need_migration is None:
+                return self._observation(
+                    valid=False,
+                    decision="restart_effective_invalid",
+                    current_share=None,
+                    ratio=None,
+                    restart=False,
+                )
+            return self._observation(
+                valid=True,
+                decision=(
+                    "restart_need_migration"
+                    if need_migration
+                    else "restart_effective_wait"
+                ),
+                current_share=None,
+                ratio=None,
+                restart=need_migration,
+            )
+
+        if self.protecting and self.compare_bucket_index is None:
+            if (
+                sum(remote_pages) < min_remote_pages
+                or remote_p20_index is None
+                or remote_p20_index < 0
+            ):
+                self.protected_count = 0
+                return self._observation(
+                    valid=False,
+                    decision="restart_protect_invalid",
+                    current_share=None,
+                    ratio=None,
+                    restart=False,
+                )
+
+            self.protected_count += 1
+            if self.protected_count < self.protected_windows:
+                return self._observation(
+                    valid=True,
+                    decision=f"restart_protect_{self.protected_count}",
+                    current_share=None,
+                    ratio=None,
+                    restart=False,
+                )
+
+            return self.arm(remote_pages, remote_p20_index)
+
         if self.compare_bucket_index is None or self.baseline_share is None:
             return self._observation(
                 valid=False,
@@ -296,11 +450,13 @@ def monitor_decision(
     decision_name: str = "monitor_off",
     invalid_decision_name: str = "invalid_skip_off",
 ) -> Decision:
-    valid = (
-        local_total >= min_local_pages
-        and remote_total >= min_remote_pages
-        and local_p80_index >= 0
-        and remote_p20_index >= 0
+    valid, local_p80_index, remote_p20_index = validate_bucket_pair(
+        local_total=local_total,
+        remote_total=remote_total,
+        local_p80_index=local_p80_index,
+        remote_p20_index=remote_p20_index,
+        min_local_pages=min_local_pages,
+        min_remote_pages=min_remote_pages,
     )
     gap = local_p80_index - remote_p20_index if valid else None
     return Decision(
@@ -385,6 +541,52 @@ def percentile_bucket(values: list[int], percentile: int) -> tuple[int, str]:
         if cumulative >= threshold:
             return index, BUCKET_LABELS[index]
     return len(values) - 1, BUCKET_LABELS[-1]
+
+
+def validate_bucket_pair(
+    *,
+    local_total: int,
+    remote_total: int,
+    local_p80_index: int,
+    remote_p20_index: int,
+    min_local_pages: int,
+    min_remote_pages: int,
+) -> tuple[bool, int, int]:
+    local_valid = local_total >= min_local_pages and local_p80_index >= 0
+    remote_valid = remote_total >= min_remote_pages and remote_p20_index >= 0
+
+    return local_valid and remote_valid, local_p80_index, remote_p20_index
+
+
+def bucket_signals(
+    local_pages: list[int],
+    remote_pages: list[int],
+    min_local_pages: int,
+    min_remote_pages: int,
+) -> BucketSignals:
+    local_total = sum(local_pages)
+    remote_total = sum(remote_pages)
+    local_p80_index, _ = percentile_bucket(local_pages, 80)
+    remote_p20_index, _ = percentile_bucket(remote_pages, 20)
+    valid, local_p80_index, remote_p20_index = validate_bucket_pair(
+        local_total=local_total,
+        remote_total=remote_total,
+        local_p80_index=local_p80_index,
+        remote_p20_index=remote_p20_index,
+        min_local_pages=min_local_pages,
+        min_remote_pages=min_remote_pages,
+    )
+    local_p80_label = BUCKET_LABELS[local_p80_index] if local_p80_index >= 0 else "NA"
+    remote_p20_label = BUCKET_LABELS[remote_p20_index] if remote_p20_index >= 0 else "NA"
+    return BucketSignals(
+        local_total=local_total,
+        remote_total=remote_total,
+        local_p80_index=local_p80_index,
+        local_p80_label=local_p80_label,
+        remote_p20_index=remote_p20_index,
+        remote_p20_label=remote_p20_label,
+        valid=valid,
+    )
 
 
 def prefix_share(values: list[int], end_index: int) -> Optional[float]:
@@ -493,6 +695,7 @@ def run_controller(args: argparse.Namespace) -> int:
                     f"remote_rate={args.remote_rate}",
                     f"min_local_pages={args.min_local_pages}",
                     f"min_remote_pages={args.min_remote_pages}",
+                    f"baseline_skip_windows={args.baseline_skip_windows}",
                     f"consecutive_effective={args.consecutive_effective}",
                     f"consecutive_no_improve={args.consecutive_no_improve}",
                     f"restart_remote_share_threshold={args.restart_remote_share_threshold}",
@@ -552,6 +755,7 @@ def run_controller(args: argparse.Namespace) -> int:
     state = DecisionState(
         args.consecutive_effective,
         args.consecutive_no_improve,
+        args.baseline_skip_windows,
     )
     restart_state = RestartState(
         args.restart_remote_share_threshold,
@@ -574,8 +778,12 @@ def run_controller(args: argparse.Namespace) -> int:
         hist_file: str,
         restart: Optional[RestartObservation] = None,
     ) -> None:
-        local_p80_index, local_p80_label = percentile_bucket(histogram.local_pages, 80)
-        remote_p20_index, remote_p20_label = percentile_bucket(histogram.remote_pages, 20)
+        signals = bucket_signals(
+            histogram.local_pages,
+            histogram.remote_pages,
+            args.min_local_pages,
+            args.min_remote_pages,
+        )
         if restart is None:
             restart = restart_state.snapshot()
         writer.writerow(
@@ -590,12 +798,12 @@ def run_controller(args: argparse.Namespace) -> int:
                 "numa_balancing": read_knob(numa_balancing_path),
                 "local_rate": read_knob(local_rate_path),
                 "remote_rate": read_knob(remote_rate_path),
-                "local_total_pages": sum(histogram.local_pages),
-                "remote_total_pages": sum(histogram.remote_pages),
-                "local_p80_bucket_index": local_p80_index,
-                "local_p80_bucket": local_p80_label,
-                "remote_p20_bucket_index": remote_p20_index,
-                "remote_p20_bucket": remote_p20_label,
+                "local_total_pages": signals.local_total,
+                "remote_total_pages": signals.remote_total,
+                "local_p80_bucket_index": signals.local_p80_index,
+                "local_p80_bucket": signals.local_p80_label,
+                "remote_p20_bucket_index": signals.remote_p20_index,
+                "remote_p20_bucket": signals.remote_p20_label,
                 "gap": "" if decision.gap is None else decision.gap,
                 "valid": int(decision.valid),
                 "decision": decision.decision,
@@ -641,30 +849,40 @@ def run_controller(args: argparse.Namespace) -> int:
 
             hist_text = read_text(hist_path)
             histogram = parse_histogram_text(hist_text)
-            local_p80_index, _ = percentile_bucket(histogram.local_pages, 80)
-            remote_p20_index, _ = percentile_bucket(histogram.remote_pages, 20)
+            signals = bucket_signals(
+                histogram.local_pages,
+                histogram.remote_pages,
+                args.min_local_pages,
+                args.min_remote_pages,
+            )
             restart_observation: Optional[RestartObservation] = None
             if controller_state == "off":
                 decision = monitor_decision(
                     state=state,
-                    local_total=sum(histogram.local_pages),
-                    remote_total=sum(histogram.remote_pages),
-                    local_p80_index=local_p80_index,
-                    remote_p20_index=remote_p20_index,
+                    local_total=signals.local_total,
+                    remote_total=signals.remote_total,
+                    local_p80_index=signals.local_p80_index,
+                    remote_p20_index=signals.remote_p20_index,
                     min_local_pages=args.min_local_pages,
                     min_remote_pages=args.min_remote_pages,
                 )
                 restart_observation = restart_state.observe(
                     histogram.remote_pages,
                     args.min_remote_pages,
+                    signals.remote_p20_index,
+                    need_migration=(
+                        decision.valid
+                        and decision.gap is not None
+                        and decision.gap >= 0
+                    ),
                 )
             elif restart_grace_remaining > 0:
                 decision = monitor_decision(
                     state=state,
-                    local_total=sum(histogram.local_pages),
-                    remote_total=sum(histogram.remote_pages),
-                    local_p80_index=local_p80_index,
-                    remote_p20_index=remote_p20_index,
+                    local_total=signals.local_total,
+                    remote_total=signals.remote_total,
+                    local_p80_index=signals.local_p80_index,
+                    remote_p20_index=signals.remote_p20_index,
                     min_local_pages=args.min_local_pages,
                     min_remote_pages=args.min_remote_pages,
                     decision_name="restart_grace",
@@ -672,10 +890,10 @@ def run_controller(args: argparse.Namespace) -> int:
                 )
             else:
                 decision = state.evaluate(
-                    local_total=sum(histogram.local_pages),
-                    remote_total=sum(histogram.remote_pages),
-                    local_p80_index=local_p80_index,
-                    remote_p20_index=remote_p20_index,
+                    local_total=signals.local_total,
+                    remote_total=signals.remote_total,
+                    local_p80_index=signals.local_p80_index,
+                    remote_p20_index=signals.remote_p20_index,
                     min_local_pages=args.min_local_pages,
                     min_remote_pages=args.min_remote_pages,
                 )
@@ -690,10 +908,7 @@ def run_controller(args: argparse.Namespace) -> int:
 
             event = "sample"
             if controller_state == "on" and decision.stop_reason:
-                restart_observation = restart_state.arm(
-                    histogram.remote_pages,
-                    remote_p20_index,
-                )
+                restart_observation = restart_state.begin_protection(decision.stop_reason)
                 if not args.dry_run:
                     write_text(numa_balancing_path, args.node_balancing_off)
                     write_text(local_rate_path, args.local_rate)
@@ -709,9 +924,14 @@ def run_controller(args: argparse.Namespace) -> int:
                 restart_state.reset()
                 controller_state = "on"
                 restart_grace_remaining = args.restart_grace_windows
+                restart_decision = (
+                    restart_observation.decision
+                    if restart_observation is not None
+                    else "restart"
+                )
                 decision = Decision(
                     valid=decision.valid,
-                    decision="restart_remote_share",
+                    decision=restart_decision,
                     stop_reason="",
                     gap=decision.gap,
                     effective_count=state.effective_count,
@@ -747,6 +967,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--remote-rate", type=int, default=5)
     parser.add_argument("--consecutive-effective", type=int, default=2)
     parser.add_argument("--consecutive-no-improve", type=int, default=2)
+    parser.add_argument("--baseline-skip-windows", type=int, default=1)
     parser.add_argument("--restart-remote-share-threshold", type=float, default=1.2)
     parser.add_argument("--consecutive-restart", type=int, default=2)
     parser.add_argument("--restart-grace-windows", type=int, default=1)
@@ -777,6 +998,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         parser.error("--consecutive-effective must be >= 1")
     if args.consecutive_no_improve < 1:
         parser.error("--consecutive-no-improve must be >= 1")
+    if args.baseline_skip_windows < 0:
+        parser.error("--baseline-skip-windows must be >= 0")
     if args.restart_remote_share_threshold <= 1.0:
         parser.error("--restart-remote-share-threshold must be > 1.0")
     if args.consecutive_restart < 1:

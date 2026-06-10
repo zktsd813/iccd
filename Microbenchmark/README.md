@@ -11,6 +11,7 @@ and multiple memory-pressure modes.
 - optional initial NUMA placement
 - separate `bw`, `pc`, `mix`, `skewed-hotset`, and `irregular-index` execution modes
 - direct request shaping with per-pass operation count and optional inter-pass pause
+- fixed-operation measured runs through `--target-ops`
 - small, scriptable command-line interface for repeatable experiments
 
 ## Modes
@@ -62,6 +63,7 @@ The project uses `gcc`, `pthread`, and `libnuma`.
 - `--bw-threads 1`
 - `--pc-chains 1`
 - `--ops-per-pass 65536`
+- `--target-ops 1000000000`
 - `--pause-ns 100000`
 - `--placement none|bind:0|interleave:0,1|split:0,1`
 - `--bw-kernel read|write|copy|triad`
@@ -104,6 +106,9 @@ Example:
 - `--ops-per-pass` sets per-worker batch size. For `pc`, `skewed-hotset`, and
   `irregular-index`, one op is one logical memory access. For `bw`, one op is
   one vector element processed by the selected kernel.
+- `--target-ops` makes a non-phase measured run stop after the aggregate
+  worker operation count reaches at least the target. The final summary reports
+  elapsed seconds, ns/op, and ops/s for that fixed-operation run.
 - `--pause-ns` sleeps after each worker batch and is the simplest way to lower
   per-core request pressure without changing the working-set model.
 - `--bw-stride` and `--bw-block` reshape the regular walk so `bw` can model

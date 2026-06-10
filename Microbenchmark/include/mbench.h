@@ -105,7 +105,6 @@ struct mbench_timing_config {
     uint32_t duration_ms;
     uint32_t sample_ms;
     uint32_t move_interval_ms;
-    uint64_t target_ops;
 };
 
 struct mbench_report_config {
@@ -143,6 +142,7 @@ struct mbench_thread_config {
 
 struct mbench_request_config {
     uint64_t ops_per_pass;
+    uint64_t target_ops;
     uint64_t pause_ns;
 };
 

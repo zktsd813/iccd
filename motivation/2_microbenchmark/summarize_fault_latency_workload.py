@@ -6,6 +6,9 @@ from pathlib import Path
 
 
 BUCKET_LABELS = [
+    "<=1",
+    "<=16",
+    "<=64",
     "<=128",
     "<=256",
     "<=512",
@@ -151,7 +154,10 @@ def parse_histogram(path):
         if not parts or parts[0] not in SERIES_KEYS:
             continue
         values = [to_int(value) for value in parts[1:]]
-        data[parts[0]] = values[: len(BUCKET_LABELS)]
+        values = values[: len(BUCKET_LABELS)]
+        if len(values) < len(BUCKET_LABELS):
+            values.extend([0] * (len(BUCKET_LABELS) - len(values)))
+        data[parts[0]] = values
     return data
 
 

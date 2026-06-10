@@ -10,6 +10,9 @@ from typing import Iterable, Optional
 
 
 BUCKET_LABELS = (
+    "<=1",
+    "<=16",
+    "<=64",
     "<=128",
     "<=256",
     "<=512",

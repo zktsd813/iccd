@@ -6,6 +6,9 @@ from pathlib import Path
 
 
 BUCKET_LABELS = [
+    "<=1",
+    "<=16",
+    "<=64",
     "<=128",
     "<=256",
     "<=512",
@@ -29,6 +32,14 @@ SERIES_LABELS = {
     "local_large_vma_pages": "local large VMA",
     "local_small_vma_pages": "local small VMA",
     "remote_pages": "remote",
+}
+
+DECISION_COLORS = {
+    "stop": ("#FEE2E2", "#991B1B"),
+    "restart": ("#DCFCE7", "#166534"),
+    "invalid": ("#F3F4F6", "#4B5563"),
+    "off": ("#E0E7FF", "#3730A3"),
+    "on": ("#DBEAFE", "#1D4ED8"),
 }
 
 
@@ -58,7 +69,10 @@ def parse_histogram(path):
             data["window_seq"] = parts[1]
         elif parts[0] in SERIES_KEYS:
             values = [int(value) for value in parts[1:]]
-            data[parts[0]] = values[: len(BUCKET_LABELS)]
+            values = values[: len(BUCKET_LABELS)]
+            if len(values) < len(BUCKET_LABELS):
+                values.extend([0] * (len(BUCKET_LABELS) - len(values)))
+            data[parts[0]] = values
     return data
 
 
@@ -78,6 +92,64 @@ def load_windows(window_dir):
             }
         )
     return rows
+
+
+def short_decision(value):
+    return value.replace("_", " ")
+
+
+def format_decision(row):
+    event = row.get("event", "")
+    decision = row.get("decision", "")
+    restart = row.get("restart_decision", "")
+    stop_reason = row.get("stop_reason", "")
+
+    if event == "off":
+        reason = stop_reason or decision.removeprefix("stop_")
+        return f"STOP {short_decision(reason)}"
+    if event == "restart":
+        reason = restart or decision.removeprefix("restart_")
+        return f"RESTART {short_decision(reason).removeprefix('restart ')}"
+    if decision.startswith("invalid"):
+        return "invalid"
+    if decision == "monitor_off" and restart:
+        return short_decision(restart)
+    if decision:
+        return short_decision(decision)
+    return event or ""
+
+
+def decision_style(label):
+    if label.startswith("STOP"):
+        return DECISION_COLORS["stop"]
+    if label.startswith("RESTART") or label.startswith("restart candidate"):
+        return DECISION_COLORS["restart"]
+    if label == "invalid" or label.startswith("restart protect invalid"):
+        return DECISION_COLORS["invalid"]
+    if label.startswith("restart wait") or label.startswith("restart armed"):
+        return DECISION_COLORS["off"]
+    return DECISION_COLORS["on"]
+
+
+def load_decisions(path):
+    if path is None:
+        return {}
+
+    decisions = {}
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                window = int(row.get("window", "0") or 0)
+            except ValueError:
+                continue
+            if window <= 0 or row.get("event") == "exit":
+                continue
+            decisions[window] = {
+                "label": format_decision(row),
+                "state": row.get("controller_state", ""),
+                "raw": row,
+            }
+    return decisions
 
 
 def infer_window_label(window_dir, rows):
@@ -432,7 +504,7 @@ def plot_local_remote_histogram_facets(
 
 
 def plot_local_remote_percentile_facets(
-    plt, rows, local_series, title, output_base, copy_dir=None
+    plt, rows, local_series, title, output_base, copy_dir=None, decisions=None
 ):
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
@@ -522,6 +594,28 @@ def plot_local_remote_percentile_facets(
                 zorder=5,
                 label="remote P20 bucket",
             )
+        decision = (decisions or {}).get(row["index"])
+        if decision:
+            label = decision["label"]
+            face, edge = decision_style(label)
+            ax.text(
+                0.02,
+                0.98,
+                label,
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=6.1,
+                color=edge,
+                bbox={
+                    "boxstyle": "round,pad=0.18",
+                    "facecolor": face,
+                    "edgecolor": edge,
+                    "linewidth": 0.45,
+                    "alpha": 0.95,
+                },
+                zorder=6,
+            )
         ax.set_ylim(0, 100)
         ax.set_title(
             f"w{row['index']:02d} {row['elapsed_ms'] / 1000.0:.0f}s\n"
@@ -592,6 +686,7 @@ def main():
     parser.add_argument("--copy-dir", type=Path)
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--percentile-csv", type=Path)
+    parser.add_argument("--decision-csv", type=Path)
     args = parser.parse_args()
 
     rows = load_windows(args.window_dir)
@@ -600,6 +695,7 @@ def main():
     window_label = infer_window_label(args.window_dir, rows)
     local_series = choose_local_series(rows)
     local_label = SERIES_LABELS[local_series]
+    decisions = load_decisions(args.decision_csv)
 
     if args.csv:
         write_csv(rows, args.csv)
@@ -676,6 +772,7 @@ def main():
         f"Local P80 and remote P20 bucket markers by {window_label} window",
         args.figure_dir / "fault_latency_windows_histograms_local_p80_remote_p20_facets",
         args.copy_dir,
+        decisions,
     )
 
 
