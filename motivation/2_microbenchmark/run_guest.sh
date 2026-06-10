@@ -16,9 +16,16 @@ WINDOW_SPLIT_LOCAL="${WINDOW_SPLIT_LOCAL:-16G}"
 PLACEMENT_MODE="${PLACEMENT_MODE:-window-split}"
 THREADS="${THREADS:-32}"
 THREAD_COUNTS="${THREAD_COUNTS:-}"
+MBENCH_MODE="${MBENCH_MODE:-bw}"
 BW_STRIDE="${BW_STRIDE:-512}"
 BW_BLOCK="${BW_BLOCK:-4K}"
 BW_SHARED_WINDOW="${BW_SHARED_WINDOW:-1}"
+HOTSET_PAGES="${HOTSET_PAGES:-}"
+HOT_PROB_PCT="${HOT_PROB_PCT:-100}"
+HOTSET_READ_PCT="${HOTSET_READ_PCT:-100}"
+HOTSET_WRITE_PCT="${HOTSET_WRITE_PCT:-0}"
+HOTSET_RMW_PCT="${HOTSET_RMW_PCT:-0}"
+HOTSET_INDEX_MODE="${HOTSET_INDEX_MODE:-xorshift}"
 MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
 DEMOTION_ENABLED="${DEMOTION_ENABLED:-true}"
 DEMOTION_TARGET="${DEMOTION_TARGET:-0 1}"
@@ -337,8 +344,7 @@ mbench_base_cmd() {
 	local placement_mode
 
 	printf '%s\0' numactl "--cpunodebind=${CPU_NODE}" "${MBENCH}" \
-		--mode bw \
-		--bw-kernel read \
+		--mode "${MBENCH_MODE}" \
 		--arena-size "${ARENA_SIZE}" \
 		--window-size "${WINDOW_SIZE}" \
 		--move-policy fixed
@@ -355,21 +361,44 @@ mbench_base_cmd() {
 		fi
 		;;
 	all-slow)
-		printf '%s\0' \
-			--hotset-pages "$(size_to_pages "${WINDOW_SIZE}")" \
-			--hotset-prefault-node 1
+		case "${MBENCH_MODE}" in
+		skewed-hotset|hotset)
+			printf '%s\0' --hotset-prefault-node 1
+			;;
+		*)
+			printf '%s\0' \
+				--hotset-pages "$(size_to_pages "${WINDOW_SIZE}")" \
+				--hotset-prefault-node 1
+			;;
+		esac
 		;;
 	*) die "unknown PLACEMENT_MODE: ${PLACEMENT_MODE}" ;;
 	esac
+	case "${MBENCH_MODE}" in
+	bw)
+		printf '%s\0' \
+			--bw-kernel read \
+			--bw-stride "${BW_STRIDE}" \
+			--bw-block "${BW_BLOCK}"
+		if [[ "${BW_SHARED_WINDOW}" == "1" ]]; then
+			printf '%s\0' --bw-shared-window
+		fi
+		;;
+	skewed-hotset|hotset)
+		printf '%s\0' \
+			--hotset-pages "${HOTSET_PAGES:-$(size_to_pages "${WINDOW_SIZE}")}" \
+			--hot-prob-pct "${HOT_PROB_PCT}" \
+			--hotset-read-pct "${HOTSET_READ_PCT}" \
+			--hotset-write-pct "${HOTSET_WRITE_PCT}" \
+			--hotset-rmw-pct "${HOTSET_RMW_PCT}" \
+			--hotset-index-mode "${HOTSET_INDEX_MODE}"
+		;;
+	*) die "unsupported MBENCH_MODE for this runner: ${MBENCH_MODE}" ;;
+	esac
 	printf '%s\0' \
-		--bw-stride "${BW_STRIDE}" \
-		--bw-block "${BW_BLOCK}" \
 		--threads "${THREADS}" \
 		--sample-ms "${SAMPLE_MS}" \
 		--csv
-	if [[ "${BW_SHARED_WINDOW}" == "1" ]]; then
-		printf '%s\0' --bw-shared-window
-	fi
 }
 
 run_timed() {
@@ -586,7 +615,12 @@ calibrate_target_ops() {
 
 write_experiment_meta() {
 	{
-		printf 'case_label=stream_read_32g_split16_4kstride\n'
+		case "${MBENCH_MODE}" in
+		bw) printf 'case_label=stream_read_32g_split16_4kstride\n' ;;
+		skewed-hotset|hotset) printf 'case_label=random_page_hotset\n' ;;
+		*) printf 'case_label=%s\n' "${MBENCH_MODE}" ;;
+		esac
+		printf 'mbench_mode=%s\n' "${MBENCH_MODE}"
 		printf 'arena_size=%s\n' "${ARENA_SIZE}"
 		printf 'window_size=%s\n' "${WINDOW_SIZE}"
 		printf 'placement_mode=%s\n' "${PLACEMENT_MODE}"
@@ -609,6 +643,12 @@ write_experiment_meta() {
 		printf 'bw_stride=%s\n' "${BW_STRIDE}"
 		printf 'bw_block=%s\n' "${BW_BLOCK}"
 		printf 'bw_shared_window=%s\n' "${BW_SHARED_WINDOW}"
+		printf 'hotset_pages=%s\n' "${HOTSET_PAGES:-$(size_to_pages "${WINDOW_SIZE}")}"
+		printf 'hot_prob_pct=%s\n' "${HOT_PROB_PCT}"
+		printf 'hotset_read_pct=%s\n' "${HOTSET_READ_PCT}"
+		printf 'hotset_write_pct=%s\n' "${HOTSET_WRITE_PCT}"
+		printf 'hotset_rmw_pct=%s\n' "${HOTSET_RMW_PCT}"
+		printf 'hotset_index_mode=%s\n' "${HOTSET_INDEX_MODE}"
 		printf 'cpu_node=%s\n' "${CPU_NODE}"
 		printf 'use_kernel_default_numa_scan=%s\n' "${USE_KERNEL_DEFAULT_NUMA_SCAN}"
 		printf 'reset_fault_latency_window_after_warmup=%s\n' \
