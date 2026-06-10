@@ -1,0 +1,4 @@
+window_seq 1
+bucket_ms le_128 le_256 le_512 le_1024 le_2048 le_4096 le_8192 gt_8192
+local_pages 83440 20030 19246 30686 82996 121973 300928 3164559
+remote_pages 0 0 0 0 0 0 0 0

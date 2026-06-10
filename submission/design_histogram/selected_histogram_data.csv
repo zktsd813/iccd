@@ -1,0 +1,33 @@
+panel,workload,window,elapsed_s,series,bucket,percent,total_samples,estimated_samples_from_svg_percent,source_svg
+a,GAPBS BC,32,332.0,local,<=128,88.948426,8958,7968,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=256,5.447645,8958,488,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=512,1.004689,8958,90,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=1024,0.513508,8958,46,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=2048,1.138648,8958,102,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=4096,1.272606,8958,114,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,<=8192,1.674482,8958,150,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,local,>8192,0.000000,8958,0,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=128,2.420084,139334,3372,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=256,4.571749,139334,6370,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=512,5.076292,139334,7073,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=1024,11.875063,139334,16546,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=2048,19.626223,139334,27346,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=4096,35.949589,139334,50090,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,<=8192,20.481003,139334,28537,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+a,GAPBS BC,32,332.0,remote,>8192,0.000000,139334,0,motivation/2_microbenchmark/figure/gapbs_bc_g29_lfrate_01_i4_local48_remote128_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=128,37.779640,169459,64021,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=256,18.173718,169459,30797,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=512,18.608041,169459,31533,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=1024,13.561983,169459,22982,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=2048,8.561363,169459,14508,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=4096,3.143533,169459,5327,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,<=8192,0.171723,169459,291,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,local,>8192,0.000000,169459,0,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=128,15.180662,550088,83507,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=256,11.269107,550088,61990,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=512,17.435393,550088,95910,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=1024,22.035929,550088,121217,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=2048,20.183862,550088,111029,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=4096,11.236202,550088,61809,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,<=8192,2.658847,550088,14626,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg
+b,BTree,130,1318.0,remote,>8192,0.000000,550088,0,motivation/2_microbenchmark/figure/btree_local16_10s_fault_latency_windows_histograms_local_p80_remote_p20_facets.svg

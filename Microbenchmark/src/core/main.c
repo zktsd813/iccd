@@ -162,6 +162,7 @@ static int drive_runtime_phase(struct mbench_runtime *runtime,
     uint64_t last_bytes = 0;
     uint32_t sample_ms = runtime->config.timing.sample_ms ? runtime->config.timing.sample_ms : 1000U;
     uint32_t move_ms = runtime->config.timing.move_interval_ms ? runtime->config.timing.move_interval_ms : 1000U;
+    bool use_target_ops = emit_samples && runtime->config.timing.target_ops > 0;
 
     if (emit_samples && runtime->config.report.csv) {
         printf("time_ms,ops_total,ops_delta,bytes_total,bytes_delta,window_offset\n");
@@ -189,7 +190,14 @@ static int drive_runtime_phase(struct mbench_runtime *runtime,
             break;
         }
 
-        if (duration_ms > 0 && now_ns - start_ns >= (uint64_t)duration_ms * 1000000ULL) {
+        if (use_target_ops &&
+            atomic_load_explicit(&runtime->completed_ops, memory_order_relaxed) >=
+                runtime->config.timing.target_ops) {
+            break;
+        }
+
+        if (!use_target_ops &&
+            duration_ms > 0 && now_ns - start_ns >= (uint64_t)duration_ms * 1000000ULL) {
             break;
         }
 
@@ -201,7 +209,8 @@ static int drive_runtime_phase(struct mbench_runtime *runtime,
             next_move_ns - now_ns < wait_ns) {
             wait_ns = next_move_ns - now_ns;
         }
-        if (duration_ms > 0 && now_ns < start_ns + (uint64_t)duration_ms * 1000000ULL &&
+        if (!use_target_ops &&
+            duration_ms > 0 && now_ns < start_ns + (uint64_t)duration_ms * 1000000ULL &&
             start_ns + (uint64_t)duration_ms * 1000000ULL - now_ns < wait_ns) {
             wait_ns = start_ns + (uint64_t)duration_ms * 1000000ULL - now_ns;
         }
@@ -629,11 +638,29 @@ int main(int argc, char **argv)
         uint64_t ops = atomic_load_explicit(&runtime.completed_ops, memory_order_relaxed);
         uint64_t ops_200s = scale_ops_to_target_duration(ops, measured_elapsed_ns, 200U);
 
-        fprintf(stderr,
-                "ops_200s=%" PRIu64 " total_ops=%" PRIu64 " elapsed_s=%.3Lf\n",
-                ops_200s,
-                ops,
-                (long double)measured_elapsed_ns / 1000000000.0L);
+        if (runtime.config.timing.target_ops > 0) {
+            long double elapsed_s = (long double)measured_elapsed_ns / 1000000000.0L;
+            long double ns_per_op = ops > 0
+                ? ((long double)measured_elapsed_ns / (long double)ops)
+                : 0.0L;
+            long double ops_per_s = elapsed_s > 0.0L
+                ? ((long double)ops / elapsed_s)
+                : 0.0L;
+
+            fprintf(stderr,
+                    "target_ops=%" PRIu64 " total_ops=%" PRIu64 " elapsed_s=%.3Lf ns_per_op=%.3Lf ops_per_s=%.3Lf\n",
+                    runtime.config.timing.target_ops,
+                    ops,
+                    elapsed_s,
+                    ns_per_op,
+                    ops_per_s);
+        } else {
+            fprintf(stderr,
+                    "ops_200s=%" PRIu64 " total_ops=%" PRIu64 " elapsed_s=%.3Lf\n",
+                    ops_200s,
+                    ops,
+                    (long double)measured_elapsed_ns / 1000000000.0L);
+        }
     }
 
     mbench_runtime_release(&runtime);

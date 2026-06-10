@@ -1,0 +1,2 @@
+[vmctl] creating qcow2 overlay /Serverless/iccd-git/submission/mlc/20260610T054936Z-vm-mlc/mlc-vm.qcow2 from /Serverless/Migration-friendly/qemu/build/ubuntu.img
+Formatting '/Serverless/iccd-git/submission/mlc/20260610T054936Z-vm-mlc/mlc-vm.qcow2', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=107374182400 backing_file=/Serverless/Migration-friendly/qemu/build/ubuntu.img backing_fmt=raw lazy_refcounts=off refcount_bits=16

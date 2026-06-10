@@ -1,0 +1,6 @@
+[pr-lf0] start 2026-06-10T16:51:34Z
+Warning: Permanently added '[127.0.0.1]:10160' (ED25519) to the list of known hosts.
+[vm32-case] starting config=migration_off workload=pr: numactl --cpunodebind=0 /root/benchmark/gapbs/pr -f /root/gapbs_graphs/kron_g29.sg -i 20 -t 1e-4 -n 8 
+[vm32-case] finished config=migration_off workload=pr status=0 elapsed_s=1849
+[pr-lf0] guest rc=0 2026-06-10T17:22:30Z
+/Serverless/iccd-git/submission/eval_3_overhead/results/20260610T160635Z-eval3-overhead-local16-lf5/guest-results/local16/migration_off/pr_lf0_rerun: No such file or directory

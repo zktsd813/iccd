@@ -1,0 +1,17 @@
+--- systemd network direct config ---
+[Match]
+Name=e* en* eth0 ens* enp*
+
+[Network]
+Address=10.0.2.15/24
+Gateway=10.0.2.2
+DNS=10.0.2.3
+DNS=8.8.8.8
+IPv6AcceptRA=no
+
+[Link]
+RequiredForOnline=no
+--- wait-online override ---
+[Service]
+ExecStart=
+ExecStart=/usr/lib/systemd/systemd-networkd-wait-online --timeout=10

@@ -1,0 +1,47 @@
+Warning: Permanently added '[127.0.0.1]:10023' (ED25519) to the list of known hosts.
+timestamp_utc=2026-06-10T05:56:08Z
+uname=Linux kernel 6.18.0modified #11 SMP PREEMPT_DYNAMIC Tue Jun  9 17:21:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+
+--- set knobs ---
+numa_balancing=0
+demotion_enabled=false
+demotion_target=0 -1
+1 -1
+lru_gen_enabled=0x0007
+
+--- numactl -H ---
+available: 2 nodes (0-1)
+node 0 cpus: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+node 0 size: 16022 MB
+node 0 free: 14574 MB
+node 1 cpus:
+node 1 size: 32253 MB
+node 1 free: 31986 MB
+node distances:
+node   0   1 
+  0:  10  20 
+  1:  20  10 
+
+--- memory tiers ---
+/sys/devices/virtual/memory_tiering/memory_tier4/nodelist=0
+/sys/devices/virtual/memory_tiering/memory_tier56/nodelist=1
+
+--- node meminfo ---
+### /sys/devices/system/node/node0/meminfo
+Node 0 MemTotal:       16407336 kB
+Node 0 MemFree:        14923644 kB
+### /sys/devices/system/node/node1/meminfo
+Node 1 MemTotal:       33027160 kB
+Node 1 MemFree:        32754648 kB
+
+--- ip ---
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+enp0s2           UP             10.0.2.15/24 fec0::5054:ff:fe12:3456/64 fe80::5054:ff:fe12:3456/64 
+
+--- mlc binary ---
+-rwxr-xr-x 1 root root 196K Jun 10 05:53 /root/mlc
+Intel(R) Memory Latency Checker - v3.11
+Invalid Argument:--help
+
+USAGE: Default and recommended usage is to just run the binary "./mlc". For specific analysis, there are six modes:
+./mlc --latency_matrix 		 prints a matrix of local and cross-socket memory latencies

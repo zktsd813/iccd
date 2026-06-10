@@ -1,0 +1,23 @@
+QEMU launch plan
+  qemu       : qemu-system-x86_64
+  kernel     : /Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage
+  initrd     : <none>
+  rootfs     : /Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/images/root.qcow2
+  rootfs fmt : qcow2
+  vm name    : gapbs-data-pr-smoke
+  accel      : kvm
+  host CPUs  : 0-31
+  guest CPUs : 32
+  topology   : two-node
+  slow mode  : host-cxl
+  node0      : guest cpus=0-31, mem=16G, host node=0
+  node1      : memory-only, mem=128G, host CXL node=2, HMAT exposed
+  ssh        : host 10175 -> guest 22
+  pidfile    : /Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.pid
+  serial log : /Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.serial.log
+  qmp socket : /Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.qmp.sock
+  cmdline    : console=ttyS0 root=/dev/vda2 rw loglevel=7 nokaslr
+  hmat       : fast 80ns/40000M, slow 250ns/10000M
+
+Command:
+  taskset -c 0-31 qemu-system-x86_64 -pidfile /Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.pid -name gapbs-data-pr-smoke -machine q35\,hmat=on -cpu host -accel kvm -smp 32\,maxcpus=32 -m 144G -kernel /Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage -append console=ttyS0\ root=/dev/vda2\ rw\ loglevel=7\ nokaslr -drive file=/Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/images/root.qcow2\,if=virtio\,format=qcow2 -netdev user\,id=net0\,hostfwd=tcp::10175-:22 -device virtio-net-pci\,netdev=net0 -display none -serial file:/Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.serial.log -monitor none -qmp unix:/Serverless/iccd-git/submission/eval_3_overhead/data_disk/pr_smoke_20260610T180132Z/vmrun/gapbs-data-pr-smoke.qmp.sock\,server=on\,wait=off -object memory-backend-ram\,id=ram0\,size=16G\,host-nodes=0\,policy=bind\,prealloc=on -numa node\,nodeid=0\,cpus=0-31\,memdev=ram0 -object memory-backend-ram\,id=ram1\,size=128G\,host-nodes=2\,policy=bind\,prealloc=on -numa node\,nodeid=1\,memdev=ram1\,initiator=0 -numa hmat-lb\,initiator=0\,target=0\,hierarchy=memory\,data-type=access-latency\,latency=80 -numa hmat-lb\,initiator=0\,target=0\,hierarchy=memory\,data-type=access-bandwidth\,bandwidth=40000M -numa hmat-lb\,initiator=0\,target=1\,hierarchy=memory\,data-type=access-latency\,latency=250 -numa hmat-lb\,initiator=0\,target=1\,hierarchy=memory\,data-type=access-bandwidth\,bandwidth=10000M -daemonize -drive file=/Serverless/iccd-git/submission/eval_3_overhead/data_disk/gapbs_g29_ext4_80g.raw\,if=virtio\,format=raw\,cache=none\,aio=native 

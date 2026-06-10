@@ -24,6 +24,7 @@ STAGE_JDK17="${STAGE_JDK17:-auto}"
 STAGE_DOTNET="${STAGE_DOTNET:-auto}"
 STAGE_DLRM_VENV="${STAGE_DLRM_VENV:-1}"
 STAGE_FRAMEWORKS="${STAGE_FRAMEWORKS:-0}"
+STAGE_GAPBS_GRAPH="${STAGE_GAPBS_GRAPH:-1}"
 SSH_CONTROL_MASTER="${SSH_CONTROL_MASTER:-1}"
 SSH_CONTROL_PATH="${SSH_CONTROL_PATH:-/tmp/iccd-realworld-${PORT}.sock}"
 
@@ -57,6 +58,10 @@ GUEST_TIMEOUT_SEC="${GUEST_TIMEOUT_SEC:-1200}"
 GUEST_OMP_THREADS="${GUEST_OMP_THREADS:-32}"
 PR_ITERATIONS="${PR_ITERATIONS:-1}"
 PR_TRIALS="${PR_TRIALS:-1}"
+GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
+GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-kron_g${GAPBS_GRAPH_SCALE}.sg}"
+GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-${BENCHMARK_DIR}/gapbs/benchmark/graphs/${GAPBS_GRAPH_NAME}}"
+GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-/root/gapbs_graphs/${GAPBS_GRAPH_NAME}}"
 
 SSH_OPTS=(-p "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 SCP_OPTS=(-P "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -203,6 +208,22 @@ stream_dir() {
     ssh "${SSH_OPTS[@]}" "root@${HOST}" "tar -xzf - -C '${dst_parent}'"
 }
 
+stream_dir_filtered() {
+  local src="$1"
+  local dst_parent="$2"
+  shift 2
+  if [[ ! -d "${src}" ]]; then
+    echo "missing local directory: ${src}" >&2
+    return 1
+  fi
+  remote "mkdir -p '${dst_parent}'"
+  local -a tar_args=(-C "$(dirname "${src}")")
+  tar_args+=("$@")
+  tar_args+=(-czf - "$(basename "${src}")")
+  tar "${tar_args[@]}" | \
+    ssh "${SSH_OPTS[@]}" "root@${HOST}" "tar --no-same-owner --no-same-permissions -xzf - -C '${dst_parent}'"
+}
+
 stream_files_from_benchmark() {
   remote "mkdir -p /root/benchmark"
   tar -C "${BENCHMARK_DIR}" -czf - "$@" | \
@@ -242,28 +263,38 @@ stream_ycsb_binding() {
     "tar -xzf - -C '${dst}' --strip-components=1 && chmod +x '${dst}/bin/ycsb'"
 }
 
-copy_ldd_libs() {
-  local bin="$1"
-  local dst_dir="${2:-/usr/local/lib/iccd-realworld-deps}"
-  if [[ ! -x "${bin}" ]]; then
+ensure_gapbs_graph_host() {
+  if [[ -s "${GAPBS_GRAPH_HOST}" ]]; then
     return 0
   fi
-  while read -r lib; do
-    [[ -n "${lib}" && -f "${lib}" ]] || continue
-    local lib_base
-    local lib_src
-    lib_base="$(basename "${lib}")"
-    case "$(basename "${lib}")" in
-      ld-linux*|libanl.so.*|libBrokenLocale.so.*|libc.so.*|libcrypt.so.*|libdl.so.*|libm.so.*|libmvec.so.*|libnsl.so.*|libnss_*.so.*|libpthread.so.*|libresolv.so.*|librt.so.*|libthread_db.so.*|libutil.so.*)
-        continue
-        ;;
-    esac
-    lib_src="$(readlink -f "${lib}")"
-    copy_file "${lib_src}" "${dst_dir}/${lib_base}"
-  done < <(ldd "${bin}" 2>/dev/null | awk '
-    $2 == "=>" && $3 ~ /^\// { print $3 }
-    $1 ~ /^\// { print $1 }
-  ' | sort -u)
+
+  local converter="${BENCHMARK_DIR}/gapbs/converter"
+  [[ -x "${converter}" ]] || die "missing GAPBS converter: ${converter}"
+  mkdir -p "$(dirname -- "${GAPBS_GRAPH_HOST}")"
+  echo "build GAPBS graph g${GAPBS_GRAPH_SCALE}: ${GAPBS_GRAPH_HOST}"
+  (
+    cd "${BENCHMARK_DIR}/gapbs"
+    env OMP_NUM_THREADS="${GUEST_OMP_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores \
+      "${converter}" -g"${GAPBS_GRAPH_SCALE}" -b "${GAPBS_GRAPH_HOST}"
+  )
+  [[ -s "${GAPBS_GRAPH_HOST}" ]] || die "GAPBS graph build did not create ${GAPBS_GRAPH_HOST}"
+}
+
+stage_gapbs_graph() {
+  ensure_gapbs_graph_host
+  local expected_size
+  expected_size="$(stat -c '%s' "${GAPBS_GRAPH_HOST}")"
+
+  if remote "actual=\$(stat -c '%s' '${GAPBS_GRAPH_GUEST}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'"; then
+    return 0
+  fi
+
+  remote "rm -f '${GAPBS_GRAPH_GUEST}'"
+  copy_file "${GAPBS_GRAPH_HOST}" "${GAPBS_GRAPH_GUEST}"
+  remote "actual=\$(stat -c '%s' '${GAPBS_GRAPH_GUEST}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'" || {
+    echo "GAPBS graph staging failed: expected ${expected_size} bytes at ${GAPBS_GRAPH_GUEST}" >&2
+    return 1
+  }
 }
 
 expand_workloads() {
@@ -383,30 +414,25 @@ stage_jdk17() {
 }
 
 stage_redis() {
-  echo "stage redis binaries"
-  stream_files_from_benchmark \
-    redis/src/redis-server \
-    redis/src/redis-benchmark \
-    redis/src/redis-cli
-  remote "chmod +x /root/benchmark/redis/src/redis-server /root/benchmark/redis/src/redis-benchmark /root/benchmark/redis/src/redis-cli"
-  copy_ldd_libs "${BENCHMARK_DIR}/redis/src/redis-server"
-  copy_ldd_libs "${BENCHMARK_DIR}/redis/src/redis-benchmark"
+  if remote "test -x /root/benchmark/redis/src/redis-server && test -x /root/benchmark/redis/src/redis-benchmark && test -x /root/benchmark/redis/src/redis-cli"; then
+    echo "skip existing redis"
+    return 0
+  fi
+  echo "stage redis source/binaries"
+  stream_dir_filtered "${BENCHMARK_DIR}/redis" /root/benchmark \
+    --exclude=redis/.git \
+    --exclude=redis/.git/\*
+  remote "cd /root/benchmark/redis && (make distclean || make clean || true); find src deps -type f \\( -name '*.o' -o -name '*.a' -o -name '*.so' \\) -delete; make -j\"\$(nproc)\" BUILD_TLS=no MALLOC=libc; test -x src/redis-server && test -x src/redis-benchmark && test -x src/redis-cli && chmod +x src/redis-server src/redis-benchmark src/redis-cli"
 }
 
 stage_memcached() {
+  if remote "command -v memcached >/dev/null 2>&1 || test -x /root/benchmark/memcached/memcached"; then
+    echo "skip existing memcached"
+    return 0
+  fi
   echo "stage memcached binary"
   copy_file /usr/bin/memcached /root/benchmark/memcached/memcached
   remote "chmod +x /root/benchmark/memcached/memcached"
-  copy_ldd_libs /usr/bin/memcached
-  for lib in \
-    /usr/lib/x86_64-linux-gnu/libevent-2.1.so.7 \
-    /usr/lib/x86_64-linux-gnu/libsasl2.so.2 \
-    /usr/lib/x86_64-linux-gnu/libssl.so.3; do
-    if [[ -e "${lib}" ]]; then
-      copy_file "$(readlink -f "${lib}")" \
-        "/usr/local/lib/iccd-realworld-deps/$(basename "${lib}")"
-    fi
-  done
 }
 
 stage_ycsb() {
@@ -416,11 +442,15 @@ stage_ycsb() {
 }
 
 stage_faster() {
-  echo "stage FASTER benchmark"
-  remote "mkdir -p /root/benchmark/FASTER/cs/benchmark/bin/x64/Release"
-  stream_dir "${BENCHMARK_DIR}/FASTER/cs/benchmark/bin/x64/Release/net7.0" \
-    /root/benchmark/FASTER/cs/benchmark/bin/x64/Release
-  remote "chmod +x /root/benchmark/FASTER/cs/benchmark/bin/x64/Release/net7.0/FASTER.benchmark"
+  if remote "test -f /root/benchmark/FASTER/cs/benchmark/bin/x64/Release/net7.0/FASTER.benchmark.dll"; then
+    echo "skip existing FASTER benchmark"
+    return 0
+  fi
+  echo "stage FASTER source/binaries"
+  stream_dir_filtered "${BENCHMARK_DIR}/FASTER" /root/benchmark \
+    --exclude=FASTER/.git \
+    --exclude=FASTER/.git/\*
+  remote "test -f /root/benchmark/FASTER/cs/benchmark/bin/x64/Release/net7.0/FASTER.benchmark.dll && chmod +x /root/benchmark/FASTER/cs/benchmark/bin/x64/Release/net7.0/FASTER.benchmark 2>/dev/null || true"
 }
 
 stage_dlrm() {
@@ -445,9 +475,6 @@ stage_npb_extra() {
     NPB3.4.3/NPB3.4-OMP/bin/mg.D.x \
     NPB3.4.3/NPB3.4-OMP/bin/ua.D.x
   remote "chmod +x /root/benchmark/NPB3.4.3/NPB3.4-OMP/bin/cg.D.x /root/benchmark/NPB3.4.3/NPB3.4-OMP/bin/mg.D.x /root/benchmark/NPB3.4.3/NPB3.4-OMP/bin/ua.D.x"
-  copy_ldd_libs "${BENCHMARK_DIR}/NPB3.4.3/NPB3.4-OMP/bin/cg.D.x"
-  copy_ldd_libs "${BENCHMARK_DIR}/NPB3.4.3/NPB3.4-OMP/bin/mg.D.x"
-  copy_ldd_libs "${BENCHMARK_DIR}/NPB3.4.3/NPB3.4-OMP/bin/ua.D.x"
 }
 
 stage_spec() {
@@ -458,19 +485,16 @@ stage_spec() {
       remote "mkdir -p /root/benchmark/spec/603.bwaves_s/run"
       stream_dir "${BENCHMARK_DIR}/spec/benchspec/CPU/603.bwaves_s/run/run_base_refspeed_mytest-m64.0000" \
         /root/benchmark/spec/603.bwaves_s/run
-      copy_ldd_libs "${BENCHMARK_DIR}/spec/benchspec/CPU/603.bwaves_s/exe/speed_bwaves_base.mytest-m64"
       ;;
     spec_fotonik3d)
       echo "stage SPEC 649.fotonik3d_s binary/source snapshot; ref input is not present locally"
       remote "mkdir -p /root/benchmark/spec"
       stream_dir "${BENCHMARK_DIR}/spec/benchspec/CPU/649.fotonik3d_s" /root/benchmark/spec
-      copy_ldd_libs "${BENCHMARK_DIR}/spec/benchspec/CPU/649.fotonik3d_s/exe/fotonik3d_s_base.mytest-m64"
       ;;
     spec_roms)
       echo "stage SPEC 654.roms_s binary/source snapshot; complete ref run directory is not present locally"
       remote "mkdir -p /root/benchmark/spec"
       stream_dir "${BENCHMARK_DIR}/spec/benchspec/CPU/654.roms_s" /root/benchmark/spec
-      copy_ldd_libs "${BENCHMARK_DIR}/spec/benchspec/CPU/654.roms_s/exe/sroms_base.mytest-m64"
       ;;
   esac
 }
@@ -479,7 +503,84 @@ stage_canneal() {
   echo "stage canneal binary"
   stream_files_from_benchmark vmitosis-workloads/bin/bench_canneal_mt
   remote "chmod +x /root/benchmark/vmitosis-workloads/bin/bench_canneal_mt"
-  copy_ldd_libs "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_canneal_mt"
+}
+
+stage_gapbs_source() {
+  if remote "test -x /root/benchmark/gapbs/pr && test -x /root/benchmark/gapbs/bc"; then
+    echo "skip existing GAPBS pr/bc"
+    return 0
+  fi
+  echo "stage GAPBS source/binaries without graph cache"
+  stream_dir_filtered "${BENCHMARK_DIR}/gapbs" /root/benchmark \
+    --exclude=gapbs/.git \
+    --exclude=gapbs/.git/\* \
+    --exclude=gapbs/benchmark/graphs \
+    --exclude=gapbs/benchmark/graphs/\*
+  remote "cd /root/benchmark/gapbs && (make -j\"\$(nproc)\" pr bc || true); test -x pr && test -x bc && chmod +x pr bc"
+}
+
+stage_vmitosis_workloads() {
+  if remote "test -x /root/benchmark/vmitosis-workloads/bin/bench_gups_mt && test -x /root/benchmark/vmitosis-workloads/bin/bench_graph500_mt && test -x /root/benchmark/vmitosis-workloads/bin/bench_btree_mt"; then
+    echo "skip existing vmitosis microbench binaries"
+    return 0
+  fi
+  echo "stage vmitosis-workloads source/binaries"
+  stream_dir_filtered "${BENCHMARK_DIR}/vmitosis-workloads" /root/benchmark \
+    --exclude=vmitosis-workloads/.git \
+    --exclude=vmitosis-workloads/.git/\*
+  remote "cd /root/benchmark/vmitosis-workloads && (make -j\"\$(nproc)\" gups graph500 btree || true); test -x bin/bench_gups_mt && test -x bin/bench_graph500_mt && test -x bin/bench_btree_mt && chmod +x bin/bench_gups_mt bin/bench_graph500_mt bin/bench_btree_mt"
+}
+
+stage_silo() {
+  echo "stage Silo source/binaries"
+  remote "if test -f /usr/lib/x86_64-linux-gnu/liblz4.so.1 && ! test -e /usr/lib/x86_64-linux-gnu/liblz4.so; then ln -s liblz4.so.1 /usr/lib/x86_64-linux-gnu/liblz4.so; fi"
+  if remote "test -x /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest && ldd /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1"; then
+    echo "skip existing Silo dbtest"
+    return 0
+  fi
+  if ! remote "test -d /root/benchmark/silo && test -f /root/benchmark/silo/Makefile"; then
+    stream_dir_filtered "${BENCHMARK_DIR}/silo" /root/benchmark \
+      --exclude=silo/.git \
+      --exclude=silo/.git/\*
+  fi
+  remote "if ! test -e /usr/lib/x86_64-linux-gnu/liblz4.so && test -f /root/benchmark/silo/third-party/lz4/liblz4.so; then cp /root/benchmark/silo/third-party/lz4/liblz4.so /usr/local/lib/liblz4.so && ldconfig; fi"
+  if remote "test -x /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest && ldd /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1"; then
+    echo "skip existing Silo dbtest after loader repair"
+    return 0
+  fi
+  remote "cd /root/benchmark/silo && rm -rf out-perf.masstree && make -j\"\$(nproc)\" dbtest MYSQL=0 USE_MALLOC_MODE=0; test -x out-perf.masstree/benchmarks/dbtest && ldd out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1 && chmod +x out-perf.masstree/benchmarks/dbtest"
+}
+
+stage_liblinear() {
+  local dataset_host="${BENCHMARK_DIR}/liblinear-multicore-2.47/datasets/${LIBLINEAR_DATASET:-kdd12}"
+  local dataset_guest="/root/benchmark/liblinear-multicore-2.47/datasets/${LIBLINEAR_DATASET:-kdd12}"
+
+  if ! remote "test -x /root/benchmark/liblinear-multicore-2.47/train"; then
+    echo "stage Liblinear source/binaries without datasets"
+    stream_dir_filtered "${BENCHMARK_DIR}/liblinear-multicore-2.47" /root/benchmark \
+      --exclude=liblinear-multicore-2.47/.git \
+      --exclude=liblinear-multicore-2.47/.git/\* \
+      --exclude=liblinear-multicore-2.47/datasets \
+      --exclude=liblinear-multicore-2.47/datasets/\*
+    remote "cd /root/benchmark/liblinear-multicore-2.47 && (make -j\"\$(nproc)\" train || true); test -x train && chmod +x train"
+  else
+    echo "skip existing Liblinear train"
+  fi
+
+  [[ -f "${dataset_host}" ]] || {
+    echo "missing Liblinear dataset: ${dataset_host}" >&2
+    return 1
+  }
+  local expected_size
+  expected_size="$(stat -c '%s' "${dataset_host}")"
+  if remote "actual=\$(stat -c '%s' '${dataset_guest}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'"; then
+    echo "skip existing Liblinear dataset ${LIBLINEAR_DATASET:-kdd12}"
+    return 0
+  fi
+  echo "stage Liblinear dataset ${LIBLINEAR_DATASET:-kdd12}"
+  remote "mkdir -p /root/benchmark/liblinear-multicore-2.47/datasets"
+  copy_file "${dataset_host}" "${dataset_guest}"
+  remote "actual=\$(stat -c '%s' '${dataset_guest}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'"
 }
 
 stage_candidate_microbench() {
@@ -487,43 +588,28 @@ stage_candidate_microbench() {
   remote "mkdir -p /root/benchmark/vmitosis-workloads/bin /root/benchmark/XSBench/openmp-threading /root/benchmark/gapbs /root/gapbs_graphs"
   case "${w}" in
     pr|bc)
-      copy_file "${BENCHMARK_DIR}/gapbs/${w}" "/root/benchmark/gapbs/${w}"
-      remote "chmod +x /root/benchmark/gapbs/${w}"
-      if ! remote "test -s /root/gapbs_graphs/kron_g28.sg"; then
-        copy_file "${BENCHMARK_DIR}/gapbs/benchmark/graphs/kron_g28.sg" \
-          /root/gapbs_graphs/kron_g28.sg
+      stage_gapbs_source
+      if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
+        stage_gapbs_graph
+      else
+        echo "skip GAPBS graph staging; guest graph path is external: ${GAPBS_GRAPH_GUEST}"
       fi
       ;;
-    gups)
-      copy_file "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_gups_mt" \
-        /root/benchmark/vmitosis-workloads/bin/bench_gups_mt
-      remote "chmod +x /root/benchmark/vmitosis-workloads/bin/bench_gups_mt"
-      copy_ldd_libs "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_gups_mt"
-      ;;
-    graph500)
-      copy_file "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_graph500_mt" \
-        /root/benchmark/vmitosis-workloads/bin/bench_graph500_mt
-      remote "chmod +x /root/benchmark/vmitosis-workloads/bin/bench_graph500_mt"
-      copy_ldd_libs "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_graph500_mt"
-      ;;
-    btree)
-      copy_file "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_btree_mt" \
-        /root/benchmark/vmitosis-workloads/bin/bench_btree_mt
-      remote "chmod +x /root/benchmark/vmitosis-workloads/bin/bench_btree_mt"
-      copy_ldd_libs "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_btree_mt"
+    gups|graph500|btree)
+      stage_vmitosis_workloads
       ;;
     xsbench)
       copy_file "${BENCHMARK_DIR}/XSBench/openmp-threading/XSBench" \
         /root/benchmark/XSBench/openmp-threading/XSBench
       remote "chmod +x /root/benchmark/XSBench/openmp-threading/XSBench"
-      copy_ldd_libs "${BENCHMARK_DIR}/XSBench/openmp-threading/XSBench"
       ;;
     gapbs_bfs|gapbs_cc|gapbs_sssp)
-      copy_file "${BENCHMARK_DIR}/gapbs/${w#gapbs_}" "/root/benchmark/gapbs/${w#gapbs_}"
-      remote "chmod +x /root/benchmark/gapbs/${w#gapbs_}"
-      if ! remote "test -s /root/gapbs_graphs/kron_g28.sg"; then
-        copy_file "${BENCHMARK_DIR}/gapbs/benchmark/graphs/kron_g28.sg" \
-          /root/gapbs_graphs/kron_g28.sg
+      stage_gapbs_source
+      remote "cd /root/benchmark/gapbs && (make -j\"\$(nproc)\" '${w#gapbs_}' || true); test -x '${w#gapbs_}' && chmod +x '${w#gapbs_}'"
+      if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
+        stage_gapbs_graph
+      else
+        echo "skip GAPBS graph staging; guest graph path is external: ${GAPBS_GRAPH_GUEST}"
       fi
       ;;
   esac
@@ -579,6 +665,12 @@ stage_workload() {
     canneal_synth)
       stage_canneal
       ;;
+    silo)
+      stage_silo
+      ;;
+    liblinear)
+      stage_liblinear
+      ;;
     pr|bc|gups|graph500|btree|xsbench|gapbs_bfs|gapbs_cc|gapbs_sssp)
       stage_candidate_microbench "${w}"
       ;;
@@ -623,7 +715,7 @@ stage_selected_workloads() {
     stage_workload "${w}"
   done
 
-  remote "printf '%s\n' /usr/local/lib/iccd-realworld-deps > /etc/ld.so.conf.d/iccd-realworld-deps.conf 2>/dev/null || true; ldconfig 2>/dev/null || true"
+  remote "rm -f /etc/ld.so.conf.d/iccd-realworld-deps.conf 2>/dev/null || true"
 
   remote "df -h / /root 2>/dev/null || true; du -sh /root/benchmark /root/tools /root/realworld-work 2>/dev/null || true; find /root/scripts -maxdepth 1 -type f -printf '%p\n' | sort"
 }

@@ -1,0 +1,23 @@
+	Command being timed: "timeout 21600 env OUTDIR=/root/vm32_realworld/20260610T083046Z-eval2-bc-promotion-local32/local32/controller_0x2/bc/controller RUN_NAME=controller_0x2-bc WORKLOAD_COMMAND=/root/benchmark/gapbs/bc -f /root/gapbs_graphs/kron_g29.sg -i 1 -n 8  CPU_NODE=0 OMP_THREADS=32 WINDOW_SEC=5 LOCAL_RATE=5 REMOTE_RATE=5 LOCAL_FAULT_SCAN_PERIOD_MS=1000 LOCAL_FAULT_SCAN_SIZE_MB=256 REMOTE_FAULT_SCAN_PERIOD_MS=1000 REMOTE_FAULT_SCAN_SIZE_MB=256 MIN_LOCAL_PAGES=1024 MIN_REMOTE_PAGES=1024 CONSECUTIVE_EFFECTIVE=2 CONSECUTIVE_NO_IMPROVE=2 RESTART_REMOTE_SHARE_THRESHOLD=1.2 CONSECUTIVE_RESTART=2 RESTART_GRACE_WINDOWS=1 NUMA_BALANCING_ON=2 NUMA_BALANCING_OFF=0 MGLRU_ENABLED=0x0007 DEMOTION_ENABLED=true DEMOTION_TARGET=0 1 NUMA_SCAN_SIZE_MB=4096 NUMA_SCAN_PERIOD_MIN_MS=1000 THP_MODE= THP_DEFRAG= /root/design/fault_bucket_controller/run_guest.sh"
+	User time (seconds): 19486.25
+	System time (seconds): 1584.02
+	Percent of CPU this job got: 2769%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 12:40.87
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 81925696
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 23
+	Minor (reclaiming a frame) page faults: 199425150
+	Voluntary context switches: 13360
+	Involuntary context switches: 111815
+	Swaps: 0
+	File system inputs: 141124688
+	File system outputs: 5400
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,10 @@
+Warning: Permanently added '[127.0.0.1]:10160' (ED25519) to the list of known hosts.
+[vm32-guest] progress start 1/11 config=migration_off workload=pr
+[vm32-guest] start config=migration_off workload=pr
+[vm32-case] starting config=migration_off workload=pr: numactl --cpunodebind=0 /root/benchmark/gapbs/pr -f /root/gapbs_graphs/kron_g29.sg -i 20 -t 1e-4 -n 8 
+[vm32-case] finished config=migration_off workload=pr status=0 elapsed_s=1594
+[vm32-guest] done config=migration_off workload=pr rc=0
+[vm32-guest] progress done 1/11 config=migration_off workload=pr rc=0
+[vm32-guest] progress start 2/11 config=migration_off workload=bc
+[vm32-guest] start config=migration_off workload=bc
+[vm32-case] starting config=migration_off workload=bc: numactl --cpunodebind=0 /root/benchmark/gapbs/bc -f /root/gapbs_graphs/kron_g29.sg -i 1 -n 8 

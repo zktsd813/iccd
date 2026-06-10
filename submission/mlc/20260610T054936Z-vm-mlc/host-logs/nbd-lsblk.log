@@ -1,0 +1,4 @@
+NAME      MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+nbd15      43:480  0  120G  0 disk 
+├─nbd15p1  43:481  0    1M  0 part 
+└─nbd15p2  43:482  0  100G  0 part 

@@ -1,0 +1,96 @@
+date_utc=2026-06-10T16:06:35Z
+run_id=20260610T160635Z-eval3-overhead-local16-lf5
+required_protocol_doc=/Serverless/iccd-git/docs/iccd-experiment-protocol-20260601.md
+repo_root=/Serverless/iccd-git
+experiment_root=/Serverless/iccd-git/motivation/3_realworld/VM
+kernel=/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage
+base_rootfs=/Serverless/Migration-friendly/qemu/build/ubuntu.img
+base_rootfs_format=raw
+root_device=/dev/vda2
+root_disk=/dev/vda
+root_partition_number=2
+rootfs_virtual_size=300G
+local_sizes_gib=16
+host_cpus=0-31
+guest_cpus=32
+guest_node0_cpus=0-31
+fast_host_node=0
+slow_host_node=2
+all_local_fast_host_node=0
+all_local_slow_host_node=2
+all_slow_fast_host_node=0
+all_slow_slow_host_node=2
+migration_fast_host_node=0
+migration_slow_host_node=2
+slow_memory_mode=host-cxl
+hmat_fast_latency_ns=80
+hmat_slow_latency_ns=250
+hmat_fast_bandwidth=40000M
+hmat_slow_bandwidth=10000M
+workloads=pr bc gups graph500 btree redis_uniform redis_ycsb_a faster_uniform faster_ycsb_a silo liblinear
+configs=migration_off
+migration_fast_mem_default=16G
+migration_slow_mem=128G
+timeout_sec=21600
+sample_interval_sec=5
+omp_threads=32
+mglru_enabled=0x0007
+numa_scan_size_mb=256
+numa_scan_period_min_ms=1000
+local_fault_rate=5
+remote_fault_rate=0
+local_fault_scan_period_ms=1000
+local_fault_scan_size_mb=256
+remote_fault_scan_period_ms=1000
+remote_fault_scan_size_mb=256
+thp_mode=
+thp_defrag=
+realworld_size_profile=rss60
+verify_required_state=1
+trace_bc_trial_promotions=0
+forbid_host_node1=1
+fault_bucket_controller_dir=/Serverless/iccd-git/design/fault_bucket_controller
+controller_window_sec=5
+controller_local_rate=5
+controller_remote_rate=5
+controller_local_fault_scan_period_ms=1000
+controller_local_fault_scan_size_mb=256
+controller_remote_fault_scan_period_ms=1000
+controller_remote_fault_scan_size_mb=256
+controller_min_local_pages=1024
+controller_min_remote_pages=1024
+controller_consecutive_effective=2
+controller_consecutive_no_improve=2
+controller_restart_remote_share_threshold=1.2
+controller_consecutive_restart=2
+controller_restart_grace_windows=1
+controller_numa_balancing_on=2
+controller_numa_balancing_off=0
+gapbs_graph_mode=prebuilt
+gapbs_graph_scale=29
+gapbs_graph_host=/Serverless/benchmark/gapbs/benchmark/graphs/kron_g29.sg
+gapbs_graph_path=/root/gapbs_graphs/kron_g29.sg
+graph_build_included=0
+pr_trials=8
+bc_trials=8
+silo_bin_host=/Serverless/benchmark/silo/out-perf.masstree/benchmarks/dbtest
+liblinear_train_host=/Serverless/benchmark/liblinear-multicore-2.47/train
+liblinear_dataset_host=/Serverless/benchmark/liblinear-multicore-2.47/datasets/kdd12
+disable_smt=1
+smt_control=off
+delete_vm_images=1
+available: 3 nodes (0-2)
+node 0 cpus: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+node 0 size: 128594 MB
+node 0 free: 48731 MB
+node 1 cpus: 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63
+node 1 size: 128999 MB
+node 1 free: 559 MB
+node 2 cpus:
+node 2 size: 262144 MB
+node 2 free: 237825 MB
+node distances:
+node   0   1   2 
+  0:  10  21  14 
+  1:  21  10  24 
+  2:  14  24  10 

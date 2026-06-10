@@ -26,7 +26,7 @@ GLOBAL_DEMOTION_TARGET="${GLOBAL_DEMOTION_TARGET:-0 1}"
 NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-}"
 NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-}"
 NUMA_FAST_SCAN="${NUMA_FAST_SCAN:-0}"
-HOT_THRESHOLD_MS="${HOT_THRESHOLD_MS:-0}"
+HOT_THRESHOLD_MS="${HOT_THRESHOLD_MS:-}"
 MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
 CPUSET_CPUS="${CPUSET_CPUS:-}"
 CPUSET_MEMS="${CPUSET_MEMS:-}"
@@ -59,12 +59,13 @@ DRY_RUN=0
 SYSFS_NUMA_DIR="${SYSFS_NUMA_DIR:-/sys/kernel/mm/numa_balancing}"
 
 WORKLOAD=()
+GAPBS_GRAPH="${GAPBS_GRAPH:-/root/gapbs_graphs/kron_g29.sg}"
 
 usage() {
   cat <<'EOF'
 Usage:
   run_ours_experiment.sh [options] -- <workload command...>
-  run_ours_experiment.sh --example pr-g28 [options]
+  run_ours_experiment.sh --example pr-g29 [options]
   run_ours_experiment.sh --print-examples
 
 Purpose:
@@ -94,7 +95,7 @@ Common options:
   --scan-size-mb MB             optionally write debugfs scan_size_mb
   --scan-period-min-ms MS       optionally write debugfs scan_period_min_ms
   --fast-scan VALUE             default: 0; writes legacy cgroup fast-scan if present
-  --hot-threshold-ms MS         default: 0; writes legacy cgroup hot threshold if present
+  --hot-threshold-ms MS         deprecated; accepted but ignored, kernel default is always used
   --mglru VALUE                default: 0x0007; empty disables write
   --cpuset-cpus LIST           optionally write cpuset.cpus
   --cpuset-mems LIST           optionally write cpuset.mems
@@ -132,8 +133,8 @@ Controller options:
 
 Example names:
   microbench-stream32
-  pr-g28
-  bc-g28
+  pr-g29
+  bc-g29
 EOF
 }
 
@@ -151,26 +152,25 @@ scripts/run_ours_experiment.sh \
   /root/mbench --mode bw --bw-kernel read --arena-size 32G --window-size 32G \
     --threads 32 --duration 300 --sample-ms 1000 --csv
 
-# GAPBS PageRank example.  Use a prebuilt graph with -f; do not rebuild in the
-# measured path.
+# GAPBS PageRank example. Use a prebuilt scale-29 graph in the measured path.
 scripts/run_ours_experiment.sh \
-  --outdir /tmp/localutil-pr-g28 \
+  --outdir /tmp/localutil-pr-g29 \
   --capacity-pages 2097152 \
   --omp-threads 32 \
   --window-sec 5 \
   --remote-threshold-pct 20 \
   -- \
-  /root/pr -f /root/gapbs_graphs/kron_g28.sg -i20 -t1e-4 -n3
+  /root/pr -f /root/gapbs_graphs/kron_g29.sg -i20 -t1e-4 -n3
 
-# GAPBS BC example with a prebuilt graph.
+# GAPBS BC example. Use a prebuilt scale-29 graph in the measured path.
 scripts/run_ours_experiment.sh \
-  --outdir /tmp/localutil-bc-g28 \
+  --outdir /tmp/localutil-bc-g29 \
   --capacity-pages 2097152 \
   --omp-threads 32 \
   --window-sec 10 \
   --remote-threshold-pct 20 \
   -- \
-  /root/bc -f /root/gapbs_graphs/kron_g28.sg -i1 -n10
+  /root/bc -f /root/gapbs_graphs/kron_g29.sg -i1 -n10
 EOF
 }
 
@@ -190,11 +190,11 @@ set_example_workload() {
         --csv
       )
       ;;
-    pr-g28)
-      WORKLOAD=(/root/pr -f /root/gapbs_graphs/kron_g28.sg -i20 -t1e-4 -n3)
+    pr-g29)
+      WORKLOAD=(/root/pr -f "${GAPBS_GRAPH}" -i20 -t1e-4 -n3)
       ;;
-    bc-g28)
-      WORKLOAD=(/root/bc -f /root/gapbs_graphs/kron_g28.sg -i1 -n10)
+    bc-g29)
+      WORKLOAD=(/root/bc -f "${GAPBS_GRAPH}" -i1 -n10)
       ;;
     *)
       echo "unknown example workload: ${name}" >&2
@@ -298,7 +298,8 @@ while (($# > 0)); do
       shift 2
       ;;
     --hot-threshold-ms)
-      HOT_THRESHOLD_MS="${2:?missing --hot-threshold-ms value}"
+      : "${2:?missing --hot-threshold-ms value}"
+      echo "warning: --hot-threshold-ms is ignored; kernel default hot threshold is used" >&2
       shift 2
       ;;
     --mglru)
@@ -627,6 +628,58 @@ snapshot_cgroup() {
   } > "${out}"
 }
 
+snapshot_system() {
+  local out="$1"
+  {
+    printf 'date_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [[ -e /proc/sys/kernel/numa_balancing ]]; then
+      printf 'numa_balancing=%s\n' "$(cat /proc/sys/kernel/numa_balancing 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/mm/lru_gen/enabled ]]; then
+      printf 'lru_gen_enabled=%s\n' "$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/mm/numa/demotion_enabled ]]; then
+      printf 'demotion_enabled=%s\n' "$(cat /sys/kernel/mm/numa/demotion_enabled 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/mm/numa/demotion_target ]]; then
+      printf 'demotion_target=%s\n' "$(tr '\n' ' ' < /sys/kernel/mm/numa/demotion_target 2>/dev/null | sed 's/[[:space:]]*$//')"
+    fi
+    if [[ -e /sys/kernel/mm/transparent_hugepage/enabled ]]; then
+      printf 'thp_enabled=%s\n' "$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/mm/transparent_hugepage/defrag ]]; then
+      printf 'thp_defrag=%s\n' "$(cat /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/mm/transparent_hugepage/hpage_pmd_size ]]; then
+      printf 'thp_hpage_pmd_size=%s\n' "$(cat /sys/kernel/mm/transparent_hugepage/hpage_pmd_size 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/debug/sched/numa_balancing/scan_size_mb ]]; then
+      printf 'scan_size_mb=%s\n' "$(cat /sys/kernel/debug/sched/numa_balancing/scan_size_mb 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms ]]; then
+      printf 'scan_period_min_ms=%s\n' "$(cat /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms 2>/dev/null || true)"
+    fi
+    if [[ -e /sys/kernel/debug/sched/numa_balancing/hot_threshold_ms ]]; then
+      printf 'hot_threshold_ms=%s\n' "$(cat /sys/kernel/debug/sched/numa_balancing/hot_threshold_ms 2>/dev/null || true)"
+    fi
+    if [[ -d "${SYSFS_NUMA_DIR}" ]]; then
+      for name in \
+        local_fault_rate \
+        local_fault_scan_period_ms \
+        local_fault_scan_size_mb \
+        local_fault_refault_hit_ms; do
+        if [[ -e "${SYSFS_NUMA_DIR}/${name}" ]]; then
+          printf '%s=%s\n' "${name}" "$(cat "${SYSFS_NUMA_DIR}/${name}" 2>/dev/null || true)"
+        fi
+      done
+    fi
+    for tier in /sys/devices/virtual/memory_tiering/memory_tier*; do
+      [[ -d "${tier}" ]] || continue
+      printf '%s_nodelist=%s\n' "$(basename "${tier}")" "$(cat "${tier}/nodelist" 2>/dev/null || true)"
+    done
+  } > "${out}"
+}
+
 cleanup() {
   local rc=$?
   touch "${STOP_FILE}" 2>/dev/null || true
@@ -701,7 +754,6 @@ case "${POLICY}" in
 esac
 write_knob_optional "${CGROUP_PATH}" kswapd_demotion_enabled "${KSWAPD_DEMOTION_ON}"
 write_knob_optional "${CGROUP_PATH}" numa_balancing_fast_scan "${NUMA_FAST_SCAN}"
-write_knob_optional "${CGROUP_PATH}" numa_balancing_hot_threshold_ms "${HOT_THRESHOLD_MS}"
 case "${POLICY}" in
   ours)
     write_local_fault_required numa_local_fault_on_tiering local_fault_rate "${LOCAL_FAULT_RATE}"
@@ -755,7 +807,7 @@ write_knob_optional "${CGROUP_PATH}" numa_promote_sample_stat_enabled 0
   echo "scan_size_mb=${NUMA_SCAN_SIZE_MB}"
   echo "scan_period_min_ms=${NUMA_SCAN_PERIOD_MIN_MS}"
   echo "fast_scan=${NUMA_FAST_SCAN}"
-  echo "hot_threshold_ms=${HOT_THRESHOLD_MS}"
+  echo "hot_threshold_ms=${HOT_THRESHOLD_MS:-kernel_default}"
   echo "local_fault_rate=${LOCAL_FAULT_RATE}"
   echo "local_fault_hit_ms=${LOCAL_FAULT_HIT_MS}"
   echo "local_fault_scan_period_ms=${LOCAL_FAULT_SCAN_PERIOD_MS}"
@@ -792,6 +844,9 @@ write_knob_optional "${CGROUP_PATH}" numa_promote_sample_stat_enabled 0
 } > "${CONFIG_FILE}"
 
 snapshot_cgroup "${OUTDIR}/cgroup.before"
+snapshot_system "${OUTDIR}/system.before"
+cat /sys/kernel/debug/sched/numa_balancing/promotion_thresholds > \
+  "${OUTDIR}/promotion_thresholds.before" 2>/dev/null || true
 [[ -e /proc/vmstat ]] && cat /proc/vmstat > "${OUTDIR}/vmstat.before"
 
 controller_args=(
@@ -872,6 +927,9 @@ if [[ -n "${CONTROLLER_PID}" ]]; then
 fi
 
 snapshot_cgroup "${OUTDIR}/cgroup.after"
+snapshot_system "${OUTDIR}/system.after"
+cat /sys/kernel/debug/sched/numa_balancing/promotion_thresholds > \
+  "${OUTDIR}/promotion_thresholds.after" 2>/dev/null || true
 [[ -e /proc/vmstat ]] && cat /proc/vmstat > "${OUTDIR}/vmstat.after"
 
 {

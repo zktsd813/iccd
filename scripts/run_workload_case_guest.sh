@@ -5,6 +5,7 @@ WORKLOAD="${1:-}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BENCHMARK_DIR="${BENCHMARK_DIR:-/root/benchmark}"
 TOOLS_DIR="${TOOLS_DIR:-/root/tools}"
+BENCH_TOOLS_DIR="${BENCH_TOOLS_DIR:-${BENCHMARK_DIR}/.tools}"
 WORKDIR="${WORKDIR:-/root/realworld-work}"
 OMP_THREADS="${OMP_THREADS:-32}"
 
@@ -13,9 +14,9 @@ realworld_apply_rss60_profile() {
 
   case "${workload}" in
     redis_uniform)
-      : "${REDIS_KEYSPACE:=1880000}"
-      : "${REDIS_LOAD_REQUESTS:=4300000}"
-      : "${REDIS_RUN_REQUESTS:=500000}"
+      : "${REDIS_KEYSPACE:=2000000}"
+      : "${REDIS_LOAD_REQUESTS:=5000000}"
+      : "${REDIS_RUN_REQUESTS:=1000000}"
       : "${REDIS_VALUE_SIZE:=32768}"
       : "${REDIS_CLIENTS:=128}"
       : "${REDIS_TESTS:=get,set}"
@@ -23,8 +24,8 @@ realworld_apply_rss60_profile() {
       export REDIS_VALUE_SIZE REDIS_CLIENTS REDIS_TESTS
       ;;
     redis_ycsb_a)
-      : "${YCSB_RECORDCOUNT:=1200000}"
-      : "${YCSB_OPERATIONCOUNT:=250000}"
+      : "${YCSB_RECORDCOUNT:=1600000}"
+      : "${YCSB_OPERATIONCOUNT:=7000000}"
       : "${YCSB_FIELDCOUNT:=10}"
       : "${YCSB_FIELDLENGTH:=4096}"
       : "${YCSB_HEAP:=8g}"
@@ -34,22 +35,22 @@ realworld_apply_rss60_profile() {
       export YCSB_FIELDLENGTH YCSB_HEAP YCSB_WORKLOAD YCSB_DISTRIBUTION
       ;;
     rocksdb_ycsb_uniform)
-      : "${YCSB_RECORDCOUNT:=1350000}"
-      : "${YCSB_OPERATIONCOUNT:=250000}"
+      : "${YCSB_RECORDCOUNT:=1600000}"
+      : "${YCSB_OPERATIONCOUNT:=500000}"
       : "${YCSB_FIELDCOUNT:=10}"
       : "${YCSB_FIELDLENGTH:=4096}"
       : "${YCSB_HEAP:=8g}"
       : "${YCSB_WORKLOAD:=workloadc}"
       : "${ROCKSDB_DIR:=/dev/shm/rocksdb-data-rss60}"
-      : "${ROCKSDB_SHM_SIZE:=80G}"
+      : "${ROCKSDB_SHM_SIZE:=96G}"
       export YCSB_RECORDCOUNT YCSB_OPERATIONCOUNT YCSB_FIELDCOUNT
       export YCSB_FIELDLENGTH YCSB_HEAP YCSB_WORKLOAD ROCKSDB_DIR
       export ROCKSDB_SHM_SIZE
       ;;
     memcached_ycsb_uniform)
-      : "${MEMCACHED_MEMORY_MB:=65536}"
-      : "${YCSB_RECORDCOUNT:=1425000}"
-      : "${YCSB_OPERATIONCOUNT:=250000}"
+      : "${MEMCACHED_MEMORY_MB:=73728}"
+      : "${YCSB_RECORDCOUNT:=1600000}"
+      : "${YCSB_OPERATIONCOUNT:=2000000}"
       : "${YCSB_FIELDCOUNT:=10}"
       : "${YCSB_FIELDLENGTH:=4096}"
       : "${YCSB_HEAP:=8g}"
@@ -58,17 +59,17 @@ realworld_apply_rss60_profile() {
       export YCSB_FIELDCOUNT YCSB_FIELDLENGTH YCSB_HEAP YCSB_WORKLOAD
       ;;
     faster_uniform|faster_ycsb_a)
-      : "${FASTER_RUNSEC:=30}"
+      : "${FASTER_RUNSEC:=210}"
       : "${FASTER_ITERATIONS:=1}"
       : "${FASTER_DISTRIBUTION:=uniform}"
       export FASTER_RUNSEC FASTER_ITERATIONS FASTER_DISTRIBUTION
       ;;
     dlrm_synth)
       : "${DLRM_TABLES:=8}"
-      : "${DLRM_ROWS_PER_TABLE:=21000000}"
+      : "${DLRM_ROWS_PER_TABLE:=42000000}"
       : "${DLRM_SPARSE_FEATURE:=64}"
       : "${DLRM_MINI_BATCH:=16}"
-      : "${DLRM_NUM_BATCHES:=1}"
+      : "${DLRM_NUM_BATCHES:=2}"
       : "${DLRM_INDICES_PER_LOOKUP:=100}"
       export DLRM_TABLES DLRM_ROWS_PER_TABLE DLRM_SPARSE_FEATURE
       export DLRM_MINI_BATCH DLRM_NUM_BATCHES DLRM_INDICES_PER_LOOKUP
@@ -86,7 +87,7 @@ realworld_apply_rss60_profile() {
 }
 
 realworld_dump_profile_env() {
-  env | LC_ALL=C sort | grep -E '^(REDIS_|YCSB_|MEMCACHED_|FASTER_|DLRM_|CANNEAL_|ROCKSDB_)' || true
+  env | LC_ALL=C sort | grep -E '^(REDIS_|YCSB_|MEMCACHED_|FASTER_|DLRM_|CANNEAL_|ROCKSDB_|SPEC2017_)' || true
 }
 
 if [[ "${REALWORLD_SIZE_PROFILE:-}" == "rss60" ]]; then
@@ -98,6 +99,11 @@ mkdir -p "${WORKDIR}"
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
 }
+
+if [[ "${REALWORLD_SIZE_PROFILE:-}" == "rss60" ]]; then
+  log "realworld rss60 profile env"
+  realworld_dump_profile_env >&2
+fi
 
 need_exec() {
   local path="$1"
@@ -113,6 +119,52 @@ need_file() {
     echo "missing file: ${path}" >&2
     exit 77
   fi
+}
+
+resolve_exec() {
+  local label="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -n "${path}" && -x "${path}" ]]; then
+      printf '%s\n' "${path}"
+      return 0
+    fi
+  done
+  if command -v "${label}" >/dev/null 2>&1; then
+    command -v "${label}"
+    return 0
+  fi
+  echo "missing executable for ${label}: $*" >&2
+  exit 77
+}
+
+resolve_file() {
+  local label="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -n "${path}" && -f "${path}" ]]; then
+      printf '%s\n' "${path}"
+      return 0
+    fi
+  done
+  echo "missing file for ${label}: $*" >&2
+  exit 77
+}
+
+resolve_dir() {
+  local label="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -n "${path}" && -d "${path}" ]]; then
+      printf '%s\n' "${path}"
+      return 0
+    fi
+  done
+  echo "missing directory for ${label}: $*" >&2
+  exit 77
 }
 
 wait_tcp() {
@@ -132,8 +184,9 @@ start_redis() {
   REDIS_DIR="${WORKDIR}/redis-${REDIS_PORT}"
   REDIS_PIDFILE="${REDIS_DIR}/redis.pid"
   mkdir -p "${REDIS_DIR}"
-  need_exec "${BENCHMARK_DIR}/redis/src/redis-server"
-  "${BENCHMARK_DIR}/redis/src/redis-server" \
+  local redis_server
+  redis_server="$(resolve_exec redis-server "${REDIS_SERVER_BIN:-}" "${BENCHMARK_DIR}/redis/src/redis-server")"
+  "${redis_server}" \
     --bind 127.0.0.1 \
     --protected-mode no \
     --port "${REDIS_PORT}" \
@@ -150,8 +203,12 @@ start_redis() {
 }
 
 stop_redis() {
-  if [[ -n "${REDIS_PORT:-}" && -x "${BENCHMARK_DIR}/redis/src/redis-cli" ]]; then
-    "${BENCHMARK_DIR}/redis/src/redis-cli" -p "${REDIS_PORT}" shutdown nosave >/dev/null 2>&1 || true
+  local redis_cli="${REDIS_CLI_BIN:-${BENCHMARK_DIR}/redis/src/redis-cli}"
+  if [[ ! -x "${redis_cli}" ]]; then
+    redis_cli="$(command -v redis-cli || true)"
+  fi
+  if [[ -n "${REDIS_PORT:-}" && -x "${redis_cli}" ]]; then
+    "${redis_cli}" -p "${REDIS_PORT}" shutdown nosave >/dev/null 2>&1 || true
   fi
   if [[ -n "${REDIS_PIDFILE:-}" && -f "${REDIS_PIDFILE}" ]]; then
     kill "$(cat "${REDIS_PIDFILE}")" >/dev/null 2>&1 || true
@@ -162,8 +219,9 @@ start_memcached() {
   MEMCACHED_PORT="${MEMCACHED_PORT:-11211}"
   MEMCACHED_MEMORY_MB="${MEMCACHED_MEMORY_MB:-49152}"
   MEMCACHED_PIDFILE="${WORKDIR}/memcached-${MEMCACHED_PORT}.pid"
-  need_exec "${BENCHMARK_DIR}/memcached/memcached"
-  "${BENCHMARK_DIR}/memcached/memcached" \
+  local memcached
+  memcached="$(resolve_exec memcached "${MEMCACHED_BIN:-}" "${BENCHMARK_DIR}/memcached/memcached" /usr/bin/memcached)"
+  "${memcached}" \
     -u root \
     -l 127.0.0.1 \
     -p "${MEMCACHED_PORT}" \
@@ -192,9 +250,111 @@ stop_memcached() {
 
 ycsb_bin() {
   local binding="$1"
-  local dir="${BENCHMARK_DIR}/ycsb-${binding}"
-  need_exec "${dir}/bin/ycsb"
-  printf '%s\n' "${dir}/bin/ycsb"
+  local root
+  root="$(ycsb_root "${binding}")"
+  printf '%s\n' "${root}/bin/ycsb"
+}
+
+ycsb_root() {
+  local binding="$1"
+  local dir
+  for dir in "${YCSB_ROOT:-}" "${BENCHMARK_DIR}/ycsb-${binding}" "${BENCHMARK_DIR}/YCSB"; do
+    if [[ -n "${dir}" && -x "${dir}/bin/ycsb" ]]; then
+      if [[ "${dir}" == "${BENCHMARK_DIR}/YCSB" && ! -d "${dir}/${binding}" ]]; then
+        continue
+      fi
+      printf '%s\n' "${dir}"
+      return 0
+    fi
+  done
+  echo "missing YCSB ${binding} runner under ${BENCHMARK_DIR}/ycsb-${binding} or ${BENCHMARK_DIR}/YCSB" >&2
+  exit 77
+}
+
+ycsb_workload_file() {
+  local binding="$1" workload="$2" root path
+  root="$(ycsb_root "${binding}")"
+  path="${root}/workloads/${workload}"
+  need_file "${path}"
+  printf '%s\n' "${path}"
+}
+
+ycsb_db_class() {
+  case "$1" in
+    redis) printf '%s\n' site.ycsb.db.RedisClient ;;
+    rocksdb) printf '%s\n' site.ycsb.db.rocksdb.RocksDBClient ;;
+    memcached) printf '%s\n' site.ycsb.db.MemcachedClient ;;
+    *) echo "unsupported direct YCSB binding: $1" >&2; exit 77 ;;
+  esac
+}
+
+ycsb_source_classpath() {
+  local root="$1" binding="$2" path
+  local -a cp_items=()
+  cp_items+=("${root}/${binding}/conf" "${root}/core/conf")
+  for path in \
+    "${root}/core/target"/core-*.jar \
+    "${root}/${binding}/target/${binding}-binding-"*.jar \
+    "${root}/core/target/dependency/"*.jar \
+    "${root}/${binding}/target/dependency/"*.jar
+  do
+    [[ -e "${path}" ]] && cp_items+=("${path}")
+  done
+  if (( ${#cp_items[@]} <= 2 )); then
+    echo "missing built YCSB jars for ${binding} under ${root}" >&2
+    exit 77
+  fi
+  (IFS=:; printf '%s\n' "${cp_items[*]}")
+}
+
+run_ycsb_checked() {
+  local binding="$1" phase="$2"
+  shift 2
+  local errlog rc
+  errlog="$(mktemp "${WORKDIR}/ycsb-${binding}-${phase}.stderr.XXXXXX")"
+
+  set +e
+  "$@" 2> >(tee "${errlog}" >&2)
+  rc=$?
+  set -e
+
+  if grep -Eq 'Exception in thread|NoSuchMethodError|RocksDBException|DBException|java\.lang\.[A-Za-z0-9_]+Error' "${errlog}"; then
+    log "YCSB ${binding} ${phase} reported a fatal exception; treating the case as failed"
+    return 1
+  fi
+  if grep -Eq '^\[OVERALL\], Throughput\(ops/sec\), 0(\.0+)?([[:space:]]|$)' "${errlog}"; then
+    log "YCSB ${binding} ${phase} reported zero throughput; treating the case as failed"
+    return 1
+  fi
+  return "${rc}"
+}
+
+run_ycsb() {
+  local binding="$1" phase="$2" heap="$3"
+  shift 3
+  local root
+  root="$(ycsb_root "${binding}")"
+
+  if [[ -f "${root}/pom.xml" ]]; then
+    local java_bin cp db_class command_flag
+    local -a cmd
+    java_bin="$(resolve_exec java "${JAVA_HOME:+${JAVA_HOME}/bin/java}")"
+    cp="$(ycsb_source_classpath "${root}" "${binding}")"
+    db_class="$(ycsb_db_class "${binding}")"
+    case "${phase}" in
+      load) command_flag="-load" ;;
+      run) command_flag="-t" ;;
+      *) echo "unknown YCSB phase: ${phase}" >&2; exit 2 ;;
+    esac
+    cmd=("${java_bin}" "-Xmx${heap}" -cp "${cp}" site.ycsb.Client -db "${db_class}" "$@" "${command_flag}")
+    run_ycsb_checked "${binding}" "${phase}" "${cmd[@]}"
+  else
+    local ycsb
+    local -a cmd
+    ycsb="${root}/bin/ycsb"
+    cmd=("${ycsb}" "${phase}" "${binding}" -jvm-args="-Xmx${heap}" "$@")
+    run_ycsb_checked "${binding}" "${phase}" "${cmd[@]}"
+  fi
 }
 
 java_env() {
@@ -203,6 +363,12 @@ java_env() {
     export PATH="${JAVA_HOME}/bin:${PATH}"
   elif [[ -x "${TOOLS_DIR}/jdk8/bin/java" ]]; then
     export JAVA_HOME="${TOOLS_DIR}/jdk8"
+    export PATH="${JAVA_HOME}/bin:${PATH}"
+  elif [[ -x "${BENCH_TOOLS_DIR}/jdk8/bin/java" ]]; then
+    export JAVA_HOME="${BENCH_TOOLS_DIR}/jdk8"
+    export PATH="${JAVA_HOME}/bin:${PATH}"
+  elif [[ -x "${BENCH_TOOLS_DIR}/jdk17/bin/java" ]]; then
+    export JAVA_HOME="${BENCH_TOOLS_DIR}/jdk17"
     export PATH="${JAVA_HOME}/bin:${PATH}"
   fi
 }
@@ -233,8 +399,7 @@ run_redis_ycsb_a() {
   trap stop_redis EXIT
   java_env
   start_redis
-  local ycsb
-  ycsb="$(ycsb_bin redis)"
+  local workload_file
 
   local records="${YCSB_RECORDCOUNT:-800000}"
   local ops="${YCSB_OPERATIONCOUNT:-1600000}"
@@ -244,18 +409,19 @@ run_redis_ycsb_a() {
   local dist="${YCSB_DISTRIBUTION:-uniform}"
   local heap="${YCSB_HEAP:-4g}"
   local workload="${YCSB_WORKLOAD:-workloada}"
+  workload_file="$(ycsb_workload_file redis "${workload}")"
 
   log "redis ycsb load: workload=${workload} records=${records} fieldcount=${fieldcount} fieldlength=${fieldlength} dist=${dist}"
-  "${ycsb}" load redis -s -P "${BENCHMARK_DIR}/ycsb-redis/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb redis load "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "redis.host=127.0.0.1" -p "redis.port=${REDIS_PORT}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
     -p "requestdistribution=${dist}"
 
   log "redis ycsb run: ops=${ops}"
-  "${ycsb}" run redis -s -P "${BENCHMARK_DIR}/ycsb-redis/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb redis run "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "redis.host=127.0.0.1" -p "redis.port=${REDIS_PORT}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
@@ -265,10 +431,13 @@ run_redis_ycsb_a() {
 run_ycsb_rocksdb_uniform() {
   if [[ -z "${YCSB_JAVA_HOME:-}" && -x "${TOOLS_DIR}/jdk17/bin/java" ]]; then
     export YCSB_JAVA_HOME="${TOOLS_DIR}/jdk17"
+  elif [[ -z "${YCSB_JAVA_HOME:-}" && -x "${BENCH_TOOLS_DIR}/jdk17/bin/java" ]]; then
+    export YCSB_JAVA_HOME="${BENCH_TOOLS_DIR}/jdk17"
+  elif [[ -z "${YCSB_JAVA_HOME:-}" && -x /usr/lib/jvm/java-17-openjdk-amd64/bin/java ]]; then
+    export YCSB_JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
   fi
   java_env
-  local ycsb
-  ycsb="$(ycsb_bin rocksdb)"
+  local workload_file
   local dbdir="${ROCKSDB_DIR:-/dev/shm/rocksdb-data-$$}"
   if [[ -n "${ROCKSDB_SHM_SIZE:-}" && "${dbdir}" == /dev/shm/* ]]; then
     mount -o "remount,size=${ROCKSDB_SHM_SIZE}" /dev/shm || true
@@ -284,18 +453,19 @@ run_ycsb_rocksdb_uniform() {
   local threads="${YCSB_THREADS:-${OMP_THREADS}}"
   local heap="${YCSB_HEAP:-4g}"
   local workload="${YCSB_WORKLOAD:-workloadc}"
+  workload_file="$(ycsb_workload_file rocksdb "${workload}")"
 
   log "rocksdb ycsb load: records=${records} fieldcount=${fieldcount} fieldlength=${fieldlength}"
-  "${ycsb}" load rocksdb -s -P "${BENCHMARK_DIR}/ycsb-rocksdb/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb rocksdb load "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "rocksdb.dir=${dbdir}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
     -p "requestdistribution=uniform"
 
   log "rocksdb ycsb run: ops=${ops}"
-  "${ycsb}" run rocksdb -s -P "${BENCHMARK_DIR}/ycsb-rocksdb/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb rocksdb run "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "rocksdb.dir=${dbdir}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
@@ -306,8 +476,7 @@ run_memcached_ycsb_uniform() {
   trap stop_memcached EXIT
   java_env
   start_memcached
-  local ycsb
-  ycsb="$(ycsb_bin memcached)"
+  local workload_file
 
   local records="${YCSB_RECORDCOUNT:-800000}"
   local ops="${YCSB_OPERATIONCOUNT:-1600000}"
@@ -316,18 +485,19 @@ run_memcached_ycsb_uniform() {
   local threads="${YCSB_THREADS:-${OMP_THREADS}}"
   local heap="${YCSB_HEAP:-4g}"
   local workload="${YCSB_WORKLOAD:-workloada}"
+  workload_file="$(ycsb_workload_file memcached "${workload}")"
 
   log "memcached ycsb load: mem=${MEMCACHED_MEMORY_MB}MB records=${records}"
-  "${ycsb}" load memcached -s -P "${BENCHMARK_DIR}/ycsb-memcached/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb memcached load "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "memcached.hosts=127.0.0.1:${MEMCACHED_PORT}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
     -p "requestdistribution=uniform"
 
   log "memcached ycsb run: ops=${ops}"
-  "${ycsb}" run memcached -s -P "${BENCHMARK_DIR}/ycsb-memcached/workloads/${workload}" \
-    -threads "${threads}" -jvm-args="-Xmx${heap}" \
+  run_ycsb memcached run "${heap}" -s -P "${workload_file}" \
+    -threads "${threads}" \
     -p "memcached.hosts=127.0.0.1:${MEMCACHED_PORT}" \
     -p "recordcount=${records}" -p "operationcount=${ops}" \
     -p "fieldcount=${fieldcount}" -p "fieldlength=${fieldlength}" \
@@ -336,12 +506,19 @@ run_memcached_ycsb_uniform() {
 
 run_faster() {
   local mix="$1"
-  local dotnet="${TOOLS_DIR}/dotnet7/dotnet"
+  local dotnet
+  dotnet="$(resolve_exec dotnet "${DOTNET_BIN:-}" "${TOOLS_DIR}/dotnet7/dotnet" "${BENCH_TOOLS_DIR}/dotnet7/dotnet" "${BENCH_TOOLS_DIR}/bin/bench-dotnet")"
   local dll="${BENCHMARK_DIR}/FASTER/cs/benchmark/bin/x64/Release/net7.0/FASTER.benchmark.dll"
-  need_exec "${dotnet}"
   need_file "${dll}"
-  export DOTNET_ROOT="${TOOLS_DIR}/dotnet7"
+  if [[ "$(basename -- "${dotnet}")" == "dotnet" ]]; then
+    export DOTNET_ROOT="$(cd -- "$(dirname -- "${dotnet}")" && pwd)"
+  else
+    export DOTNET_ROOT="${BENCH_TOOLS_DIR}/dotnet7"
+  fi
   export PATH="${DOTNET_ROOT}:${PATH}"
+  local faster_workdir="${WORKDIR}/faster"
+  mkdir -p "${faster_workdir}/D:/data/FasterYcsbBenchmark"
+  cd "${faster_workdir}"
   "${dotnet}" "${dll}" \
     --benchmark "${FASTER_BENCHMARK:-1}" \
     --threads "${FASTER_THREADS:-${OMP_THREADS}}" \
@@ -354,11 +531,13 @@ run_faster() {
 }
 
 run_dlrm_synth() {
-  local py="${TOOLS_DIR}/dlrm-venv/bin/python"
+  local py
+  py="$(resolve_exec python "${DLRM_PYTHON:-}" "${TOOLS_DIR}/dlrm-venv/bin/python" "${BENCH_TOOLS_DIR}/dlrm-venv/bin/python" "${BENCH_TOOLS_DIR}/bin/bench-python")"
   local app="${BENCHMARK_DIR}/DLRM/dlrm_s_pytorch.py"
-  need_exec "${py}"
   need_file "${app}"
-  export PYTHONPATH="${TOOLS_DIR}/dlrm-venv/lib/python3.10/site-packages:${PYTHONPATH:-}"
+  local site_packages
+  site_packages="$(resolve_dir dlrm-site-packages "${TOOLS_DIR}/dlrm-venv/lib/python3.10/site-packages" "${BENCH_TOOLS_DIR}/dlrm-venv/lib/python3.10/site-packages")"
+  export PYTHONPATH="${site_packages}:${PYTHONPATH:-}"
   local tables="${DLRM_TABLES:-8}"
   local rows="${DLRM_ROWS_PER_TABLE:-22000000}"
   local emb
@@ -423,6 +602,153 @@ run_spec_roms() {
   ./sroms_base.mytest-m64 < ocean_benchmark3.in
 }
 
+spec2017_benchmark_mode() {
+  local bench="$1"
+  case "${bench}" in
+    intrate|fprate|*_r|5[0-9][0-9].*) printf 'rate\n' ;;
+    intspeed|fpspeed|*_s|6[0-9][0-9].*) printf 'speed\n' ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
+
+spec2017_benchmark_for_workload() {
+  local workload="$1"
+  workload="${workload#spec2017_}"
+  workload="${workload#spec32_}"
+
+  case "${workload}" in
+    intrate|fprate|intspeed|fpspeed|[56][0-9][0-9].*) printf '%s\n' "${workload}" ;;
+    500_perlbench_r|perlbench_r) printf '500.perlbench_r\n' ;;
+    503_bwaves_r|bwaves_r) printf '503.bwaves_r\n' ;;
+    505_mcf_r|mcf_r) printf '505.mcf_r\n' ;;
+    507_cactuBSSN_r|cactuBSSN_r) printf '507.cactuBSSN_r\n' ;;
+    508_namd_r|namd_r) printf '508.namd_r\n' ;;
+    511_povray_r|povray_r) printf '511.povray_r\n' ;;
+    519_lbm_r|lbm_r) printf '519.lbm_r\n' ;;
+    520_omnetpp_r|omnetpp_r) printf '520.omnetpp_r\n' ;;
+    523_xalancbmk_r|xalancbmk_r) printf '523.xalancbmk_r\n' ;;
+    525_x264_r|x264_r) printf '525.x264_r\n' ;;
+    526_blender_r|blender_r) printf '526.blender_r\n' ;;
+    531_deepsjeng_r|deepsjeng_r) printf '531.deepsjeng_r\n' ;;
+    538_imagick_r|imagick_r) printf '538.imagick_r\n' ;;
+    541_leela_r|leela_r) printf '541.leela_r\n' ;;
+    544_nab_r|nab_r) printf '544.nab_r\n' ;;
+    548_exchange2_r|exchange2_r) printf '548.exchange2_r\n' ;;
+    549_fotonik3d_r|fotonik3d_r) printf '549.fotonik3d_r\n' ;;
+    554_roms_r|roms_r) printf '554.roms_r\n' ;;
+    557_xz_r|xz_r) printf '557.xz_r\n' ;;
+    600_perlbench_s|perlbench_s) printf '600.perlbench_s\n' ;;
+    603_bwaves_s|bwaves_s) printf '603.bwaves_s\n' ;;
+    605_mcf_s|mcf_s) printf '605.mcf_s\n' ;;
+    607_cactuBSSN_s|cactuBSSN_s) printf '607.cactuBSSN_s\n' ;;
+    619_lbm_s|lbm_s) printf '619.lbm_s\n' ;;
+    620_omnetpp_s|omnetpp_s) printf '620.omnetpp_s\n' ;;
+    623_xalancbmk_s|xalancbmk_s) printf '623.xalancbmk_s\n' ;;
+    625_x264_s|x264_s) printf '625.x264_s\n' ;;
+    631_deepsjeng_s|deepsjeng_s) printf '631.deepsjeng_s\n' ;;
+    638_imagick_s|imagick_s) printf '638.imagick_s\n' ;;
+    641_leela_s|leela_s) printf '641.leela_s\n' ;;
+    644_nab_s|nab_s) printf '644.nab_s\n' ;;
+    648_exchange2_s|exchange2_s) printf '648.exchange2_s\n' ;;
+    649_fotonik3d_s|fotonik3d_s) printf '649.fotonik3d_s\n' ;;
+    654_roms_s|roms_s) printf '654.roms_s\n' ;;
+    657_xz_s|xz_s) printf '657.xz_s\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+run_spec2017_runcpu() {
+  local bench="$1"
+  local root config config_file size tune iterations threads copies expid nobuild fake output_root mode spec_log rc
+  local -a cmd
+
+  root="$(resolve_dir spec2017-root "${SPEC2017_ROOT:-}" "${BENCHMARK_DIR}/spec")"
+  config="${SPEC2017_CONFIG:-iccd-gcc-32core}"
+  config_file="${config}"
+  [[ "${config_file}" == *.cfg ]] || config_file="${config_file}.cfg"
+  need_file "${root}/shrc"
+  need_file "${root}/config/${config_file}"
+
+  size="${SPEC2017_SIZE:-ref}"
+  tune="${SPEC2017_TUNE:-base}"
+  iterations="${SPEC2017_ITERATIONS:-1}"
+  threads="${SPEC2017_THREADS:-${OMP_THREADS}}"
+  copies="${SPEC2017_COPIES:-${OMP_THREADS}}"
+  expid="${SPEC2017_EXPID:-}"
+  nobuild="${SPEC2017_NOBUILD:-1}"
+  fake="${SPEC2017_FAKE:-0}"
+  output_root="${SPEC2017_OUTPUT_ROOT:-}"
+  mode="$(spec2017_benchmark_mode "${bench}")"
+  [[ "${mode}" != "unknown" ]] || {
+    echo "cannot infer SPEC CPU2017 mode for ${bench}" >&2
+    exit 2
+  }
+
+  cmd=(
+    runcpu
+    --config "${config}"
+    --size "${size}"
+    --tune "${tune}"
+    --iterations "${iterations}"
+    --noreportable
+  )
+  [[ -n "${expid}" ]] && cmd+=(--expid "${expid}")
+  case "${mode}" in
+    speed) cmd+=(--threads "${threads}") ;;
+    rate) cmd+=(--copies "${copies}") ;;
+  esac
+  [[ "${nobuild}" == "1" ]] && cmd+=(--nobuild)
+  [[ "${fake}" == "1" ]] && cmd+=(--fake)
+  if [[ -n "${output_root}" ]]; then
+    mkdir -p "${output_root}"
+    cmd+=(--output_root "${output_root}")
+  fi
+  cmd+=("${bench}")
+
+  cd "${root}"
+  set +u
+  # shellcheck source=/dev/null
+  . ./shrc
+  set -u
+
+  log "spec2017 runcpu: root=${root} config=${config} mode=${mode} bench=${bench}"
+  printf '[spec2017] command:' >&2
+  printf ' %q' "${cmd[@]}" >&2
+  printf '\n' >&2
+
+  export OMP_PROC_BIND="${OMP_PROC_BIND:-true}"
+  export OMP_PLACES="${OMP_PLACES:-cores}"
+  spec_log="$(mktemp "${TMPDIR:-/tmp}/spec2017-runcpu.XXXXXX")"
+  set +e
+  "${cmd[@]}" 2>&1 | tee "${spec_log}"
+  rc="${PIPESTATUS[0]}"
+  set -e
+  if ((rc != 0)); then
+    rm -f "${spec_log}"
+    return "${rc}"
+  fi
+  if grep -Eq '^(Error:|Error [0-9][0-9][0-9]\.)' "${spec_log}"; then
+    echo "SPEC CPU2017 reported benchmark errors despite runcpu rc=0" >&2
+    rm -f "${spec_log}"
+    return 1
+  fi
+  if ! grep -Eq '^Success:' "${spec_log}"; then
+    echo "SPEC CPU2017 did not report Success:" >&2
+    rm -f "${spec_log}"
+    return 1
+  fi
+  rm -f "${spec_log}"
+}
+
+run_spec2017_workload() {
+  local bench
+  bench="$(spec2017_benchmark_for_workload "${WORKLOAD}")" || {
+    echo "unknown SPEC CPU2017 workload alias: ${WORKLOAD}" >&2
+    exit 2
+  }
+  run_spec2017_runcpu "${bench}"
+}
+
 generate_canneal_netlist() {
   local out="$1"
   local elems="${CANNEAL_ELEMENTS:-500000}"
@@ -479,6 +805,7 @@ case "${WORKLOAD}" in
   spec_bwaves) run_spec_bwaves ;;
   spec_fotonik3d) run_spec_fotonik3d ;;
   spec_roms) run_spec_roms ;;
+  spec2017_*|spec32_*) run_spec2017_workload ;;
   canneal_synth) run_canneal_synth ;;
   hibench_repartition) unavailable "${WORKLOAD}" "Spark/Hadoop runtime is not staged by the lightweight default path" ;;
   hibench_sql_join) unavailable "${WORKLOAD}" "Spark/Hadoop runtime is not staged by the lightweight default path" ;;

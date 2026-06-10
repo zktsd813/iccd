@@ -6,6 +6,7 @@ experiments/**/logs/
 experiments/**/images/
 *.qcow2
 *.img
+*.raw
 *.iso
 
 # Local kernel build outputs

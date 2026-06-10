@@ -1,0 +1,11 @@
+timestamp_utc=2026-06-10T05:56:20Z
+command=/root/mlc --latency_matrix -e -r
+Warning: Permanently added '[127.0.0.1]:10023' (ED25519) to the list of known hosts.
+Intel(R) Memory Latency Checker - v3.11
+Command line parameters: --latency_matrix -e -r 
+
+Using buffer size of 200.000MiB
+Measuring idle latencies for random access (in ns)...
+		Numa node
+Numa node	     0	     1	
+       0	 151.4	 273.8	

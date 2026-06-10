@@ -1,0 +1,19 @@
+tag=before
+date_utc=2026-06-10T16:16:38Z
+uname=Linux kernel 6.18.0modified #11 SMP PREEMPT_DYNAMIC Tue Jun  9 17:21:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+cmdline=console=ttyS0 root=/dev/vda2 rw loglevel=7 nokaslr
+numa_balancing=0
+lru_gen_enabled=0x0007
+demotion_enabled=false
+demotion_target=0 -1 1 -1
+thp_enabled=always [madvise] never
+thp_defrag=always defer defer+madvise [madvise] never
+scan_size_mb=256
+scan_period_min_ms=1000
+hot_threshold_ms=1000
+local_fault_rate=5
+remote_fault_rate=0
+local_fault_scan_size_mb=256
+local_fault_scan_period_ms=1000
+remote_fault_scan_size_mb=256
+remote_fault_scan_period_ms=1000

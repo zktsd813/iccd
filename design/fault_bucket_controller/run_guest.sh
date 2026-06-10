@@ -16,6 +16,10 @@ OMP_THREADS="${OMP_THREADS:-32}"
 WINDOW_SEC="${WINDOW_SEC:-5}"
 LOCAL_RATE="${LOCAL_RATE:-5}"
 REMOTE_RATE="${REMOTE_RATE:-5}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-256}"
+REMOTE_FAULT_SCAN_PERIOD_MS="${REMOTE_FAULT_SCAN_PERIOD_MS:-${LOCAL_FAULT_SCAN_PERIOD_MS}}"
+REMOTE_FAULT_SCAN_SIZE_MB="${REMOTE_FAULT_SCAN_SIZE_MB:-${LOCAL_FAULT_SCAN_SIZE_MB}}"
 MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
 MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
 CONSECUTIVE_EFFECTIVE="${CONSECUTIVE_EFFECTIVE:-2}"
@@ -29,9 +33,11 @@ NUMA_BALANCING_OFF="${NUMA_BALANCING_OFF:-0}"
 MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
 DEMOTION_ENABLED="${DEMOTION_ENABLED:-true}"
 DEMOTION_TARGET="${DEMOTION_TARGET:-0 1}"
-NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-4096}"
-NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-}"
+NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-}"
 USE_KERNEL_DEFAULT_NUMA_SCAN="${USE_KERNEL_DEFAULT_NUMA_SCAN:-0}"
+THP_MODE="${THP_MODE:-}"
+THP_DEFRAG="${THP_DEFRAG:-}"
 PLOT_AFTER="${PLOT_AFTER:-1}"
 RESTORE_KNOBS="${RESTORE_KNOBS:-1}"
 
@@ -65,9 +71,18 @@ write_if_writable() {
 }
 
 save_original_knobs() {
+	mkdir -p /sys/kernel/debug
+	mountpoint -q /sys/kernel/debug ||
+		mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
 	ORIG_NUMA_BALANCING="$(read_file /proc/sys/kernel/numa_balancing)"
+	ORIG_NUMA_SCAN_SIZE_MB="$(read_file /sys/kernel/debug/sched/numa_balancing/scan_size_mb)"
+	ORIG_NUMA_SCAN_PERIOD_MIN_MS="$(read_file /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms)"
 	ORIG_LOCAL_FAULT_RATE="$(read_file /sys/kernel/mm/numa_balancing/local_fault_rate)"
 	ORIG_REMOTE_FAULT_RATE="$(read_file /sys/kernel/mm/numa_balancing/remote_fault_rate)"
+	ORIG_LOCAL_FAULT_SCAN_PERIOD_MS="$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms)"
+	ORIG_LOCAL_FAULT_SCAN_SIZE_MB="$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)"
+	ORIG_REMOTE_FAULT_SCAN_PERIOD_MS="$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms)"
+	ORIG_REMOTE_FAULT_SCAN_SIZE_MB="$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb)"
 }
 
 restore_original_knobs() {
@@ -77,6 +92,14 @@ restore_original_knobs() {
 	if [[ -n "${ORIG_NUMA_BALANCING:-}" && "${ORIG_NUMA_BALANCING}" != "NA" ]]; then
 		write_if_writable /proc/sys/kernel/numa_balancing "${ORIG_NUMA_BALANCING}"
 	fi
+	if [[ -n "${ORIG_NUMA_SCAN_SIZE_MB:-}" && "${ORIG_NUMA_SCAN_SIZE_MB}" != "NA" ]]; then
+		write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_size_mb \
+			"${ORIG_NUMA_SCAN_SIZE_MB}"
+	fi
+	if [[ -n "${ORIG_NUMA_SCAN_PERIOD_MIN_MS:-}" && "${ORIG_NUMA_SCAN_PERIOD_MIN_MS}" != "NA" ]]; then
+		write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms \
+			"${ORIG_NUMA_SCAN_PERIOD_MIN_MS}"
+	fi
 	if [[ -n "${ORIG_LOCAL_FAULT_RATE:-}" && "${ORIG_LOCAL_FAULT_RATE}" != "NA" ]]; then
 		write_if_writable /sys/kernel/mm/numa_balancing/local_fault_rate \
 			"${ORIG_LOCAL_FAULT_RATE}"
@@ -84,6 +107,22 @@ restore_original_knobs() {
 	if [[ -n "${ORIG_REMOTE_FAULT_RATE:-}" && "${ORIG_REMOTE_FAULT_RATE}" != "NA" ]]; then
 		write_if_writable /sys/kernel/mm/numa_balancing/remote_fault_rate \
 			"${ORIG_REMOTE_FAULT_RATE}"
+	fi
+	if [[ -n "${ORIG_LOCAL_FAULT_SCAN_PERIOD_MS:-}" && "${ORIG_LOCAL_FAULT_SCAN_PERIOD_MS}" != "NA" ]]; then
+		write_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms \
+			"${ORIG_LOCAL_FAULT_SCAN_PERIOD_MS}"
+	fi
+	if [[ -n "${ORIG_LOCAL_FAULT_SCAN_SIZE_MB:-}" && "${ORIG_LOCAL_FAULT_SCAN_SIZE_MB}" != "NA" ]]; then
+		write_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb \
+			"${ORIG_LOCAL_FAULT_SCAN_SIZE_MB}"
+	fi
+	if [[ -n "${ORIG_REMOTE_FAULT_SCAN_PERIOD_MS:-}" && "${ORIG_REMOTE_FAULT_SCAN_PERIOD_MS}" != "NA" ]]; then
+		write_if_writable /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms \
+			"${ORIG_REMOTE_FAULT_SCAN_PERIOD_MS}"
+	fi
+	if [[ -n "${ORIG_REMOTE_FAULT_SCAN_SIZE_MB:-}" && "${ORIG_REMOTE_FAULT_SCAN_SIZE_MB}" != "NA" ]]; then
+		write_if_writable /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb \
+			"${ORIG_REMOTE_FAULT_SCAN_SIZE_MB}"
 	fi
 }
 
@@ -100,6 +139,14 @@ require_environment() {
 		die "missing writable local_fault_rate"
 	[[ -w /sys/kernel/mm/numa_balancing/remote_fault_rate ]] ||
 		die "missing writable remote_fault_rate"
+	[[ -w /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms ]] ||
+		die "missing writable local_fault_scan_period_ms"
+	[[ -w /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb ]] ||
+		die "missing writable local_fault_scan_size_mb"
+	[[ -w /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms ]] ||
+		die "missing writable remote_fault_scan_period_ms"
+	[[ -w /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb ]] ||
+		die "missing writable remote_fault_scan_size_mb"
 	[[ -w /proc/sys/kernel/numa_balancing ]] ||
 		die "missing writable /proc/sys/kernel/numa_balancing"
 	if [[ -z "${WORKLOAD_COMMAND}" ]]; then
@@ -120,12 +167,29 @@ set_common_knobs() {
 	write_if_writable /sys/kernel/mm/numa/demotion_enabled "${DEMOTION_ENABLED}"
 	write_if_writable /sys/kernel/mm/numa/demotion_target "${DEMOTION_TARGET}"
 	if [[ "${USE_KERNEL_DEFAULT_NUMA_SCAN}" != "1" ]]; then
-		write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_size_mb \
-			"${NUMA_SCAN_SIZE_MB}"
-		write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms \
-			"${NUMA_SCAN_PERIOD_MIN_MS}"
+		if [[ -n "${NUMA_SCAN_SIZE_MB}" ]]; then
+			write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_size_mb \
+				"${NUMA_SCAN_SIZE_MB}"
+		fi
+		if [[ -n "${NUMA_SCAN_PERIOD_MIN_MS}" ]]; then
+			write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms \
+				"${NUMA_SCAN_PERIOD_MIN_MS}"
+		fi
 	fi
-	write_if_writable /sys/kernel/mm/transparent_hugepage/enabled never
+	write_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms \
+		"${LOCAL_FAULT_SCAN_PERIOD_MS}"
+	write_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb \
+		"${LOCAL_FAULT_SCAN_SIZE_MB}"
+	write_if_writable /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms \
+		"${REMOTE_FAULT_SCAN_PERIOD_MS}"
+	write_if_writable /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb \
+		"${REMOTE_FAULT_SCAN_SIZE_MB}"
+	if [[ -n "${THP_MODE}" ]]; then
+		write_if_writable /sys/kernel/mm/transparent_hugepage/enabled "${THP_MODE}"
+	fi
+	if [[ -n "${THP_DEFRAG}" ]]; then
+		write_if_writable /sys/kernel/mm/transparent_hugepage/defrag "${THP_DEFRAG}"
+	fi
 }
 
 snapshot() {
@@ -143,6 +207,12 @@ snapshot() {
 		printf 'scan_period_min_ms=%s\n' "$(read_file /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms)"
 		printf 'local_fault_rate=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_rate)"
 		printf 'remote_fault_rate=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_rate)"
+		printf 'local_fault_scan_period_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms)"
+		printf 'local_fault_scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)"
+		printf 'remote_fault_scan_period_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms)"
+		printf 'remote_fault_scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb)"
+		printf 'thp_enabled=%s\n' "$(read_file /sys/kernel/mm/transparent_hugepage/enabled | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+		printf 'thp_defrag=%s\n' "$(read_file /sys/kernel/mm/transparent_hugepage/defrag | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 		printf 'window_sec=%s\n' "${WINDOW_SEC}"
 		find /sys/devices/virtual/memory_tiering -name nodelist -print -exec cat {} \; 2>/dev/null || true
 	} > "${OUTDIR}/${tag}.meta"
@@ -164,6 +234,10 @@ write_config() {
 		printf 'window_sec=%s\n' "${WINDOW_SEC}"
 		printf 'local_rate=%s\n' "${LOCAL_RATE}"
 		printf 'remote_rate=%s\n' "${REMOTE_RATE}"
+		printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+		printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+		printf 'remote_fault_scan_period_ms=%s\n' "${REMOTE_FAULT_SCAN_PERIOD_MS}"
+		printf 'remote_fault_scan_size_mb=%s\n' "${REMOTE_FAULT_SCAN_SIZE_MB}"
 		printf 'min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
 		printf 'min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
 		printf 'consecutive_effective=%s\n' "${CONSECUTIVE_EFFECTIVE}"
@@ -173,6 +247,8 @@ write_config() {
 		printf 'restart_grace_windows=%s\n' "${RESTART_GRACE_WINDOWS}"
 		printf 'numa_balancing_on=%s\n' "${NUMA_BALANCING_ON}"
 		printf 'numa_balancing_off=%s\n' "${NUMA_BALANCING_OFF}"
+		printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
+		printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
 		printf 'restore_knobs=%s\n' "${RESTORE_KNOBS}"
 		printf 'cpu_node=%s\n' "${CPU_NODE}"
 		printf 'omp_threads=%s\n' "${OMP_THREADS}"

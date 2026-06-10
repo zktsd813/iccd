@@ -1,0 +1,24 @@
+QEMU launch plan
+  qemu       : qemu-system-x86_64
+  kernel     : /Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage
+  initrd     : <none>
+  rootfs     : /Serverless/iccd-git/submission/mlc/20260610T054936Z-vm-mlc/mlc-vm.qcow2
+  rootfs fmt : qcow2
+  vm name    : submission-mlc-20260610
+  accel      : kvm
+  host CPUs  : 0-31
+  guest CPUs : 32
+  topology   : two-node
+  slow mode  : host-cxl
+  node0      : guest cpus=0-31, mem=16G, host node=0
+  node1      : memory-only, mem=32G, host CXL node=2, HMAT exposed
+  ssh        : host 10023 -> guest 22
+  pidfile    : /Serverless/iccd-git/VM/run/submission-mlc-20260610.pid
+  serial log : /Serverless/iccd-git/VM/run/submission-mlc-20260610.serial.log
+  qmp socket : /Serverless/iccd-git/VM/run/submission-mlc-20260610.qmp.sock
+  cmdline    : console=ttyS0 root=/dev/vda2 rw loglevel=7 nokaslr
+  hmat       : fast 80ns/40000M, slow 250ns/10000M
+
+Command:
+  taskset -c 0-31 qemu-system-x86_64 -pidfile /Serverless/iccd-git/VM/run/submission-mlc-20260610.pid -name submission-mlc-20260610 -machine q35\,hmat=on -cpu host -accel kvm -smp 32\,maxcpus=32 -m 48G -kernel /Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage -append console=ttyS0\ root=/dev/vda2\ rw\ loglevel=7\ nokaslr -drive file=/Serverless/iccd-git/submission/mlc/20260610T054936Z-vm-mlc/mlc-vm.qcow2\,if=virtio\,format=qcow2 -netdev user\,id=net0\,hostfwd=tcp::10023-:22 -device e1000\,netdev=net0 -display none -serial file:/Serverless/iccd-git/VM/run/submission-mlc-20260610.serial.log -monitor none -qmp unix:/Serverless/iccd-git/VM/run/submission-mlc-20260610.qmp.sock\,server=on\,wait=off -object memory-backend-ram\,id=ram0\,size=16G\,host-nodes=0\,policy=bind\,prealloc=on -numa node\,nodeid=0\,cpus=0-31\,memdev=ram0 -object memory-backend-ram\,id=ram1\,size=32G\,host-nodes=2\,policy=bind\,prealloc=on -numa node\,nodeid=1\,memdev=ram1\,initiator=0 -numa hmat-lb\,initiator=0\,target=0\,hierarchy=memory\,data-type=access-latency\,latency=80 -numa hmat-lb\,initiator=0\,target=0\,hierarchy=memory\,data-type=access-bandwidth\,bandwidth=40000M -numa hmat-lb\,initiator=0\,target=1\,hierarchy=memory\,data-type=access-latency\,latency=250 -numa hmat-lb\,initiator=0\,target=1\,hierarchy=memory\,data-type=access-bandwidth\,bandwidth=10000M -daemonize 
+[vmctl] started submission-mlc-20260610; pidfile=/Serverless/iccd-git/VM/run/submission-mlc-20260610.pid

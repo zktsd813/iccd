@@ -15,7 +15,7 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
   `/Serverless/iccd-git` in the paths below.
 - Use `/Serverless/iccd-git` as the canonical ICCD git checkout for commits, pushes, docs, and root workload scripts.
 - Treat the current working directory `/Serverless/iccd-git` as the repo root when running repo-relative commands.
-- Read `/Serverless/iccd-git/docs/session-handoff-20260601.md` when resuming a session or when repo/submodule state matters.
+- Read `/Serverless/iccd-git/docs/session-handoff-20260601.md` when resuming a session or when repo/submodule state matters. Also read `/Serverless/iccd-git/docs/session-handoff-20260605.md` for the current TPP, motivation experiment, no-MGLRU diagnostic, and reclaim-state analysis handoff.
 - Use `/Serverless/iccd-git/VM` as the `linux-kernel-vm` submodule. Keep workload scripts in `/Serverless/iccd-git/scripts`, not in the VM submodule.
 - Use `/Serverless/iccd-git/linux` as the active kernel source tree for implementation unless the user explicitly requests another tree.
 - Use `/Serverless/iccd-git/linux-global-build` as the active out-of-tree kernel build directory unless the user explicitly requests another build directory.
@@ -63,7 +63,7 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Use host NUMA memory policy `NUMA_MEM_POLICY=bind` and preallocate with `NUMA_PREALLOC=1` so QEMU memory backing is actually allocated from the intended host NUMA nodes.
 - Use VM slow-memory mode `host-cxl` for performance experiments. This keeps guest node1 as KVM RAM backed by host NUMA node2 and exposes HMAT so the guest kernel separates node0/node1 memory tiers. Do not use QEMU Type3 `qemu-cxl`/`cxl` mode for performance results unless explicitly measuring QEMU CXL emulation overhead.
 - Run workloads with the repo-wide default placement from `scripts/iccd_experiment_defaults.sh`: `ICCD_WORKLOAD_CPU_NODE=0`, or `numactl --cpunodebind=0`.
-- Do not force a NUMA hot threshold unless an experiment explicitly asks for it. Use the kernel default hot threshold.
+- Do not change the NUMA hot/latency threshold for baseline, ours, or performance comparison runs. Leave `/sys/kernel/debug/sched/numa_balancing/hot_threshold_ms` at the kernel default reference value, currently 1000 ms from `sysctl_numa_balancing_hot_threshold = MSEC_PER_SEC`, and record the before/after value instead of tuning it. In memory-tiering promotion, the effective per-node threshold can still adapt internally through `numa_promotion_adjust_threshold()` and `pgdat->nbp_threshold`; do not disable or override that adaptive behavior.
 - Use the default NUMA scan size `NUMA_SCAN_SIZE_MB=4096` unless an experiment explicitly asks for a different scan size.
 - Use the default NUMA scan period minimum `NUMA_SCAN_PERIOD_MIN_MS=1000` unless an experiment explicitly asks for a different scan cadence. Do not use old `SCAN_PERIOD_SCALE` reasoning for current runs.
 - For workload candidate-specific placement, phase-pair, or first-touch rules, consult `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` only when needed.
@@ -103,7 +103,7 @@ description: Use when working on ICCD / Migration-friendly Linux kernel experime
 - Phase microbench output override: `EXP_NAME=<experiment-name>; mkdir -p /Serverless/iccd-git/experiments/${EXP_NAME}/{qemu-logs/phase_candidate_microbench,summaries,graphs,notes}; OUTDIR=/Serverless/iccd-git/experiments/${EXP_NAME}/qemu-logs/phase_candidate_microbench /Serverless/Migration-friendly/scripts/kernel/run_qemu_phase_candidate_microbench.sh`
 - Required VM binding variables for phase experiments: `HOST_CPUS=0-31 GUEST_CPUS=32 GUEST_NODE0_CPUS=0-31 FAST_HOST_NODE=0 SLOW_HOST_NODE=2 SLOW_MEMORY_MODE=host-cxl NUMA_MEM_POLICY=bind NUMA_PREALLOC=1 NUMA_SCAN_SIZE_MB=4096 NUMA_SCAN_PERIOD_MIN_MS=1000`.
 - Read `/Serverless/iccd-git/docs/current-migration-workloads-20260507.md` only when workload candidate details are needed.
-- After every experiment, include the kernel image, initrd image, KVM status, VM CPU/memory/node binding, global NUMA/demotion knobs, scan tuning, workload, on/off throughput, promoted pages/GiB, and demoted pages/GiB in the result summary. Report demotion as `pgdemote_direct + pgdemote_kswapd` when both counters are available.
+- After every experiment, include the kernel image, initrd image, KVM status, VM CPU/memory/node binding, global NUMA/demotion knobs, scan tuning, NUMA hot threshold reference knob value, workload, on/off throughput, promoted pages/GiB, and demoted pages/GiB in the result summary. Report demotion as `pgdemote_direct + pgdemote_kswapd` when both counters are available.
 
 ## Git discipline
 

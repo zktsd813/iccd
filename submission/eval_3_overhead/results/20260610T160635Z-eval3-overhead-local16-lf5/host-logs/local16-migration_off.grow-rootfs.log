@@ -1,0 +1,21 @@
+Warning: Permanently added '[127.0.0.1]:10160' (ED25519) to the list of known hosts.
+[grow-rootfs] before
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root        98G   62G   32G  67% /
+NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+vda    253:0    0  300G  0 disk 
+├─vda1 253:1    0    1M  0 part 
+└─vda2 253:2    0  100G  0 part /
+CHANGED: partition=2 start=4096 old: size=209709056 end=209713151 new: size=629141471 end=629145566
+resize2fs 1.47.0 (5-Feb-2023)
+Filesystem at /dev/vda2 is mounted on /; on-line resizing required
+old_desc_blocks = 13, new_desc_blocks = 38
+The filesystem on /dev/vda2 is now 78642683 (4k) blocks long.
+
+[grow-rootfs] after
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       295G   62G  221G  22% /
+NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+vda    253:0    0  300G  0 disk 
+├─vda1 253:1    0    1M  0 part 
+└─vda2 253:2    0  300G  0 part /

@@ -18,6 +18,8 @@ Read this section before every experiment:
 - Keep MGLRU at `0x0007`.
 - Use global NUMA balancing: `2` for migration on, `0` for migration off.
 - Enable global demotion and verify `demotion_target` contains `0 1`.
+- Do not tune the NUMA hot/latency threshold reference knob; keep the kernel
+  default and record it in result metadata.
 - Run workloads with the shared default placement: `numactl --cpunodebind=0`.
 - For all-fast/all-slow controls, change VM memory sizing and use explicit
   `numactl --membind` for the control node.
@@ -128,6 +130,15 @@ NUMA_SCAN_SIZE_MB=4096
 NUMA_SCAN_PERIOD_MIN_MS=1000
 ```
 
+Do not write `/sys/kernel/debug/sched/numa_balancing/hot_threshold_ms` for
+baseline, ours, or performance-comparison runs. The current kernel default
+reference value is `1000 ms` (`sysctl_numa_balancing_hot_threshold =
+MSEC_PER_SEC` in `linux/kernel/sched/fair.c`). In memory-tiering promotion, the
+effective per-node threshold can still adapt internally through
+`numa_promotion_adjust_threshold()` and `pgdat->nbp_threshold`; experiments
+should preserve that adaptive behavior and only record the exposed reference
+knob before/after so accidental tuning is visible.
+
 For on/off experiments:
 
 - migration on: write `2` to `/proc/sys/kernel/numa_balancing`
@@ -182,4 +193,5 @@ Every experiment summary should include:
 - global NUMA balancing value
 - demotion enabled/target values
 - NUMA scan size and scan period
+- NUMA hot/latency threshold reference knob value
 - promoted and demoted page counters

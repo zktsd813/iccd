@@ -1,0 +1,25 @@
+Wed Jun 10 18:04:55 UTC 2026
+Linux kernel 6.18.0modified #11 SMP PREEMPT_DYNAMIC Tue Jun  9 17:21:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+numa_balancing=0
+demotion_enabled=false
+cmd=numactl --cpunodebind=0 env OMP_NUM_THREADS=32 OMP_PROC_BIND=true OMP_PLACES=cores /root/benchmark/gapbs/pr -f /mnt/data/gapbs/kron_g29.sg -i20 -t1e-4 -n1
+available: 2 nodes (0-1)
+node 0 cpus: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+node 0 size: 16022 MB
+node 0 free: 15569 MB
+node 1 cpus:
+node 1 size: 129020 MB
+node 1 free: 128131 MB
+node distances:
+node   0   1 
+  0:  10  20 
+  1:  20  10 
+               total        used        free      shared  buff/cache   available
+Mem:           141Gi       1.7Gi       140Gi       972Ki        66Mi       139Gi
+Swap:             0B          0B          0B
+NAME    SIZE FSTYPE LABEL     MOUNTPOINTS
+vda     120G                  
+├─vda1    1M                  
+└─vda2  100G ext4             /
+vdb      80G ext4   GAPBS_G29 /mnt/data
+graph=/mnt/data/gapbs/kron_g29.sg size=72243477929

@@ -1,0 +1,2 @@
+[vm32-case] starting config=migration_off workload=pr: numactl --cpunodebind=0 /root/benchmark/gapbs/pr -f /root/gapbs_graphs/kron_g29.sg -i 20 -t 1e-4 -n 8 
+[vm32-case] finished config=migration_off workload=pr status=0 elapsed_s=1849

@@ -10,7 +10,7 @@ WORKLOADS="${WORKLOADS:-scalable}"
 POLICIES="${POLICIES:-off on ours}"
 CAPS="${CAPS:-physical:0}"
 BENCHMARK_DIR="${BENCHMARK_DIR:-/root/benchmark}"
-GRAPH="${GRAPH:-/root/gapbs_graphs/kron_g28.sg}"
+GRAPH="${GRAPH:-/root/gapbs_graphs/kron_g29.sg}"
 OMP_THREADS="${OMP_THREADS:-32}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-7200}"
 RESUME="${RESUME:-1}"
@@ -35,6 +35,7 @@ REENABLE_CONSECUTIVE="${REENABLE_CONSECUTIVE:-2}"
 USE_WINDOW_BUCKETS="${USE_WINDOW_BUCKETS:-0}"
 
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
+GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
 XSBENCH_PARTICLES="${XSBENCH_PARTICLES:-90000000}"
@@ -92,10 +93,10 @@ set_workload_cmd() {
 
   case "${workload}" in
     pr|gapbs_pr)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/pr")" -f "${GRAPH}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/pr")" -f "$(resolve_existing_file "${GRAPH}")" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
       ;;
     bc|gapbs_bc)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bc")" -f "${GRAPH}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bc")" -f "$(resolve_existing_file "${GRAPH}")" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
       ;;
     gups|gups_64g)
       CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_gups_mt")" "${GUPS_MEMORY_GB}")
@@ -110,13 +111,13 @@ set_workload_cmd() {
       CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/XSBench/openmp-threading/XSBench")" -t "${OMP_THREADS}" -g "${XSBENCH_GRID}" -p "${XSBENCH_PARTICLES}")
       ;;
     gapbs_bfs|bfs)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bfs")" -f "${GRAPH}" -n "${GAPBS_BFS_TRIALS:-${GAPBS_TRIALS}}")
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bfs")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_BFS_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     gapbs_cc|cc)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/cc")" -f "${GRAPH}" -n "${GAPBS_CC_TRIALS:-${GAPBS_TRIALS}}")
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/cc")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_CC_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     gapbs_sssp|sssp)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/sssp")" -f "${GRAPH}" -n "${GAPBS_SSSP_TRIALS:-${GAPBS_TRIALS}}")
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/sssp")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_SSSP_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     *)
       CMD=("${CASE_RUNNER}" "${workload}")
@@ -170,7 +171,6 @@ run_case() {
     --scan-size-mb "${NUMA_SCAN_SIZE_MB}" \
     --scan-period-min-ms "${NUMA_SCAN_PERIOD_MIN_MS}" \
     --fast-scan 0 \
-    --hot-threshold-ms 0 \
     --mglru 0x0007 \
     --cpuset-cpus "${CPUSET_CPUS}" \
     --cpuset-mems "${CPUSET_MEMS}" \

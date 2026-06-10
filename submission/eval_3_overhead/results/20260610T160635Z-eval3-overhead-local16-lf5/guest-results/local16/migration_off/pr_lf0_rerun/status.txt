@@ -1,0 +1,4 @@
+returncode=0
+elapsed_s=1849
+start_utc=2026-06-10T16:51:36Z
+end_utc=2026-06-10T17:22:25Z

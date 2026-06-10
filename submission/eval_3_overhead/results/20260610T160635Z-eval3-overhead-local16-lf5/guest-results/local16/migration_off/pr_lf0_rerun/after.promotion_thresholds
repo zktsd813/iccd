@@ -1,0 +1,5 @@
+reference_hot_threshold_ms 1000
+scan_period_max_ms 60000
+node effective_hot_threshold_ms raw_nbp_threshold_ms pgpromote_candidate pgpromote_candidate_nrl
+0 1000 0 0 0
+1 1000 0 0 0

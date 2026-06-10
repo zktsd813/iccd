@@ -1,0 +1,4 @@
+ssh-ok
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+enp0s2           UP             10.0.2.15/24 fec0::5054:ff:fe12:3456/64 fe80::5054:ff:fe12:3456/64 
+Linux kernel 6.18.0modified #11 SMP PREEMPT_DYNAMIC Tue Jun  9 17:21:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux

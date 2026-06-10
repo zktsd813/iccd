@@ -1,0 +1,31 @@
+--- netplan ---
+/mnt/iccd-mlc-root/etc/netplan/01-all-eth-dhcp.yaml
+network:
+  version: 2
+  ethernets:
+    all-en:
+      match:
+        name: "e*"
+      dhcp4: true
+      dhcp6: false
+/mnt/iccd-mlc-root/etc/netplan/50-cloud-init.yaml.bak
+network:
+  version: 2
+  ethernets:
+    ens3:
+      dhcp4: true
+/mnt/iccd-mlc-root/etc/netplan/50-cloud-init.yaml
+network:
+  version: 2
+  ethernets:
+    ens3:
+      dhcp4: true
+--- systemd-networkd ---
+--- ssh keys ---
+total 12
+drwx------  2 root root 4096 Apr 10 11:38 .
+drwx------ 56 root root 4096 Jun  1 10:45 ..
+-rw-------  1 root root 1034 May 30 12:37 authorized_keys
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDU4IAXAQKwLvup9anq5hupXBCG3HOaacKLBFgZbcCeJnTLRXXNaRtx1xZutIGRmYNekC04I5upViwmd/cAEBywxzw62w+uR3aq1z4Z7k2uGsJlGfbcqjZdT0p5SpejUivPb7O8kjcNfJED5EKSlE5W3uUp/K+jpL2jhwzCnGRFGMcTAoYCHou+mFlh1d3Cj7LGYFlN2ROWoRShwpUZmgqYi770nOo5U+Q0AocExAfcS1EbRjB3oDf+icS67eWsYOa6du7HThcSTSON3I7I2xzenpqbjWLm+sZP0aC5B+vLwhOumdr1wngKgOKMB6PsZSYvlqdPg5Qm5OpQToDPLwJHu5pkVnEEG8UutwodpfxG6nmKjRn+qmEkfHLpmy0ZREjqob91c4MguAikKQPwYEdKwqFFYyk22KrRvyP3YEp7EmjDAlAPMYGccF2N0ARpcC/y6u1nBjwPUToQ6x3866Ql0n9/daeeka/Dg1+QtpkwIqZcjP5Rnjqfu2ea4DD5iNM= ijkim@ubuntu
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCikC46WYtXotUd0UGPz9547Aj0KqC4gk+nt4BBJm86IHgCD9FygSGX9EFutXlhz9KZIPg9Okk7+IzXRHCWI2MNvhrcjyrezKREm71z08j9iwfxY3340fY2Mo+0khwpO7bzsgzkljHIHqcOg7MgttPInVMNH/EfqpgR8EDKJuWCB2Ny+EBFN/3dAiff0X/EvKle9PUrY70EkSycnyURS8HZReEqj8lN9J5kXzA8F6jBo/0Q42Ttv6e4k5YcaDrwmLrBWLra2PCXZLNyHqXEiFkGmdXtA1Eox9gc/p4jIXim6xrPNmpN6WyrrEjaCF5xYvNv8wXkD6uSWwbHYU24lIAn well-known key for qemu-test, do not use on any machine exposed to an external network
+--- mlc ---

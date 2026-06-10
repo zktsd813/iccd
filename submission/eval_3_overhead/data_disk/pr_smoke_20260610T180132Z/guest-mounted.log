@@ -1,0 +1,19 @@
+-rw-r--r-- 1 root root 68G Jun 10 18:00 /mnt/data/gapbs/kron_g29.sg
+/mnt/data/gapbs/kron_g29.sg 72243477929 bytes
+-rwxr-xr-x 1 root root 107K Jun  1 05:27 /root/benchmark/gapbs/pr
+-rwxr-xr-x 1 root root 110K Mar  5 06:05 /root/pr
+/usr/bin/numactl
+               total        used        free      shared  buff/cache   available
+Mem:           141Gi       2.0Gi       139Gi       984Ki       1.0Gi       139Gi
+Swap:             0B          0B          0B
+available: 2 nodes (0-1)
+node 0 cpus: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+node 0 size: 16022 MB
+node 0 free: 14535 MB
+node 1 cpus:
+node 1 size: 129020 MB
+node 1 free: 128131 MB
+node distances:
+node   0   1 
+  0:  10  20 
+  1:  20  10 

@@ -685,6 +685,7 @@ void mbench_config_init(struct mbench_config *config)
     config->timing.duration_ms = k_default_duration_ms;
     config->timing.sample_ms = k_default_sample_ms;
     config->timing.move_interval_ms = k_default_move_interval_ms;
+    config->timing.target_ops = 0;
     config->report.csv = false;
     config->report.quiet = false;
     config->report.emit_summary = true;
@@ -1029,6 +1030,7 @@ void mbench_print_usage(FILE *out, const char *progname)
             "  --move-max-offset BYTES|K|M|G (0 means arena max)\n"
             "  --duration N\n"
             "  --duration-ms N\n"
+            "  --target-ops N\n"
             "  --sample-ms N\n"
             "  --move-interval-ms N\n"
             "  timing note: non-phase runs ignore duration knobs and use a fixed 20s warmup + 200s measured phase\n"
@@ -1075,7 +1077,7 @@ void mbench_config_dump(FILE *out, const struct mbench_config *config)
     fprintf(out,
             "mode=%s bw_kernel=%s hugepage=%s prefault=%d seed=%llu\n"
             "arena_bytes=%zu window_bytes=%zu offset_bytes=%zu move_step_bytes=%zu move_min_offset_bytes=%zu move_max_offset_bytes=%zu move_policy=%s\n"
-            "duration_ms=%u sample_ms=%u move_interval_ms=%u csv=%d quiet=%d emit_summary=%d\n"
+            "duration_ms=%u target_ops=%llu sample_ms=%u move_interval_ms=%u csv=%d quiet=%d emit_summary=%d\n"
             "ops_per_pass=%llu pause_ns=%llu pc_pattern=%s bw_stride=%u bw_block_bytes=%zu bw_shared_window=%d hotset_pages=%u hot_prob_pct=%u hotset_read_pct=%u hotset_write_pct=%u hotset_rmw_pct=%u hotset_index_mode=%s hotset_prefault_node=%d\n"
             "index_kernel=%s index_distribution=%s index_zipf_alpha=%.3f index_cluster_bytes=%zu index_cluster_span_ops=%u index_segments=%u index_segment_span_ops=%u\n"
             "placement=%s nodes=",
@@ -1092,6 +1094,7 @@ void mbench_config_dump(FILE *out, const struct mbench_config *config)
             config->window.move_max_offset_bytes,
             mbench_move_policy_name(config->window.move_policy),
             config->timing.duration_ms,
+            (unsigned long long)config->timing.target_ops,
             config->timing.sample_ms,
             config->timing.move_interval_ms,
             config->report.csv ? 1 : 0,
@@ -1201,6 +1204,12 @@ int mbench_config_parse(struct mbench_config *config, int argc, char **argv)
         } else if (strncmp(arg, "--duration-ms", 13) == 0) {
             const char *value = option_value(&i, argc, argv, arg);
             if (!value || mbench_parse_u32(value, &config->timing.duration_ms) != 0) {
+                return -EINVAL;
+            }
+        } else if (strncmp(arg, "--target-ops", 12) == 0 &&
+                   (arg[12] == '\0' || arg[12] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            if (!value || mbench_parse_u64(value, &config->timing.target_ops) != 0) {
                 return -EINVAL;
             }
         } else if (strncmp(arg, "--sample-ms", 11) == 0) {
