@@ -32,13 +32,16 @@ LIBLINEAR_DATASET="${LIBLINEAR_DATASET:-/Serverless/benchmark/liblinear-multicor
 NUMACTL_BIN="${NUMACTL_BIN:-/usr/bin/numactl}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 IPMI_BIN="${IPMI_BIN:-/usr/bin/ipmitool}"
+TMUX_BIN="${TMUX_BIN:-/usr/bin/tmux}"
+TMUX_SESSION="${TMUX_SESSION:-eval1-host-native-sweep}"
+TMUX_LOG="${TMUX_LOG:-${LOG_ROOT}/tmux-session.log}"
 
 OMP_THREADS="${OMP_THREADS:-32}"
 PR_ITERATIONS="${PR_ITERATIONS:-1000}"
 PR_TOLERANCE="${PR_TOLERANCE:-1e-4}"
-PR_TRIALS="${PR_TRIALS:-20}"
+PR_TRIALS="${PR_TRIALS:-4}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
-BC_TRIALS="${BC_TRIALS:-16}"
+BC_TRIALS="${BC_TRIALS:-4}"
 SILO_THREADS="${SILO_THREADS:-32}"
 SILO_SCALE_FACTOR="${SILO_SCALE_FACTOR:-800000}"
 SILO_OPS_PER_WORKER="${SILO_OPS_PER_WORKER:-100000000}"
@@ -62,7 +65,9 @@ usage() {
   cat <<'EOF'
 Usage:
   run_host_native_migration_sweep.sh start
+  run_host_native_migration_sweep.sh start-tmux
   run_host_native_migration_sweep.sh resume
+  run_host_native_migration_sweep.sh resume-tmux
   run_host_native_migration_sweep.sh status
   run_host_native_migration_sweep.sh remove-hook
 
@@ -106,6 +111,11 @@ save_state() {
     printf 'RESULTS_ROOT=%q\n' "${RESULTS_ROOT}"
     printf 'GAPBS_GRAPH=%q\n' "${GAPBS_GRAPH}"
     printf 'GAPBS_GRAPH_SCALE=%q\n' "${GAPBS_GRAPH_SCALE}"
+    printf 'PR_ITERATIONS=%q\n' "${PR_ITERATIONS}"
+    printf 'PR_TOLERANCE=%q\n' "${PR_TOLERANCE}"
+    printf 'PR_TRIALS=%q\n' "${PR_TRIALS}"
+    printf 'BC_ITERATIONS=%q\n' "${BC_ITERATIONS}"
+    printf 'BC_TRIALS=%q\n' "${BC_TRIALS}"
     printf 'SILO_BIN=%q\n' "${SILO_BIN}"
     printf 'SILO_THREADS=%q\n' "${SILO_THREADS}"
     printf 'SILO_SCALE_FACTOR=%q\n' "${SILO_SCALE_FACTOR}"
@@ -137,7 +147,7 @@ install_reboot_hook() {
   mkdir -p "${STATE_ROOT}" "${LOG_ROOT}"
   local marker_begin="# ICCD_EVAL1_HOST_NATIVE_SWEEP_BEGIN"
   local marker_end="# ICCD_EVAL1_HOST_NATIVE_SWEEP_END"
-  local cmd="cd ${REPO_ROOT@Q} && sleep ${RESUME_WAIT_SEC@Q} && exec ${SCRIPT_PATH@Q} resume >> ${LOG_ROOT@Q}/reboot-resume.log 2>&1"
+  local cmd="cd ${REPO_ROOT@Q} && sleep ${RESUME_WAIT_SEC@Q} && exec env TMUX_BIN=${TMUX_BIN@Q} TMUX_SESSION=${TMUX_SESSION@Q} TMUX_LOG=${TMUX_LOG@Q} ${SCRIPT_PATH@Q} resume-tmux >> ${LOG_ROOT@Q}/reboot-resume.log 2>&1"
   local tmp
   tmp="$(mktemp)"
   {
@@ -169,6 +179,39 @@ remove_reboot_hook() {
   crontab "${tmp}" || true
   rm -f "${tmp}"
   log "removed @reboot sweep resume hook"
+}
+
+tmux_env_prefix() {
+  local name
+  local -a names=(
+    RUN_ID TARGETS MIGRATION_MODES WORKLOADS RESULTS_ROOT
+    GAPBS_GRAPH GAPBS_GRAPH_SCALE
+    PR_ITERATIONS PR_TOLERANCE PR_TRIALS BC_ITERATIONS BC_TRIALS
+    SILO_BIN SILO_THREADS SILO_SCALE_FACTOR SILO_OPS_PER_WORKER
+    LIBLINEAR_TRAIN_BIN LIBLINEAR_DATASET LIBLINEAR_SOLVER LIBLINEAR_THREADS
+    TMUX_BIN TMUX_SESSION TMUX_LOG
+  )
+  for name in "${names[@]}"; do
+    printf '%s=%q ' "${name}" "${!name}"
+  done
+}
+
+start_tmux_run() {
+  local subcmd="$1"
+  require_root
+  [[ -x "${TMUX_BIN}" ]] || die "missing executable tmux: ${TMUX_BIN}"
+  mkdir -p "${STATE_ROOT}" "${LOG_ROOT}" "${RESULTS_ROOT}"
+  if "${TMUX_BIN}" has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+    log "tmux session already exists: ${TMUX_SESSION}"
+    return 0
+  fi
+
+  local env_prefix cmd shell_cmd
+  env_prefix="$(tmux_env_prefix)"
+  cmd="set -o pipefail; cd ${REPO_ROOT@Q} && ${env_prefix}${SCRIPT_PATH@Q} ${subcmd@Q} 2>&1 | tee -a ${TMUX_LOG@Q}"
+  printf -v shell_cmd '/bin/bash -lc %q' "${cmd}"
+  "${TMUX_BIN}" new-session -d -s "${TMUX_SESSION}" "${shell_cmd}"
+  log "started tmux session=${TMUX_SESSION} cmd=${subcmd}"
 }
 
 drop_caches() {
@@ -617,7 +660,9 @@ main() {
   local cmd="${1:-}"
   case "${cmd}" in
     start) start_run ;;
+    start-tmux) start_tmux_run start ;;
     resume) resume_run ;;
+    resume-tmux) start_tmux_run resume ;;
     status) cmd_status ;;
     remove-hook) remove_reboot_hook ;;
     -h|--help|help) usage ;;
