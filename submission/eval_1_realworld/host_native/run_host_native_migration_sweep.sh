@@ -18,7 +18,7 @@ CPU_NODE="${CPU_NODE:-0}"
 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB:-1}"
 TARGETS="${TARGETS:-16 32}"
 MIGRATION_MODES="${MIGRATION_MODES:-off on}"
-WORKLOADS="${WORKLOADS:-pr bc gups btree}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree silo liblinear}"
 
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
 GAPBS_GRAPH="${GAPBS_GRAPH:-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g${GAPBS_GRAPH_SCALE}.sg}"
@@ -26,6 +26,9 @@ PR_BIN="${PR_BIN:-/Serverless/benchmark/gapbs/pr}"
 BC_BIN="${BC_BIN:-/Serverless/benchmark/gapbs/bc}"
 GUPS_BIN="${GUPS_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_gups_mt}"
 BTREE_BIN="${BTREE_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_btree_mt}"
+SILO_BIN="${SILO_BIN:-/Serverless/benchmark/silo/out-perf.masstree/benchmarks/dbtest}"
+LIBLINEAR_TRAIN_BIN="${LIBLINEAR_TRAIN_BIN:-/Serverless/benchmark/liblinear-multicore-2.47/train}"
+LIBLINEAR_DATASET="${LIBLINEAR_DATASET:-/Serverless/benchmark/liblinear-multicore-2.47/datasets/kdd12}"
 NUMACTL_BIN="${NUMACTL_BIN:-/usr/bin/numactl}"
 TIME_BIN="${TIME_BIN:-/usr/bin/time}"
 IPMI_BIN="${IPMI_BIN:-/usr/bin/ipmitool}"
@@ -36,6 +39,11 @@ PR_TOLERANCE="${PR_TOLERANCE:-1e-4}"
 PR_TRIALS="${PR_TRIALS:-20}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
 BC_TRIALS="${BC_TRIALS:-16}"
+SILO_THREADS="${SILO_THREADS:-32}"
+SILO_SCALE_FACTOR="${SILO_SCALE_FACTOR:-800000}"
+SILO_OPS_PER_WORKER="${SILO_OPS_PER_WORKER:-100000000}"
+LIBLINEAR_SOLVER="${LIBLINEAR_SOLVER:-6}"
+LIBLINEAR_THREADS="${LIBLINEAR_THREADS:-32}"
 POST_WORKLOAD_SLEEP_SEC="${POST_WORKLOAD_SLEEP_SEC:-5}"
 RESUME_WAIT_SEC="${RESUME_WAIT_SEC:-20}"
 VERIFY_RETRIES="${VERIFY_RETRIES:-3}"
@@ -98,6 +106,14 @@ save_state() {
     printf 'RESULTS_ROOT=%q\n' "${RESULTS_ROOT}"
     printf 'GAPBS_GRAPH=%q\n' "${GAPBS_GRAPH}"
     printf 'GAPBS_GRAPH_SCALE=%q\n' "${GAPBS_GRAPH_SCALE}"
+    printf 'SILO_BIN=%q\n' "${SILO_BIN}"
+    printf 'SILO_THREADS=%q\n' "${SILO_THREADS}"
+    printf 'SILO_SCALE_FACTOR=%q\n' "${SILO_SCALE_FACTOR}"
+    printf 'SILO_OPS_PER_WORKER=%q\n' "${SILO_OPS_PER_WORKER}"
+    printf 'LIBLINEAR_TRAIN_BIN=%q\n' "${LIBLINEAR_TRAIN_BIN}"
+    printf 'LIBLINEAR_DATASET=%q\n' "${LIBLINEAR_DATASET}"
+    printf 'LIBLINEAR_SOLVER=%q\n' "${LIBLINEAR_SOLVER}"
+    printf 'LIBLINEAR_THREADS=%q\n' "${LIBLINEAR_THREADS}"
     printf 'updated_utc=%q\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "${STATE_FILE}"
 }
@@ -355,6 +371,7 @@ summarize_ipmi_power() {
 
 workload_command() {
   local workload="$1"
+  local outdir="${2:-}"
   WORKLOAD_CMD=()
   case "${workload}" in
     pr)
@@ -370,6 +387,20 @@ workload_command() {
       ;;
     btree)
       WORKLOAD_CMD=("${BTREE_BIN}")
+      ;;
+    silo)
+      [[ -x "${SILO_BIN}" ]] || die "missing executable Silo dbtest: ${SILO_BIN}"
+      WORKLOAD_CMD=("${SILO_BIN}" --verbose --bench ycsb --num-threads "${SILO_THREADS}" \
+        --scale-factor "${SILO_SCALE_FACTOR}" --ops-per-worker="${SILO_OPS_PER_WORKER}")
+      ;;
+    liblinear)
+      [[ -x "${LIBLINEAR_TRAIN_BIN}" ]] || die "missing executable Liblinear train: ${LIBLINEAR_TRAIN_BIN}"
+      [[ -r "${LIBLINEAR_DATASET}" ]] || die "missing Liblinear dataset: ${LIBLINEAR_DATASET}"
+      [[ -n "${outdir}" ]] || die "internal error: liblinear requires an output directory"
+      local dataset_name
+      dataset_name="$(basename -- "${LIBLINEAR_DATASET}")"
+      WORKLOAD_CMD=("${LIBLINEAR_TRAIN_BIN}" -s "${LIBLINEAR_SOLVER}" -m "${LIBLINEAR_THREADS}" \
+        "${LIBLINEAR_DATASET}" "${outdir}/${dataset_name}.model")
       ;;
     *)
       die "unknown workload: ${workload}"
@@ -398,7 +429,7 @@ run_one_workload() {
   free_before="$(node_memfree_mib "${LOCAL_NODE}" 2>/dev/null || printf 0)"
   snapshot_common "${outdir}" "before"
   write_rapl_snapshot "${outdir}" "before"
-  workload_command "${workload}"
+  workload_command "${workload}" "${outdir}"
 
   {
     printf 'target_gib=%s\n' "${target}"
@@ -553,6 +584,13 @@ start_run() {
     printf 'bc_args=-f %s -i %s -n %s\n' "${GAPBS_GRAPH}" "${BC_ITERATIONS}" "${BC_TRIALS}"
     printf 'gups_bin=%s\n' "${GUPS_BIN}"
     printf 'btree_bin=%s\n' "${BTREE_BIN}"
+    printf 'silo_bin=%s\n' "${SILO_BIN}"
+    printf 'silo_args=--verbose --bench ycsb --num-threads %s --scale-factor %s --ops-per-worker=%s\n' \
+      "${SILO_THREADS}" "${SILO_SCALE_FACTOR}" "${SILO_OPS_PER_WORKER}"
+    printf 'liblinear_train_bin=%s\n' "${LIBLINEAR_TRAIN_BIN}"
+    printf 'liblinear_dataset=%s\n' "${LIBLINEAR_DATASET}"
+    printf 'liblinear_args=-s %s -m %s %s <outdir>/kdd12.model\n' \
+      "${LIBLINEAR_SOLVER}" "${LIBLINEAR_THREADS}" "${LIBLINEAR_DATASET}"
     printf 'post_workload_sleep_sec=%s\n' "${POST_WORKLOAD_SLEEP_SEC}"
     printf 'rapl_package_domain=%s\n' "${RAPL_PACKAGE_DOMAIN}"
     printf 'rapl_dram_domain=%s\n' "${RAPL_DRAM_DOMAIN}"

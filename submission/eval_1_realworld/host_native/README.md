@@ -73,6 +73,21 @@ Restore normal GRUB boot arguments:
 sudo submission/eval_1_realworld/host_native/host_boot_target.sh restore --apply --reboot
 ```
 
+Run the host-native sweep from the beginning:
+
+```bash
+sudo submission/eval_1_realworld/host_native/run_host_native_migration_sweep.sh start
+```
+
+The default sweep uses targets `16 32`, migration modes `off on`, and
+workloads `pr bc gups btree silo liblinear`.  GAPBS reads the prebuilt
+`kron_g29.sg` graph.  Silo uses the existing dbtest binary with YCSB
+`--scale-factor 800000 --ops-per-worker=100000000 --num-threads 32`.
+Liblinear uses the existing `kdd12` dataset with `train -s 6 -m 32`, writing
+the model file into the per-workload result directory.  The runner persists
+state under `/var/lib/iccd/eval1-host-native-migration-sweep` and installs an
+`@reboot` resume hook so a target-convergence reboot continues the sweep.
+
 Current-host default plan:
 
 - target 16G: keep node0 24G, reserve `232G@0x680000000`
