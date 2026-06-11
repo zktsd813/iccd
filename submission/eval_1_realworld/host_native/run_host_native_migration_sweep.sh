@@ -18,7 +18,7 @@ CPU_NODE="${CPU_NODE:-0}"
 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB:-1}"
 TARGETS="${TARGETS:-16 32}"
 MIGRATION_MODES="${MIGRATION_MODES:-off on}"
-WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 liblinear}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500}"
 
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
 GAPBS_GRAPH="${GAPBS_GRAPH:-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g${GAPBS_GRAPH_SCALE}.sg}"
