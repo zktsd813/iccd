@@ -152,7 +152,7 @@ scripts/run_ours_experiment.sh \
   /root/mbench --mode bw --bw-kernel read --arena-size 32G --window-size 32G \
     --threads 32 --duration 300 --sample-ms 1000 --csv
 
-# GAPBS PageRank example. Use a prebuilt scale-29 graph in the measured path.
+# GAPBS PageRank example. Generate a scale-29 graph in the measured path.
 scripts/run_ours_experiment.sh \
   --outdir /tmp/localutil-pr-g29 \
   --capacity-pages 2097152 \
@@ -160,9 +160,9 @@ scripts/run_ours_experiment.sh \
   --window-sec 5 \
   --remote-threshold-pct 20 \
   -- \
-  /root/pr -f /root/gapbs_graphs/kron_g29.sg -i20 -t1e-4 -n3
+  /root/pr -g29 -i20 -t1e-4 -n3
 
-# GAPBS BC example. Use a prebuilt scale-29 graph in the measured path.
+# GAPBS BC example. Generate a scale-29 graph in the measured path.
 scripts/run_ours_experiment.sh \
   --outdir /tmp/localutil-bc-g29 \
   --capacity-pages 2097152 \
@@ -170,7 +170,7 @@ scripts/run_ours_experiment.sh \
   --window-sec 10 \
   --remote-threshold-pct 20 \
   -- \
-  /root/bc -f /root/gapbs_graphs/kron_g29.sg -i1 -n10
+  /root/bc -g29 -i1 -n10
 EOF
 }
 
@@ -191,10 +191,10 @@ set_example_workload() {
       )
       ;;
     pr-g29)
-      WORKLOAD=(/root/pr -f "${GAPBS_GRAPH}" -i20 -t1e-4 -n3)
+      WORKLOAD=(/root/pr -g29 -i20 -t1e-4 -n3)
       ;;
     bc-g29)
-      WORKLOAD=(/root/bc -f "${GAPBS_GRAPH}" -i1 -n10)
+      WORKLOAD=(/root/bc -g29 -i1 -n10)
       ;;
     *)
       echo "unknown example workload: ${name}" >&2

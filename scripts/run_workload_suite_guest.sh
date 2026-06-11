@@ -36,6 +36,8 @@ USE_WINDOW_BUCKETS="${USE_WINDOW_BUCKETS:-0}"
 
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
+GAPBS_GRAPH_MODE="${GAPBS_GRAPH_MODE:-generated}"
+DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-0}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
 XSBENCH_PARTICLES="${XSBENCH_PARTICLES:-90000000}"
@@ -86,17 +88,28 @@ resolve_existing_file() {
   printf '%s\n' "${path}"
 }
 
+gapbs_graph_args() {
+  if [[ "${GAPBS_GRAPH_MODE}" == "prebuilt" ]]; then
+    printf '%s\0' -f "$(resolve_existing_file "${GRAPH}")"
+  else
+    printf '%s\0' -g "${GAPBS_GRAPH_SCALE}"
+  fi
+}
+
 set_workload_cmd() {
   local workload="$1"
+  local -a graph_args
   CMD=()
   CMD_DISPLAY=""
 
   case "${workload}" in
     pr|gapbs_pr)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/pr")" -f "$(resolve_existing_file "${GRAPH}")" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/pr")" "${graph_args[@]}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
       ;;
     bc|gapbs_bc)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bc")" -f "$(resolve_existing_file "${GRAPH}")" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bc")" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
       ;;
     gups|gups_64g)
       CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_gups_mt")" "${GUPS_MEMORY_GB}")
@@ -111,13 +124,16 @@ set_workload_cmd() {
       CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/XSBench/openmp-threading/XSBench")" -t "${OMP_THREADS}" -g "${XSBENCH_GRID}" -p "${XSBENCH_PARTICLES}")
       ;;
     gapbs_bfs|bfs)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bfs")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_BFS_TRIALS:-${GAPBS_TRIALS}}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/bfs")" "${graph_args[@]}" -n "${GAPBS_BFS_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     gapbs_cc|cc)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/cc")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_CC_TRIALS:-${GAPBS_TRIALS}}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/cc")" "${graph_args[@]}" -n "${GAPBS_CC_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     gapbs_sssp|sssp)
-      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/sssp")" -f "$(resolve_existing_file "${GRAPH}")" -n "${GAPBS_SSSP_TRIALS:-${GAPBS_TRIALS}}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      CMD=("$(resolve_existing_file "${BENCHMARK_DIR}/gapbs/sssp")" "${graph_args[@]}" -n "${GAPBS_SSSP_TRIALS:-${GAPBS_TRIALS}}")
       ;;
     *)
       CMD=("${CASE_RUNNER}" "${workload}")
@@ -128,8 +144,10 @@ set_workload_cmd() {
 }
 
 drop_caches() {
-  sync || true
-  echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+  if [[ "${DROP_GUEST_CACHES}" == "1" ]]; then
+    sync || true
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+  fi
 }
 
 run_case() {

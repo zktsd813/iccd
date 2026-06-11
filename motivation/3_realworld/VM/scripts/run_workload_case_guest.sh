@@ -42,7 +42,7 @@ done
 BENCHMARK_DIR="${BENCHMARK_DIR:-/root/benchmark}"
 TOOLS_DIR="${TOOLS_DIR:-/root/tools}"
 REALWORLD_CASE_RUNNER="${REALWORLD_CASE_RUNNER:-/root/scripts/run_workload_case_guest.sh}"
-GRAPH="${GRAPH:-/mnt/data/gapbs/kron_g29.sg}"
+GRAPH="${GRAPH:-}"
 WORKDIR="${WORKDIR:-/root/realworld-work}"
 CPU_NODE="${CPU_NODE:-0}"
 OMP_THREADS="${OMP_THREADS:-32}"
@@ -90,6 +90,8 @@ PR_TRIALS="${PR_TRIALS:-8}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
 BC_TRIALS="${BC_TRIALS:-8}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
+DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-1}"
+COMPACT_GUEST_MEMORY="${COMPACT_GUEST_MEMORY:-1}"
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
@@ -218,19 +220,24 @@ need_writable_path() {
 WORKLOAD_CMD=()
 WORKLOAD_COMMAND_KIND=""
 
+gapbs_graph_args() {
+  printf '%s\0' -g "${GAPBS_GRAPH_SCALE}"
+}
+
 set_workload_cmd() {
   WORKLOAD_CMD=()
   WORKLOAD_COMMAND_KIND="${WORKLOAD}"
+  local -a graph_args
 
   case "${WORKLOAD}" in
     pr|gapbs_pr)
       need_exec_path "${BENCHMARK_DIR}/gapbs/pr" || return $?
-      need_file_path "${GRAPH}" || return $?
-      WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/pr" -f "${GRAPH}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
+      WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/pr" "${graph_args[@]}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
       ;;
     bc|gapbs_bc)
       need_exec_path "${BENCHMARK_DIR}/gapbs/bc" || return $?
-      need_file_path "${GRAPH}" || return $?
+      mapfile -d '' -t graph_args < <(gapbs_graph_args)
       if [[ "${TRACE_BC_TRIAL_PROMOTIONS}" == "1" ]]; then
         need_exec_path /root/vm32_realworld/scripts/trace_gapbs_trial_promotions.sh || return $?
         WORKLOAD_CMD=(
@@ -238,10 +245,10 @@ set_workload_cmd() {
           "TRIAL_PROMOTION_OUT=${OUTDIR}/trial_promotion.csv"
           "TRIAL_PROMOTION_RAW_OUT=${OUTDIR}/trial_promotion.raw.log"
           /root/vm32_realworld/scripts/trace_gapbs_trial_promotions.sh
-          "${BENCHMARK_DIR}/gapbs/bc" -f "${GRAPH}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}"
+          "${BENCHMARK_DIR}/gapbs/bc" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}"
         )
       else
-        WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/bc" -f "${GRAPH}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
+        WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/bc" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
       fi
       ;;
     gups|gups_64g)
@@ -643,9 +650,13 @@ sample_promotion() {
 }
 
 drop_caches() {
-  sync || true
-  write_if_writable /proc/sys/vm/drop_caches 3
-  write_if_writable /proc/sys/vm/compact_memory 1
+  if [[ "${DROP_GUEST_CACHES}" == "1" ]]; then
+    sync || true
+    write_if_writable /proc/sys/vm/drop_caches 3
+  fi
+  if [[ "${COMPACT_GUEST_MEMORY}" == "1" ]]; then
+    write_if_writable /proc/sys/vm/compact_memory 1
+  fi
 }
 
 write_status() {
@@ -794,17 +805,19 @@ run_case() {
     printf 'omp_threads=%s\n' "${OMP_THREADS}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
     printf 'sample_interval_sec=%s\n' "${SAMPLE_INTERVAL_SEC}"
+    printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
+    printf 'compact_guest_memory=%s\n' "${COMPACT_GUEST_MEMORY}"
     printf 'thp_mode=%s\n' "${THP_MODE}"
     printf 'thp_defrag=%s\n' "${THP_DEFRAG}"
     printf 'realworld_size_profile=%s\n' "${REALWORLD_SIZE_PROFILE}"
     printf 'trace_bc_trial_promotions=%s\n' "${TRACE_BC_TRIAL_PROMOTIONS}"
     case "${WORKLOAD}" in
       pr|gapbs_pr|bc|gapbs_bc)
-        printf 'gapbs_graph_mode=prebuilt\n'
+        printf 'gapbs_graph_mode=generated\n'
         printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE}"
-        printf 'gapbs_graph_path=%s\n' "${GRAPH}"
-        printf 'graph=%s\n' "${GRAPH}"
-        printf 'graph_build_included=0\n'
+        printf 'gapbs_graph_path=generated:g%s\n' "${GAPBS_GRAPH_SCALE}"
+        printf 'graph=generated:g%s\n' "${GAPBS_GRAPH_SCALE}"
+        printf 'graph_build_included=1\n'
         printf 'pr_trials=%s\n' "${PR_TRIALS}"
         printf 'bc_trials=%s\n' "${BC_TRIALS}"
         printf 'pr_iterations=%s\n' "${PR_ITERATIONS}"

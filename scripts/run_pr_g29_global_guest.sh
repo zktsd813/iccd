@@ -26,6 +26,7 @@ NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-${ICCD_NUMA_SCAN_SIZE_MB:-4096}}"
 NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-${ICCD_NUMA_SCAN_PERIOD_MIN_MS:-1000}}"
 LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-${NUMA_SCAN_SIZE_MB}}"
 LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}}"
+DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-0}"
 
 mkdir -p "${OUTROOT}"
 
@@ -164,8 +165,10 @@ run_one() {
   set_common_knobs
   write_if_writable /proc/sys/kernel/numa_balancing "${numa_value}"
 
-  sync || true
-  write_if_writable /proc/sys/vm/drop_caches 3
+  if [[ "${DROP_GUEST_CACHES}" == "1" ]]; then
+    sync || true
+    write_if_writable /proc/sys/vm/drop_caches 3
+  fi
 
   snapshot "${dir}" before
   mapfile -d '' -t place < <(placement_args "${run}")
@@ -184,6 +187,7 @@ run_one() {
     printf '\n'
     printf 'omp_threads=%s\n' "${OMP_THREADS}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
+    printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
   } > "${dir}/run.config"
 
   log "starting ${run}: ${cmd[*]}"

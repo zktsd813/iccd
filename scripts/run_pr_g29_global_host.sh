@@ -122,7 +122,7 @@ run_guest_matrix() {
 
   log "running ${name}: ${runs}"
   ssh_vm "${port}" \
-    "OUTROOT='${guest_out}' RUNS='${runs}' GRAPH_SCALE='${GRAPH_SCALE}' PR_ITERATIONS='${PR_ITERATIONS}' PR_TOLERANCE='${PR_TOLERANCE}' PR_TRIALS='${PR_TRIALS}' OMP_THREADS='${OMP_THREADS}' TIMEOUT_SEC='${TIMEOUT_SEC}' /root/scripts/run_pr_g29_global_guest.sh" \
+    "OUTROOT='${guest_out}' RUNS='${runs}' GRAPH_SCALE='${GRAPH_SCALE}' PR_ITERATIONS='${PR_ITERATIONS}' PR_TOLERANCE='${PR_TOLERANCE}' PR_TRIALS='${PR_TRIALS}' OMP_THREADS='${OMP_THREADS}' TIMEOUT_SEC='${TIMEOUT_SEC}' DROP_GUEST_CACHES='0' /root/scripts/run_pr_g29_global_guest.sh" \
     > "${EXP_ROOT}/host-logs/${name}.ssh.log" 2>&1 || true
 
   rm -rf "${host_out}"

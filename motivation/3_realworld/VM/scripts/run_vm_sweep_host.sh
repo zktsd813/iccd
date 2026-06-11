@@ -123,22 +123,9 @@ PR_TRIALS="${PR_TRIALS:-8}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
 BC_TRIALS="${BC_TRIALS:-8}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
-GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-kron_g${GAPBS_GRAPH_SCALE}.sg}"
-GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-${BENCHMARK_DIR}/gapbs/benchmark/graphs/${GAPBS_GRAPH_NAME}}"
-GAPBS_DATA_DISK="${GAPBS_DATA_DISK:-1}"
-GAPBS_DATA_DISK_IMAGE="${GAPBS_DATA_DISK_IMAGE:-${EXP_ROOT}/data/gapbs_g${GAPBS_GRAPH_SCALE}_ext4_80g.raw}"
-GAPBS_DATA_DISK_SIZE="${GAPBS_DATA_DISK_SIZE:-80G}"
-GAPBS_DATA_DISK_LABEL="${GAPBS_DATA_DISK_LABEL:-GAPBS_G${GAPBS_GRAPH_SCALE}}"
-GAPBS_DATA_DISK_DEVICE="${GAPBS_DATA_DISK_DEVICE:-/dev/vdb}"
-GAPBS_DATA_DISK_MOUNT="${GAPBS_DATA_DISK_MOUNT:-/mnt/data}"
-if [[ -z "${GAPBS_GRAPH_GUEST:-}" ]]; then
-  if [[ "${GAPBS_DATA_DISK}" == "1" ]]; then
-    GAPBS_GRAPH_GUEST="${GAPBS_DATA_DISK_MOUNT}/gapbs/${GAPBS_GRAPH_NAME}"
-  else
-    GAPBS_GRAPH_GUEST="/root/gapbs_graphs/${GAPBS_GRAPH_NAME}"
-  fi
-fi
-GRAPH="${GRAPH:-${GAPBS_GRAPH_GUEST}}"
+GRAPH=""
+DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-1}"
+COMPACT_GUEST_MEMORY="${COMPACT_GUEST_MEMORY:-1}"
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
@@ -356,8 +343,7 @@ workloads_need_gapbs_graph() {
 }
 
 use_gapbs_data_disk() {
-  [[ "${GAPBS_DATA_DISK}" == "1" ]] || return 1
-  workloads_need_gapbs_graph
+  return 1
 }
 
 drop_host_page_cache() {
@@ -366,33 +352,11 @@ drop_host_page_cache() {
 }
 
 mount_gapbs_data_disk_guest() {
-  local config="$1"
-  use_gapbs_data_disk || return 0
-
-  log "mount GAPBS data disk for ${CURRENT_LOCAL_LABEL}/${config}: ${GAPBS_DATA_DISK_DEVICE} -> ${GAPBS_DATA_DISK_MOUNT}"
-  {
-    retry_vm_cmd "mount-gapbs-data ${CURRENT_LOCAL_LABEL}/${config}" \
-      ssh_vm "${config}" \
-        "GAPBS_DATA_DISK_DEVICE='${GAPBS_DATA_DISK_DEVICE}' GAPBS_DATA_DISK_MOUNT='${GAPBS_DATA_DISK_MOUNT}' GAPBS_GRAPH_GUEST='${GAPBS_GRAPH_GUEST}' bash -s" <<'EOF'
-set -euo pipefail
-mkdir -p "${GAPBS_DATA_DISK_MOUNT}"
-if ! mountpoint -q "${GAPBS_DATA_DISK_MOUNT}"; then
-  mount "${GAPBS_DATA_DISK_DEVICE}" "${GAPBS_DATA_DISK_MOUNT}"
-fi
-test -f "${GAPBS_GRAPH_GUEST}"
-stat -c 'graph=%n size=%s' "${GAPBS_GRAPH_GUEST}"
-findmnt "${GAPBS_DATA_DISK_MOUNT}"
-EOF
-  } > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.mount-gapbs-data.log" 2>&1
+  return 0
 }
 
 unmount_gapbs_data_disk_guest() {
-  local config="$1"
-  use_gapbs_data_disk || return 0
-  log "unmount GAPBS data disk for ${CURRENT_LOCAL_LABEL}/${config}"
-  retry_vm_cmd "unmount-gapbs-data ${CURRENT_LOCAL_LABEL}/${config}" \
-    ssh_vm "${config}" "sync; mountpoint -q '${GAPBS_DATA_DISK_MOUNT}' && umount '${GAPBS_DATA_DISK_MOUNT}' || true" \
-    > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.unmount-gapbs-data.log" 2>&1 || true
+  return 0
 }
 
 config_fast_mem() {
@@ -496,8 +460,8 @@ Local sizes GiB: ${local_size_list[*]}
 Default fast host node: ${FAST_HOST_NODE}
 Default slow host node: ${SLOW_HOST_NODE}
 HMAT:            fast ${HMAT_FAST_LATENCY_NS}ns/${HMAT_FAST_BANDWIDTH}, slow ${HMAT_SLOW_LATENCY_NS}ns/${HMAT_SLOW_BANDWIDTH}
-GAPBS graph:     prebuilt g${GAPBS_GRAPH_SCALE}, host ${GAPBS_GRAPH_HOST}, guest ${GAPBS_GRAPH_GUEST}
-GAPBS data disk: enabled=${GAPBS_DATA_DISK} image=${GAPBS_DATA_DISK_IMAGE} mount=${GAPBS_DATA_DISK_MOUNT} device=${GAPBS_DATA_DISK_DEVICE}
+GAPBS graph:     generated g${GAPBS_GRAPH_SCALE}
+GAPBS data disk: disabled
 THP:             mode=${THP_MODE:-default} defrag=${THP_DEFRAG:-default}
 Delete images:   ${DELETE_VM_IMAGES}
 Forbid host n1:  ${FORBID_HOST_NODE1}
@@ -557,12 +521,7 @@ preflight() {
   [[ -d "/sys/devices/system/node/node${FAST_HOST_NODE}" ]] || die "missing fast host node ${FAST_HOST_NODE}"
   [[ -d "/sys/devices/system/node/node${SLOW_HOST_NODE}" ]] || die "missing slow host node ${SLOW_HOST_NODE}"
   [[ "${DISABLE_SMT}" != "1" || "$(id -u)" == "0" ]] || sudo -n true >/dev/null 2>&1 || die "sudo -n is required to disable SMT"
-  if workloads_need_gapbs_graph && [[ ! -s "${GAPBS_GRAPH_HOST}" ]]; then
-    [[ -x "${BENCHMARK_DIR}/gapbs/converter" ]] || die "missing GAPBS converter for ${GAPBS_GRAPH_HOST}"
-  fi
   if use_gapbs_data_disk; then
-    [[ "${GAPBS_GRAPH_GUEST}" == "${GAPBS_DATA_DISK_MOUNT}/"* ]] ||
-      die "GAPBS_GRAPH_GUEST must live under GAPBS_DATA_DISK_MOUNT when GAPBS_DATA_DISK=1: ${GAPBS_GRAPH_GUEST}"
     sudo -n true >/dev/null 2>&1 || die "sudo -n is required to create/mount GAPBS data disk"
     ensure_gapbs_data_disk
   fi
@@ -576,63 +535,7 @@ preflight() {
 }
 
 ensure_gapbs_data_disk() {
-  use_gapbs_data_disk || return 0
-
-  local image="${GAPBS_DATA_DISK_IMAGE}"
-  local mount_dir="${RUN_ROOT}/state/gapbs-data-disk-mnt"
-  local graph_rel="gapbs/${GAPBS_GRAPH_NAME}"
-  local expected_size actual_size
-  local rc=0 mounted=0 umount_rc=0
-  expected_size="$(stat -c '%s' "${GAPBS_GRAPH_HOST}")"
-  mkdir -p "$(dirname -- "${image}")" "${mount_dir}" "${HOST_LOG_DIR}"
-
-  if [[ ! -e "${image}" ]]; then
-    log "create GAPBS data disk ${image} size=${GAPBS_DATA_DISK_SIZE}"
-    drop_host_page_cache
-    truncate -s "${GAPBS_DATA_DISK_SIZE}" "${image}"
-    /sbin/mkfs.ext4 -F -L "${GAPBS_DATA_DISK_LABEL}" "${image}" \
-      > "${HOST_LOG_DIR:-${RUN_ROOT}/host-logs}/gapbs-data-disk.mkfs.log" 2>&1
-  fi
-
-  if mountpoint -q "${mount_dir}"; then
-    as_root umount "${mount_dir}"
-  fi
-
-  set +e
-  as_root mount -o loop "${image}" "${mount_dir}"
-  rc=$?
-  if [[ "${rc}" == "0" ]]; then
-    mounted=1
-    actual_size="$(as_root stat -c '%s' "${mount_dir}/${graph_rel}" 2>/dev/null || printf '0')"
-    if [[ "${actual_size}" != "${expected_size}" ]]; then
-      log "populate GAPBS data disk graph=${GAPBS_GRAPH_HOST}"
-      as_root mkdir -p "${mount_dir}/gapbs" &&
-        as_root rm -f "${mount_dir}/${graph_rel}" &&
-        as_root cp --reflink=never "${GAPBS_GRAPH_HOST}" "${mount_dir}/${graph_rel}" &&
-        sync
-      rc=$?
-      if [[ "${rc}" == "0" ]]; then
-        actual_size="$(as_root stat -c '%s' "${mount_dir}/${graph_rel}")"
-        rc=$?
-      fi
-    fi
-    if [[ "${rc}" == "0" ]]; then
-      as_root chown -R root:root "${mount_dir}/gapbs"
-      rc=$?
-    fi
-    as_root umount "${mount_dir}"
-    umount_rc=$?
-    mounted=0
-    if [[ "${rc}" == "0" ]]; then
-      rc="${umount_rc}"
-    fi
-  fi
-  set -e
-  [[ "${mounted}" != "1" ]] || as_root umount "${mount_dir}" >/dev/null 2>&1 || true
-  [[ "${rc}" == "0" ]] || return "${rc}"
-  [[ "${actual_size}" == "${expected_size}" ]] ||
-    die "GAPBS data disk graph size mismatch: expected=${expected_size} actual=${actual_size}"
-  drop_host_page_cache
+  return 0
 }
 
 write_host_config() {
@@ -706,19 +609,13 @@ write_host_config() {
     printf 'controller_restart_grace_windows=%s\n' "${CONTROLLER_RESTART_GRACE_WINDOWS}"
     printf 'controller_numa_balancing_on=%s\n' "${CONTROLLER_NUMA_BALANCING_ON}"
     printf 'controller_numa_balancing_off=%s\n' "${CONTROLLER_NUMA_BALANCING_OFF}"
-    printf 'gapbs_graph_mode=prebuilt\n'
+    printf 'gapbs_graph_mode=generated\n'
     printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE}"
-    printf 'gapbs_graph_host=%s\n' "${GAPBS_GRAPH_HOST}"
-    printf 'gapbs_graph_path=%s\n' "${GAPBS_GRAPH_GUEST}"
-    printf 'gapbs_data_disk=%s\n' "${GAPBS_DATA_DISK}"
-    printf 'gapbs_data_disk_image=%s\n' "${GAPBS_DATA_DISK_IMAGE}"
-    printf 'gapbs_data_disk_size=%s\n' "${GAPBS_DATA_DISK_SIZE}"
-    printf 'gapbs_data_disk_label=%s\n' "${GAPBS_DATA_DISK_LABEL}"
-    printf 'gapbs_data_disk_device=%s\n' "${GAPBS_DATA_DISK_DEVICE}"
-    printf 'gapbs_data_disk_mount=%s\n' "${GAPBS_DATA_DISK_MOUNT}"
-    printf 'gapbs_data_disk_qemu_cache=none\n'
-    printf 'gapbs_data_disk_qemu_aio=native\n'
-    printf 'graph_build_included=0\n'
+    printf 'gapbs_graph_path=generated:g%s\n' "${GAPBS_GRAPH_SCALE}"
+    printf 'gapbs_data_disk=0\n'
+    printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
+    printf 'compact_guest_memory=%s\n' "${COMPACT_GUEST_MEMORY}"
+    printf 'graph_build_included=1\n'
     printf 'pr_trials=%s\n' "${PR_TRIALS}"
     printf 'bc_trials=%s\n' "${BC_TRIALS}"
     printf 'silo_bin_host=%s\n' "${SILO_BIN_HOST}"
@@ -792,13 +689,6 @@ boot_vm() {
   )
   [[ -z "${INITRD:-}" ]] || args+=(--initrd "${INITRD}")
   [[ -z "${CXL_FMW_SIZE:-}" ]] || args+=(--cxl-fmw-size "${CXL_FMW_SIZE}")
-  if use_gapbs_data_disk; then
-    args+=(
-      --qemu-extra -drive
-      --qemu-extra "file=${GAPBS_DATA_DISK_IMAGE},if=virtio,format=raw,cache=none,aio=native"
-    )
-  fi
-
   CURRENT_VM_NAME="${name}"
   log "boot ${CURRENT_LOCAL_LABEL}/${config} name=${name} port=${port} fast=${fast_mem}@host[${fast_host_node}] slow=${slow_mem}@host[${slow_host_node}]"
   vmctl_cmd "${args[@]}" > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.boot.log" 2>&1
@@ -986,7 +876,7 @@ stage_extra_workloads() {
 
 stage_common_workloads_once() {
   local config="$1" common_workloads="$2"
-  local stage_gapbs_graph=1
+  local stage_gapbs_graph=0
   if use_gapbs_data_disk; then
     stage_gapbs_graph=0
   fi
@@ -999,8 +889,6 @@ stage_common_workloads_once() {
     WORKLOADS="${common_workloads}" \
     BENCHMARK_DIR="${BENCHMARK_DIR}" \
     GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE}" \
-    GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST}" \
-    GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST}" \
     STAGE_GAPBS_GRAPH="${stage_gapbs_graph}" \
     LIBLINEAR_DATASET="${LIBLINEAR_DATASET}" \
     CLEAN="${CLEAN_STAGE}" \
@@ -1072,13 +960,13 @@ run_guest_config() {
   local guest_cmd rc attempt
 
   printf -v guest_cmd \
-    'OUTROOT=%q LOCAL_SIZE_GIB=%q CONFIGS=%q WORKLOADS=%q PROGRESS_BASE=%q PROGRESS_TOTAL=%q TIMEOUT_SEC=%q SAMPLE_INTERVAL_SEC=%q OMP_THREADS=%q MGLRU_ENABLED=%q NUMA_SCAN_SIZE_MB=%q NUMA_SCAN_PERIOD_MIN_MS=%q LOCAL_FAULT_RATE=%q REMOTE_FAULT_RATE=%q LOCAL_FAULT_SCAN_PERIOD_MS=%q LOCAL_FAULT_SCAN_SIZE_MB=%q REMOTE_FAULT_SCAN_PERIOD_MS=%q REMOTE_FAULT_SCAN_SIZE_MB=%q THP_MODE=%q THP_DEFRAG=%q REALWORLD_SIZE_PROFILE=%q VERIFY_REQUIRED_STATE=%q TRACE_BC_TRIAL_PROMOTIONS=%q RESUME=%q BENCHMARK_DIR=%q REALWORLD_CASE_RUNNER=%q GRAPH=%q GAPBS_GRAPH_SCALE=%q PR_ITERATIONS=%q PR_TOLERANCE=%q PR_TRIALS=%q BC_ITERATIONS=%q BC_TRIALS=%q GUPS_MEMORY_GB=%q GRAPH500_SCALE=%q XSBENCH_GRID=%q XSBENCH_PARTICLES=%q SILO_SCALE_FACTOR=%q SILO_OPS_PER_WORKER=%q LIBLINEAR_DATASET=%q CONTROLLER_WINDOW_SEC=%q CONTROLLER_LOCAL_RATE=%q CONTROLLER_REMOTE_RATE=%q CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB=%q CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB=%q CONTROLLER_MIN_LOCAL_PAGES=%q CONTROLLER_MIN_REMOTE_PAGES=%q CONTROLLER_CONSECUTIVE_EFFECTIVE=%q CONTROLLER_CONSECUTIVE_NO_IMPROVE=%q CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD=%q CONTROLLER_CONSECUTIVE_RESTART=%q CONTROLLER_RESTART_GRACE_WINDOWS=%q CONTROLLER_NUMA_BALANCING_ON=%q CONTROLLER_NUMA_BALANCING_OFF=%q /root/vm32_realworld/scripts/run_vm_sweep_guest.sh' \
+    'OUTROOT=%q LOCAL_SIZE_GIB=%q CONFIGS=%q WORKLOADS=%q PROGRESS_BASE=%q PROGRESS_TOTAL=%q TIMEOUT_SEC=%q SAMPLE_INTERVAL_SEC=%q OMP_THREADS=%q MGLRU_ENABLED=%q NUMA_SCAN_SIZE_MB=%q NUMA_SCAN_PERIOD_MIN_MS=%q LOCAL_FAULT_RATE=%q REMOTE_FAULT_RATE=%q LOCAL_FAULT_SCAN_PERIOD_MS=%q LOCAL_FAULT_SCAN_SIZE_MB=%q REMOTE_FAULT_SCAN_PERIOD_MS=%q REMOTE_FAULT_SCAN_SIZE_MB=%q THP_MODE=%q THP_DEFRAG=%q REALWORLD_SIZE_PROFILE=%q VERIFY_REQUIRED_STATE=%q TRACE_BC_TRIAL_PROMOTIONS=%q RESUME=%q BENCHMARK_DIR=%q REALWORLD_CASE_RUNNER=%q GAPBS_GRAPH_SCALE=%q DROP_GUEST_CACHES=%q COMPACT_GUEST_MEMORY=%q PR_ITERATIONS=%q PR_TOLERANCE=%q PR_TRIALS=%q BC_ITERATIONS=%q BC_TRIALS=%q GUPS_MEMORY_GB=%q GRAPH500_SCALE=%q XSBENCH_GRID=%q XSBENCH_PARTICLES=%q SILO_SCALE_FACTOR=%q SILO_OPS_PER_WORKER=%q LIBLINEAR_DATASET=%q CONTROLLER_WINDOW_SEC=%q CONTROLLER_LOCAL_RATE=%q CONTROLLER_REMOTE_RATE=%q CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB=%q CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB=%q CONTROLLER_MIN_LOCAL_PAGES=%q CONTROLLER_MIN_REMOTE_PAGES=%q CONTROLLER_CONSECUTIVE_EFFECTIVE=%q CONTROLLER_CONSECUTIVE_NO_IMPROVE=%q CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD=%q CONTROLLER_CONSECUTIVE_RESTART=%q CONTROLLER_RESTART_GRACE_WINDOWS=%q CONTROLLER_NUMA_BALANCING_ON=%q CONTROLLER_NUMA_BALANCING_OFF=%q /root/vm32_realworld/scripts/run_vm_sweep_guest.sh' \
     "${guest_base}" "${CURRENT_LOCAL_SIZE_GIB}" "${config}" "${WORKLOADS}" "${CURRENT_PROGRESS_BASE}" "${TOTAL_WORKLOAD_CASES}" \
     "${TIMEOUT_SEC}" "${SAMPLE_INTERVAL_SEC}" "${OMP_THREADS}" "${MGLRU_ENABLED}" "${NUMA_SCAN_SIZE_MB}" "${NUMA_SCAN_PERIOD_MIN_MS}" \
     "${LOCAL_FAULT_RATE}" "${REMOTE_FAULT_RATE}" "${LOCAL_FAULT_SCAN_PERIOD_MS}" "${LOCAL_FAULT_SCAN_SIZE_MB}" \
     "${REMOTE_FAULT_SCAN_PERIOD_MS}" "${REMOTE_FAULT_SCAN_SIZE_MB}" \
     "${THP_MODE}" "${THP_DEFRAG}" "${REALWORLD_SIZE_PROFILE}" "${VERIFY_REQUIRED_STATE}" "${TRACE_BC_TRIAL_PROMOTIONS}" "${RESUME}" "/root/benchmark" \
-    "/root/scripts/run_workload_case_guest.sh" "${GAPBS_GRAPH_GUEST}" "${GAPBS_GRAPH_SCALE}" \
+    "/root/scripts/run_workload_case_guest.sh" "${GAPBS_GRAPH_SCALE}" "${DROP_GUEST_CACHES}" "${COMPACT_GUEST_MEMORY}" \
     "${PR_ITERATIONS}" "${PR_TOLERANCE}" "${PR_TRIALS}" "${BC_ITERATIONS}" "${BC_TRIALS}" \
     "${GUPS_MEMORY_GB}" "${GRAPH500_SCALE}" "${XSBENCH_GRID}" "${XSBENCH_PARTICLES}" \
     "${SILO_SCALE_FACTOR:-800000}" "${SILO_OPS_PER_WORKER:-100000000}" "${LIBLINEAR_DATASET}" \
@@ -1198,10 +1086,6 @@ run_one_config() {
   fi
   if [[ "${rc}" == "0" ]]; then
     mount_gapbs_data_disk_guest "${config}" || rc=$?
-  fi
-  if [[ "${rc}" == "0" && "${GAPBS_DATA_DISK}" == "1" ]]; then
-    log "drop host page cache before workload run for ${CURRENT_LOCAL_LABEL}/${config}"
-    drop_host_page_cache > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.host-drop-caches.log" 2>&1 || rc=$?
   fi
   if [[ "${rc}" == "0" ]]; then
     set +e

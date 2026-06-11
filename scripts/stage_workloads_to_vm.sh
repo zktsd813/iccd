@@ -24,7 +24,7 @@ STAGE_JDK17="${STAGE_JDK17:-auto}"
 STAGE_DOTNET="${STAGE_DOTNET:-auto}"
 STAGE_DLRM_VENV="${STAGE_DLRM_VENV:-1}"
 STAGE_FRAMEWORKS="${STAGE_FRAMEWORKS:-0}"
-STAGE_GAPBS_GRAPH="${STAGE_GAPBS_GRAPH:-1}"
+STAGE_GAPBS_GRAPH="${STAGE_GAPBS_GRAPH:-0}"
 SSH_CONTROL_MASTER="${SSH_CONTROL_MASTER:-1}"
 SSH_CONTROL_PATH="${SSH_CONTROL_PATH:-/tmp/iccd-realworld-${PORT}.sock}"
 
@@ -59,9 +59,14 @@ GUEST_OMP_THREADS="${GUEST_OMP_THREADS:-32}"
 PR_ITERATIONS="${PR_ITERATIONS:-1}"
 PR_TRIALS="${PR_TRIALS:-1}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
-GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-kron_g${GAPBS_GRAPH_SCALE}.sg}"
-GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-${BENCHMARK_DIR}/gapbs/benchmark/graphs/${GAPBS_GRAPH_NAME}}"
-GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-/root/gapbs_graphs/${GAPBS_GRAPH_NAME}}"
+GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-}"
+GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-}"
+GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-}"
+if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
+  GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-kron_g${GAPBS_GRAPH_SCALE}.sg}"
+  GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-${BENCHMARK_DIR}/gapbs/benchmark/graphs/${GAPBS_GRAPH_NAME}}"
+  GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-/root/gapbs_graphs/${GAPBS_GRAPH_NAME}}"
+fi
 
 SSH_OPTS=(-p "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 SCP_OPTS=(-P "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -585,14 +590,17 @@ stage_liblinear() {
 
 stage_candidate_microbench() {
   local w="$1"
-  remote "mkdir -p /root/benchmark/vmitosis-workloads/bin /root/benchmark/XSBench/openmp-threading /root/benchmark/gapbs /root/gapbs_graphs"
+  remote "mkdir -p /root/benchmark/vmitosis-workloads/bin /root/benchmark/XSBench/openmp-threading /root/benchmark/gapbs"
+  if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
+    remote "mkdir -p /root/gapbs_graphs"
+  fi
   case "${w}" in
     pr|bc)
       stage_gapbs_source
       if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
         stage_gapbs_graph
       else
-        echo "skip GAPBS graph staging; guest graph path is external: ${GAPBS_GRAPH_GUEST}"
+        echo "skip GAPBS graph staging; GAPBS will generate graph at runtime: g${GAPBS_GRAPH_SCALE}"
       fi
       ;;
     gups|graph500|btree)
@@ -609,7 +617,7 @@ stage_candidate_microbench() {
       if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
         stage_gapbs_graph
       else
-        echo "skip GAPBS graph staging; guest graph path is external: ${GAPBS_GRAPH_GUEST}"
+        echo "skip GAPBS graph staging; GAPBS will generate graph at runtime: g${GAPBS_GRAPH_SCALE}"
       fi
       ;;
   esac
