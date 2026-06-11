@@ -90,10 +90,17 @@ resume hook so a target-convergence reboot continues the sweep in a new
 
 Current-host default plan:
 
-- target 16G: keep node0 24G, reserve `232G@0x680000000`
-- target 32G: keep node0 40G, reserve `216G@0xa80000000`
+- target 16G: keep node0 online setting `22G`, boot with
+  `maxcpus=32 nosmt memhp_default_state=online memmap=239488M$0x608000000`
+- target 32G: keep node0 online setting `39G`, boot with
+  `maxcpus=32 nosmt memhp_default_state=online memmap=217G$0xa40000000`
 - target 48G: keep node0 56G, reserve `200G@0xe80000000`
 
 The extra 8G above the requested target is intentional boot overhead. The
 script will tune it after reboot if the measured node 0 free memory misses the
-target window. The default target window is `target +/- 1G`.
+target window. The sweep runner uses the tuned 16G/32G cmdlines above when it
+switches targets, then lets `host_boot_target.sh converge` make any smaller
+post-reboot adjustment.  Same-target drift preserves the current boot plan
+instead of starting a fresh plan from a memmap-limited sysfs view.  The default
+target window is `target +/- 1G`; the runner verifies up to 6 times with 30s
+between attempts before rebooting for convergence.

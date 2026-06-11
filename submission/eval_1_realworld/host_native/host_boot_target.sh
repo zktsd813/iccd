@@ -36,6 +36,7 @@ ICCD_FROM_REBOOT_HOOK="${ICCD_FROM_REBOOT_HOOK:-0}"
 CPU_BOOT_MODE="${CPU_BOOT_MODE:-maxcpus}"
 ENABLE_NOSMT="${ENABLE_NOSMT:-1}"
 MEMHP_DEFAULT_STATE="${MEMHP_DEFAULT_STATE:-online}"
+BOOT_CMDLINE_OVERRIDE="${BOOT_CMDLINE_OVERRIDE:-}"
 
 APPLY=0
 REBOOT=0
@@ -75,6 +76,11 @@ Important environment defaults:
   VERIFY_DELAY_AFTER_REBOOT_SEC=30
   VERIFY_WARMUP_PR_AFTER_REBOOT=1
   VERIFY_WARMUP_PR_GRAPH=/Serverless/benchmark/gapbs/benchmark/graphs/kron_g29.sg
+
+Advanced:
+  BOOT_CMDLINE_OVERRIDE may be set by the sweep runner to apply a known-good
+  current-host cmdline for a target without regenerating a plan from a
+  memmap-limited boot.
 EOF
 }
 
@@ -304,6 +310,22 @@ generate_plan() {
   local online_gib="${NODE0_ONLINE_GIB:-}"
   [[ -n "${online_gib}" ]] || online_gib="$(default_online_gib)"
   [[ "${online_gib}" =~ ^[0-9]+$ ]] || die "--node0-online-gib must be an integer GiB"
+
+  if [[ -n "${BOOT_CMDLINE_OVERRIDE}" ]]; then
+    printf 'target_gib=%s\n' "${TARGET_GIB}"
+    printf 'node0_online_gib=%s\n' "${online_gib}"
+    printf 'block_mib=%s\n' "$(memory_block_mib)"
+    printf 'local_node=%s\n' "${LOCAL_NODE}"
+    printf 'keep_memory_nodes=%s\n' "${KEEP_MEMORY_NODES}"
+    printf 'excluded_ranges_count=override\n'
+    printf 'excluded_ranges=override\n'
+    printf 'kept_ranges=override\n'
+    printf 'offline_cpu_node=%s\n' "${OFFLINE_CPU_NODE}"
+    printf 'offline_cpu_count=override\n'
+    printf 'cmdline=%s\n' "${BOOT_CMDLINE_OVERRIDE}"
+    return 0
+  fi
+
   local preserve_cmdline=""
   if [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" && -r "${STATE_FILE}" ]]; then
     # shellcheck disable=SC1090
@@ -605,6 +627,18 @@ do_reboot() {
   fi
 }
 
+restore_full_boot_for_converge() {
+  need_root_for_apply
+  install_reboot_hook
+  if [[ -e "${GRUB_DROPIN}" ]]; then
+    rm -f "${GRUB_DROPIN}"
+    update_grub
+  fi
+  write_state "" "" "restore-for-converge"
+  log "restoring unrestricted boot first; convergence will continue after reboot"
+  do_reboot
+}
+
 cmd_status() {
   printf 'cmdline=%s\n' "$(cat /proc/cmdline)"
   printf 'cpu_online=%s\n' "$(cat /sys/devices/system/cpu/online 2>/dev/null || true)"
@@ -754,9 +788,35 @@ cmd_converge() {
   [[ "${APPLY}" == "1" ]] || die "converge requires --apply"
   need_root_for_apply
 
+  local previous_mode=""
+  if [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" && -r "${STATE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${STATE_FILE}" || true
+    previous_mode="${mode:-}"
+  fi
+  if [[ "${REBOOT}" == "1" &&
+        "${ICCD_FROM_REBOOT_HOOK}" == "1" &&
+        "${previous_mode}" == "restore-for-converge" ]]; then
+    [[ -n "${NODE0_ONLINE_GIB}" ]] || NODE0_ONLINE_GIB="$(default_online_gib)"
+    log "unrestricted boot restored; applying initial node0_online_gib=${NODE0_ONLINE_GIB} and rebooting"
+    cmd_apply
+    return 0
+  fi
+
   if [[ "${REBOOT}" == "1" && "${ICCD_FROM_REBOOT_HOOK}" != "1" ]]; then
     set_reboots 0
     [[ -n "${NODE0_ONLINE_GIB}" ]] || NODE0_ONLINE_GIB="$(default_online_gib)"
+    local plan_err
+    plan_err="$(mktemp)"
+    if ! generate_plan > /dev/null 2> "${plan_err}"; then
+      while IFS= read -r line; do
+        [[ -n "${line}" ]] && log "initial plan failed: ${line}"
+      done < "${plan_err}"
+      rm -f "${plan_err}"
+      restore_full_boot_for_converge
+      return 0
+    fi
+    rm -f "${plan_err}"
     log "starting convergence for ${TARGET_GIB}G; applying initial node0_online_gib=${NODE0_ONLINE_GIB} and rebooting"
     cmd_apply
     return 0

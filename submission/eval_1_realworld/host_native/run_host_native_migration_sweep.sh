@@ -51,11 +51,16 @@ LIBLINEAR_SOLVER="${LIBLINEAR_SOLVER:-6}"
 LIBLINEAR_THREADS="${LIBLINEAR_THREADS:-32}"
 POST_WORKLOAD_SLEEP_SEC="${POST_WORKLOAD_SLEEP_SEC:-5}"
 RESUME_WAIT_SEC="${RESUME_WAIT_SEC:-20}"
-VERIFY_RETRIES="${VERIFY_RETRIES:-3}"
+VERIFY_RETRIES="${VERIFY_RETRIES:-6}"
+VERIFY_RETRY_SLEEP_SEC="${VERIFY_RETRY_SLEEP_SEC:-30}"
 RAPL_PACKAGE_DOMAIN="${RAPL_PACKAGE_DOMAIN:-package-0}"
 RAPL_DRAM_DOMAIN="${RAPL_DRAM_DOMAIN:-dram}"
 IPMI_POWER_SAMPLING="${IPMI_POWER_SAMPLING:-1}"
 IPMI_POWER_INTERVAL_SEC="${IPMI_POWER_INTERVAL_SEC:-1}"
+HOST_BOOT_CMDLINE_16G="${HOST_BOOT_CMDLINE_16G:-maxcpus=32 nosmt memhp_default_state=online memmap=239488M\$0x608000000}"
+HOST_BOOT_NODE0_ONLINE_16G="${HOST_BOOT_NODE0_ONLINE_16G:-22}"
+HOST_BOOT_CMDLINE_32G="${HOST_BOOT_CMDLINE_32G:-maxcpus=32 nosmt memhp_default_state=online memmap=217G\$0xa40000000}"
+HOST_BOOT_NODE0_ONLINE_32G="${HOST_BOOT_NODE0_ONLINE_32G:-39}"
 
 RUN_ID="${RUN_ID:-}"
 TARGET_INDEX="${TARGET_INDEX:-0}"
@@ -120,6 +125,12 @@ save_state() {
     printf 'BC_TRIALS=%q\n' "${BC_TRIALS}"
     printf 'GRAPH500_BIN=%q\n' "${GRAPH500_BIN}"
     printf 'GRAPH500_SCALE=%q\n' "${GRAPH500_SCALE}"
+    printf 'VERIFY_RETRIES=%q\n' "${VERIFY_RETRIES}"
+    printf 'VERIFY_RETRY_SLEEP_SEC=%q\n' "${VERIFY_RETRY_SLEEP_SEC}"
+    printf 'HOST_BOOT_CMDLINE_16G=%q\n' "${HOST_BOOT_CMDLINE_16G}"
+    printf 'HOST_BOOT_NODE0_ONLINE_16G=%q\n' "${HOST_BOOT_NODE0_ONLINE_16G}"
+    printf 'HOST_BOOT_CMDLINE_32G=%q\n' "${HOST_BOOT_CMDLINE_32G}"
+    printf 'HOST_BOOT_NODE0_ONLINE_32G=%q\n' "${HOST_BOOT_NODE0_ONLINE_32G}"
     printf 'SILO_BIN=%q\n' "${SILO_BIN}"
     printf 'SILO_THREADS=%q\n' "${SILO_THREADS}"
     printf 'SILO_SCALE_FACTOR=%q\n' "${SILO_SCALE_FACTOR}"
@@ -195,6 +206,8 @@ tmux_env_prefix() {
     SILO_BIN SILO_THREADS SILO_SCALE_FACTOR SILO_OPS_PER_WORKER
     LIBLINEAR_TRAIN_BIN LIBLINEAR_DATASET LIBLINEAR_SOLVER LIBLINEAR_THREADS
     TMUX_BIN TMUX_SESSION TMUX_LOG
+    HOST_BOOT_CMDLINE_16G HOST_BOOT_NODE0_ONLINE_16G
+    HOST_BOOT_CMDLINE_32G HOST_BOOT_NODE0_ONLINE_32G
   )
   for name in "${names[@]}"; do
     printf '%s=%q ' "${name}" "${!name}"
@@ -257,6 +270,46 @@ wait_for_converge_if_running() {
   done
 }
 
+target_static_cmdline() {
+  local target="$1" var value
+  var="HOST_BOOT_CMDLINE_${target}G"
+  value="${!var-}"
+  printf '%s\n' "${value}"
+}
+
+target_static_online_gib() {
+  local target="$1" var value
+  var="HOST_BOOT_NODE0_ONLINE_${target}G"
+  value="${!var-}"
+  printf '%s\n' "${value}"
+}
+
+converge_current_target_and_reboot() {
+  local target="$1" reason="$2"
+  log "${reason}; preserving current boot plan and rebooting for target=${target}G convergence"
+  save_state
+  MAX_REBOOTS=4 ICCD_FROM_REBOOT_HOOK=1 VERIFY_WARMUP_PR_AFTER_REBOOT=0 \
+    "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
+  exit 0
+}
+
+apply_target_boot_and_reboot() {
+  local target="$1"
+  local cmdline online_gib
+  cmdline="$(target_static_cmdline "${target}")"
+  online_gib="$(target_static_online_gib "${target}")"
+  save_state
+  if [[ -n "${cmdline}" && -n "${online_gib}" ]]; then
+    log "switching to target=${target}G with current-host boot cmdline and rebooting"
+    MAX_REBOOTS=4 BOOT_CMDLINE_OVERRIDE="${cmdline}" \
+      "${HOST_BOOT_SCRIPT}" apply --target-gib "${target}" --node0-online-gib "${online_gib}" --apply --reboot
+  else
+    log "switching to target=${target}G; no static cmdline configured, starting convergence and reboot"
+    MAX_REBOOTS=4 "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
+  fi
+  exit 0
+}
+
 verify_target_or_reboot() {
   local target="$1"
   local outdir="$2"
@@ -273,13 +326,12 @@ verify_target_or_reboot() {
       return 0
     fi
     log "target ${target}G not ready before workload; attempt=${attempt}; see ${verify_log}"
-    sleep 5
+    if (( attempt < VERIFY_RETRIES )); then
+      sleep "${VERIFY_RETRY_SLEEP_SEC}"
+    fi
   done
 
-  log "target ${target}G is not in window; starting convergence and reboot"
-  save_state
-  MAX_REBOOTS=4 "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
-  exit 0
+  converge_current_target_and_reboot "${target}" "target ${target}G is not in window after ${VERIFY_RETRIES} verify attempts"
 }
 
 set_migration_mode() {
@@ -473,10 +525,8 @@ run_one_workload() {
   set_migration_mode "${migration}"
   drop_caches
   if ! target_ok "${target}"; then
-    log "target ${target}G drifted after setting migration=${migration}; starting convergence and reboot"
-    save_state
-    MAX_REBOOTS=4 "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
-    exit 0
+    log "target ${target}G drifted after setting migration=${migration}; retrying verify before convergence"
+    verify_target_or_reboot "${target}" "${outdir}/verify.after_migration"
   fi
   free_before="$(node_memfree_mib "${LOCAL_NODE}" 2>/dev/null || printf 0)"
   snapshot_common "${outdir}" "before"
@@ -578,9 +628,7 @@ advance_indices() {
     split_words "${TARGETS}"
     local next_target="${SPLIT_WORDS[${TARGET_INDEX}]}"
     if ! target_ok "${next_target}"; then
-      log "switching to next target=${next_target}G; starting convergence and reboot"
-      MAX_REBOOTS=4 "${HOST_BOOT_SCRIPT}" converge --target-gib "${next_target}" --apply --reboot
-      exit 0
+      apply_target_boot_and_reboot "${next_target}"
     fi
   fi
 }
@@ -646,6 +694,8 @@ start_run() {
     printf 'liblinear_args=-s %s -m %s %s <outdir>/kdd12.model\n' \
       "${LIBLINEAR_SOLVER}" "${LIBLINEAR_THREADS}" "${LIBLINEAR_DATASET}"
     printf 'post_workload_sleep_sec=%s\n' "${POST_WORKLOAD_SLEEP_SEC}"
+    printf 'verify_retries=%s\n' "${VERIFY_RETRIES}"
+    printf 'verify_retry_sleep_sec=%s\n' "${VERIFY_RETRY_SLEEP_SEC}"
     printf 'rapl_package_domain=%s\n' "${RAPL_PACKAGE_DOMAIN}"
     printf 'rapl_dram_domain=%s\n' "${RAPL_DRAM_DOMAIN}"
     printf 'ipmi_power_sampling=%s\n' "${IPMI_POWER_SAMPLING}"
