@@ -81,14 +81,14 @@ sudo tmux attach -t eval1-host-native-sweep
 ```
 
 The default sweep uses targets `16 32`, migration modes `off on`, and
-workloads `pr bc gups btree silo liblinear`.  GAPBS reads the prebuilt
-`kron_g29.sg` graph.  PR and BC both use 4 trials by default.  Silo uses the existing dbtest binary with YCSB
-`--scale-factor 800000 --ops-per-worker=100000000 --num-threads 32`.
-Liblinear uses the existing `kdd12` dataset with `train -s 6 -m 32`, writing
-the model file into the per-workload result directory.  The runner persists
-state under `/var/lib/iccd/eval1-host-native-migration-sweep` and installs an
-`@reboot` resume hook so a target-convergence reboot continues the sweep in a
-new `eval1-host-native-sweep` tmux session.
+workloads `pr bc gups btree graph500 liblinear`.  GAPBS reads the prebuilt
+`kron_g29.sg` graph.  PR and BC both use 4 trials by default.  Graph500 uses
+`bench_graph500_mt -s 28`.  Liblinear uses the existing `kdd12` dataset with
+`train -s 6 -m 32`, writing the model file into the per-workload result
+directory.  The runner persists state under
+`/var/lib/iccd/eval1-host-native-migration-sweep` and installs an `@reboot`
+resume hook so a target-convergence reboot continues the sweep in a new
+`eval1-host-native-sweep` tmux session.
 
 Current-host default plan:
 

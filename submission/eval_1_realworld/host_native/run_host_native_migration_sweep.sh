@@ -18,7 +18,7 @@ CPU_NODE="${CPU_NODE:-0}"
 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB:-1}"
 TARGETS="${TARGETS:-16 32}"
 MIGRATION_MODES="${MIGRATION_MODES:-off on}"
-WORKLOADS="${WORKLOADS:-pr bc gups btree silo liblinear}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 liblinear}"
 
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
 GAPBS_GRAPH="${GAPBS_GRAPH:-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g${GAPBS_GRAPH_SCALE}.sg}"
@@ -26,6 +26,7 @@ PR_BIN="${PR_BIN:-/Serverless/benchmark/gapbs/pr}"
 BC_BIN="${BC_BIN:-/Serverless/benchmark/gapbs/bc}"
 GUPS_BIN="${GUPS_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_gups_mt}"
 BTREE_BIN="${BTREE_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_btree_mt}"
+GRAPH500_BIN="${GRAPH500_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_graph500_mt}"
 SILO_BIN="${SILO_BIN:-/Serverless/benchmark/silo/out-perf.masstree/benchmarks/dbtest}"
 LIBLINEAR_TRAIN_BIN="${LIBLINEAR_TRAIN_BIN:-/Serverless/benchmark/liblinear-multicore-2.47/train}"
 LIBLINEAR_DATASET="${LIBLINEAR_DATASET:-/Serverless/benchmark/liblinear-multicore-2.47/datasets/kdd12}"
@@ -42,6 +43,7 @@ PR_TOLERANCE="${PR_TOLERANCE:-1e-4}"
 PR_TRIALS="${PR_TRIALS:-4}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
 BC_TRIALS="${BC_TRIALS:-4}"
+GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 SILO_THREADS="${SILO_THREADS:-32}"
 SILO_SCALE_FACTOR="${SILO_SCALE_FACTOR:-800000}"
 SILO_OPS_PER_WORKER="${SILO_OPS_PER_WORKER:-100000000}"
@@ -116,6 +118,8 @@ save_state() {
     printf 'PR_TRIALS=%q\n' "${PR_TRIALS}"
     printf 'BC_ITERATIONS=%q\n' "${BC_ITERATIONS}"
     printf 'BC_TRIALS=%q\n' "${BC_TRIALS}"
+    printf 'GRAPH500_BIN=%q\n' "${GRAPH500_BIN}"
+    printf 'GRAPH500_SCALE=%q\n' "${GRAPH500_SCALE}"
     printf 'SILO_BIN=%q\n' "${SILO_BIN}"
     printf 'SILO_THREADS=%q\n' "${SILO_THREADS}"
     printf 'SILO_SCALE_FACTOR=%q\n' "${SILO_SCALE_FACTOR}"
@@ -187,6 +191,7 @@ tmux_env_prefix() {
     RUN_ID TARGETS MIGRATION_MODES WORKLOADS RESULTS_ROOT
     GAPBS_GRAPH GAPBS_GRAPH_SCALE
     PR_ITERATIONS PR_TOLERANCE PR_TRIALS BC_ITERATIONS BC_TRIALS
+    GRAPH500_BIN GRAPH500_SCALE
     SILO_BIN SILO_THREADS SILO_SCALE_FACTOR SILO_OPS_PER_WORKER
     LIBLINEAR_TRAIN_BIN LIBLINEAR_DATASET LIBLINEAR_SOLVER LIBLINEAR_THREADS
     TMUX_BIN TMUX_SESSION TMUX_LOG
@@ -431,6 +436,10 @@ workload_command() {
     btree)
       WORKLOAD_CMD=("${BTREE_BIN}")
       ;;
+    graph500)
+      [[ -x "${GRAPH500_BIN}" ]] || die "missing executable Graph500 benchmark: ${GRAPH500_BIN}"
+      WORKLOAD_CMD=("${GRAPH500_BIN}" -s "${GRAPH500_SCALE}")
+      ;;
     silo)
       [[ -x "${SILO_BIN}" ]] || die "missing executable Silo dbtest: ${SILO_BIN}"
       WORKLOAD_CMD=("${SILO_BIN}" --verbose --bench ycsb --num-threads "${SILO_THREADS}" \
@@ -627,6 +636,8 @@ start_run() {
     printf 'bc_args=-f %s -i %s -n %s\n' "${GAPBS_GRAPH}" "${BC_ITERATIONS}" "${BC_TRIALS}"
     printf 'gups_bin=%s\n' "${GUPS_BIN}"
     printf 'btree_bin=%s\n' "${BTREE_BIN}"
+    printf 'graph500_bin=%s\n' "${GRAPH500_BIN}"
+    printf 'graph500_args=-s %s\n' "${GRAPH500_SCALE}"
     printf 'silo_bin=%s\n' "${SILO_BIN}"
     printf 'silo_args=--verbose --bench ycsb --num-threads %s --scale-factor %s --ops-per-worker=%s\n' \
       "${SILO_THREADS}" "${SILO_SCALE_FACTOR}" "${SILO_OPS_PER_WORKER}"
