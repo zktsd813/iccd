@@ -1368,10 +1368,15 @@ struct task_struct {
 	unsigned long			numa_migrate_retry;
 	/* Migration stamp: */
 	u64				node_stamp;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	u64				numa_sampler_stamp;
+#endif
 	u64				last_task_numa_placement;
 	u64				last_sum_exec_runtime;
-	struct callback_head		numa_work
-	;
+	struct callback_head		numa_work;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	struct callback_head		numa_sampler_work;
+#endif
 
 	/*
 	 * This pointer is only modified for current in syscall and

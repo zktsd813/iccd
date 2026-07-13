@@ -2062,6 +2062,10 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 		nid = NUMA_NO_NODE;
 	if (target_nid == NUMA_NO_NODE)
 		goto out_map;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (!numa_balancing_migration_enabled())
+		goto out_map;
+#endif
 	if (migrate_misplaced_folio_prepare(folio, vma, target_nid)) {
 		flags |= TNF_MIGRATE_FAIL;
 		goto out_map;
@@ -2433,9 +2437,9 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 			goto unlock;
 
 		if (folio_use_access_time(folio)) {
+			numa_account_remote_scan_pte(vma->vm_mm);
 			folio_xchg_access_time(folio,
 					       jiffies_to_msecs(jiffies));
-			numa_account_remote_fault_pte(folio, HPAGE_PMD_NR);
 		}
 	}
 	/*

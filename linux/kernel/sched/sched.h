@@ -98,26 +98,6 @@ struct cpuidle_state;
 
 extern __read_mostly int scheduler_running;
 
-#if defined(CONFIG_DEBUG_FS) && defined(CONFIG_NUMA_BALANCING)
-DECLARE_STATIC_KEY_FALSE(sched_reuse_time_key);
-static inline bool sched_reuse_time_enabled(void)
-{
-	return static_branch_unlikely(&sched_reuse_time_key);
-}
-void sched_reuse_time_record(struct task_struct *p, struct folio *folio,
-			     int src_nid, unsigned int latency_ms);
-#else
-static inline bool sched_reuse_time_enabled(void)
-{
-	return false;
-}
-static inline void sched_reuse_time_record(struct task_struct *p,
-					   struct folio *folio, int src_nid,
-					   unsigned int latency_ms)
-{
-}
-#endif
-
 extern unsigned long calc_load_update;
 extern atomic_long_t calc_load_tasks;
 
@@ -2835,12 +2815,6 @@ extern int sysctl_resched_latency_warn_ms;
 extern int sysctl_resched_latency_warn_once;
 
 extern unsigned int sysctl_sched_tunable_scaling;
-
-extern unsigned int sysctl_numa_balancing_scan_delay;
-extern unsigned int sysctl_numa_balancing_scan_period_min;
-extern unsigned int sysctl_numa_balancing_scan_period_max;
-extern unsigned int sysctl_numa_balancing_scan_size;
-extern unsigned int sysctl_numa_balancing_hot_threshold;
 
 #ifdef CONFIG_SCHED_HRTICK
 

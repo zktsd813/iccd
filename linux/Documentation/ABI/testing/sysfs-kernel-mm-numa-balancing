@@ -1,50 +1,130 @@
+What:		/sys/kernel/mm/numa_balancing/numa_scan_size_mb
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write size, in megabytes, of the virtual address range
+		processed by each normal automatic NUMA-balancing scan. The value
+		must be non-zero. Writes require CAP_SYS_ADMIN.
+
+What:		/sys/kernel/mm/numa_balancing/numa_scan_period_min_ms
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write lower bound, in milliseconds, for the adaptive normal
+		NUMA-balancing scan period. The value must be non-zero. Writes
+		require CAP_SYS_ADMIN.
+
+What:		/sys/kernel/mm/numa_balancing/numa_scan_period_max_ms
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write upper bound, in milliseconds, for the adaptive normal
+		NUMA-balancing scan period. The value must be non-zero. Writes
+		require CAP_SYS_ADMIN.
+
+What:		/sys/kernel/mm/numa_balancing/numa_scan_delay_ms
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write initial delay, in milliseconds, before normal automatic
+		NUMA balancing begins scanning a task. Zero starts scanning without
+		an initial delay. Writes require CAP_SYS_ADMIN.
+
 What:		/sys/kernel/mm/numa_balancing/local_fault_rate
 Date:		May 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
-		Read-write percentage controlling local-fault sampling for
-		NUMA memory tiering diagnostics. A value of 0 disables local
-		fault sampling. Values from 1 to 100 enable sampling at the
-		requested PFN selection rate.
+		Read-write percentage controlling local-tier refault sampling.
+		Zero disables the local sampler. Values from 1 through 100 select
+		base-page PFNs at the requested rate.
 
-		When non-zero, the local-fault sampler is active even if
-		kernel.numa_balancing is 0. In that state regular NUMA balancing
-		migration remains disabled, but the local-fault probe/refault
-		accounting path can still run.
+		The local sampler can run while kernel.numa_balancing is zero.
+		It installs NUMA protection probes but does not enable migration.
 
 What:		/sys/kernel/mm/numa_balancing/local_fault_scan_period_ms
 Date:		May 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
-		Read-write scan period, in milliseconds, used by the global
-		local-fault sampling scan.
+		Read-write local-tier sampling period in milliseconds. The value
+		must be non-zero.
 
 What:		/sys/kernel/mm/numa_balancing/local_fault_scan_size_mb
 Date:		May 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
-		Read-write maximum local-fault scan size, in megabytes, for one
-		task NUMA scan period.
-
-What:		/sys/kernel/mm/numa_balancing/local_fault_refault_hit_ms
-Date:		May 2026
-Contact:	Linux memory management mailing list <linux-mm@kvack.org>
-Description:
-		Read-write latency threshold, in milliseconds. Local-fault
-		refaults no later than this threshold are counted as hits.
+		Read-write maximum amount of local-tier memory, in megabytes, for
+		which probes are installed during one sampler invocation. The value
+		must be non-zero. The default is 64 megabytes.
 
 What:		/sys/kernel/mm/numa_balancing/local_fault_window
 Date:		May 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
-		Read-write sampling window sequence. Reading returns the current
-		window sequence. Writing any value advances the window and resets
-		the newly selected per-window bucket.
+		Read-write sampling-window sequence. Reading returns the current
+		sequence. Writing a non-zero integer advances the sequence. Local
+		and remote KLL sketches are reset lazily when their first sample for
+		the new sequence arrives.
 
-What:		/sys/kernel/mm/numa_balancing/local_fault_stats
-Date:		May 2026
+What:		/sys/kernel/mm/numa_balancing/remote_scan_cycles
+Date:		July 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
-		Read-only flat-keyed diagnostic file showing global local-fault
-		sampling counters, current knob values, and current-window
-		PTE/refault/lost-page counters.
+		Read-only cumulative count of completed normal NUMA address-space
+		scan passes that installed at least one remote-tier access-time
+		probe. A controller can use changes in this counter to align a
+		sampling window with remote scan progress.
+
+What:		/sys/kernel/mm/numa_balancing/fault_latency_quantiles
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-only weighted-KLL snapshot for the current sampling window.
+		All values in one read come from the same copied sketch snapshot.
+		The quantile_snapshot_v4 schema contains:
+
+		schema
+		window_seq
+		algorithm
+		value_source
+		local_total
+		remote_total
+		local_q75_ns
+		remote_query_rank_ppm
+		remote_query_q_ns
+		remote_query_valid
+		remote_cdf_lt_local_q75_ppm
+		remote_cdf_le_local_q75_ppm
+
+		The totals are page-weighted sample counts. local_q75_ns is zero
+		when there are no local samples. The CDF fields are integer parts
+		per million in [0, 1000000], evaluated at local_q75_ns. The _lt_
+		field excludes remote samples equal to local P75; the _le_ field
+		includes them.
+
+		remote_query_rank_ppm echoes the value of remote_quantile_rank_ppm
+		captured at the start of this read. When that rank is in [1, 1000000]
+		and the copied remote sketch is nonempty, remote_query_valid is one
+		and remote_query_q_ns is the smallest latency whose inclusive remote
+		CDF reaches that rank. Otherwise remote_query_valid and
+		remote_query_q_ns are zero. A valid quantile can itself be zero, so
+		consumers must check remote_query_valid rather than using the
+		quantile value as a validity test.
+
+What:		/sys/kernel/mm/numa_balancing/remote_quantile_rank_ppm
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write remote weighted-KLL query rank in integer parts per
+		million. Values in [1, 1000000] select the inverse inclusive-CDF
+		quantile returned by fault_latency_quantiles. Zero disables the
+		query. Other values are rejected. Writing this query parameter does
+		not advance the sampling window or change the sampling policy.
+
+What:		/sys/kernel/mm/numa_balancing/migration_enabled
+Date:		July 2026
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:
+		Read-write Boolean gate for NUMA-balancing page migration. Zero
+		keeps normal NUMA scanning, protection faults, and latency sampling
+		active while rejecting page moves. One permits migrations selected
+		by the active NUMA-balancing mode.

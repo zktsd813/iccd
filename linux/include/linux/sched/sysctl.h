@@ -39,6 +39,10 @@ static inline bool numa_balancing_mode_tpp(int mode)
 
 #ifdef CONFIG_NUMA_BALANCING
 extern int sysctl_numa_balancing_mode;
+extern unsigned int sysctl_numa_balancing_scan_delay;
+extern unsigned int sysctl_numa_balancing_scan_period_min;
+extern unsigned int sysctl_numa_balancing_scan_period_max;
+extern unsigned int sysctl_numa_balancing_scan_size;
 #else
 #define sysctl_numa_balancing_mode	0
 #endif

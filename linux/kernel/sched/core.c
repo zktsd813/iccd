@@ -4509,8 +4509,7 @@ static void __set_numabalancing_state(bool enabled)
 void sched_numa_balancing_update_state(void)
 {
 	__set_numabalancing_state(READ_ONCE(sysctl_numa_balancing_mode) ||
-				  numa_local_fault_sampling_enabled() ||
-				  numa_remote_fault_sampling_enabled());
+				  numa_local_fault_sampling_enabled());
 }
 #endif
 

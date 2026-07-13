@@ -4870,8 +4870,9 @@ static void uncharge_folio(struct folio *folio, struct uncharge_gather *ug)
 	}
 
 	nr_pages = folio_nr_pages(folio);
-	if (folio_test_clear_local_tiering_sampled(folio))
-		numa_account_local_fault_lost(folio, nr_pages);
+#ifdef CONFIG_NUMA_BALANCING_MT
+	folio_clear_local_tiering_sampled(folio);
+#endif
 
 	if (folio_memcg_kmem(folio)) {
 		ug->nr_memory += nr_pages;

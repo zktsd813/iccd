@@ -1989,32 +1989,23 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 		struct pglist_data *pgdat;
 		unsigned long rate_limit;
 		unsigned int latency, th, def_th, hot_th;
-		bool reuse_time_enabled;
 		long nr = folio_nr_pages(folio);
 
 		pgdat = NODE_DATA(dst_nid);
-		count_vm_numa_event(NUMA_PROMOTE_ACCESS);
-		count_vm_numa_events(NUMA_PROMOTE_ACCESS_PAGES, nr);
 
-		reuse_time_enabled = sched_reuse_time_enabled();
 		latency = numa_hint_fault_latency(folio);
 		numa_account_remote_fault_latency(folio, nr, latency);
-		if (reuse_time_enabled)
-			sched_reuse_time_record(p, folio, src_nid, latency);
+
+		if (!numa_balancing_migration_enabled())
+			return false;
 
 		if (numa_balancing_mode_tpp(task_numa_balancing_mode(p))) {
 			if (!numa_tpp_folio_active(folio)) {
 				folio_mark_accessed(folio);
-				count_vm_numa_event(NUMA_TPP_INACTIVE_REJECT);
-				count_vm_numa_events(NUMA_TPP_INACTIVE_REJECT_PAGES, nr);
 				return false;
 			}
 
 			mod_node_page_state(pgdat, PGPROMOTE_CANDIDATE, nr);
-			count_vm_numa_event(NUMA_TPP_ACTIVE_CANDIDATE);
-			count_vm_numa_events(NUMA_TPP_ACTIVE_CANDIDATE_PAGES, nr);
-			count_vm_numa_event(NUMA_PROMOTE_TRY);
-			count_vm_numa_events(NUMA_PROMOTE_TRY_PAGES, nr);
 			return true;
 		}
 
@@ -2022,10 +2013,6 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			/* workload changed, reset hot threshold */
 			pgdat->nbp_threshold = 0;
 			mod_node_page_state(pgdat, PGPROMOTE_CANDIDATE_NRL, nr);
-			count_vm_numa_event(NUMA_PROMOTE_NRL);
-			count_vm_numa_events(NUMA_PROMOTE_NRL_PAGES, nr);
-			count_vm_numa_event(NUMA_PROMOTE_TRY);
-			count_vm_numa_events(NUMA_PROMOTE_TRY_PAGES, nr);
 			return true;
 		}
 
@@ -2039,22 +2026,12 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			th = pgdat->nbp_threshold ? : def_th;
 		}
 
-		if (latency >= th) {
-			count_vm_numa_event(NUMA_PROMOTE_LATENCY_REJECT);
-			count_vm_numa_events(NUMA_PROMOTE_LATENCY_REJECT_PAGES, nr);
+		if (latency >= th)
 			return false;
-		}
 
-		count_vm_numa_event(NUMA_PROMOTE_HOT);
-		count_vm_numa_events(NUMA_PROMOTE_HOT_PAGES, nr);
-
-		if (numa_promotion_rate_limit(pgdat, rate_limit, nr)) {
-			count_vm_numa_event(NUMA_PROMOTE_RATE_LIMIT_REJECT);
-			count_vm_numa_events(NUMA_PROMOTE_RATE_LIMIT_REJECT_PAGES, nr);
+		if (numa_promotion_rate_limit(pgdat, rate_limit, nr))
 			return false;
-		}
-		count_vm_numa_event(NUMA_PROMOTE_TRY);
-		count_vm_numa_events(NUMA_PROMOTE_TRY_PAGES, nr);
+
 		return true;
 	}
 
@@ -3360,6 +3337,7 @@ static void reset_ptenuma_scan(struct task_struct *p)
 	 * statistical sampling. Use READ_ONCE/WRITE_ONCE, which are not
 	 * expensive, to avoid any form of compiler optimizations:
 	 */
+	numa_account_remote_scan_cycle(p->mm);
 	WRITE_ONCE(p->mm->numa_scan_seq, READ_ONCE(p->mm->numa_scan_seq) + 1);
 	p->mm->numa_scan_offset = 0;
 }
@@ -3405,8 +3383,7 @@ static bool vma_is_accessed(struct mm_struct *mm, struct vm_area_struct *vma)
 static bool task_numa_balancing_enabled(struct task_struct *p)
 {
 	return (task_numa_balancing_mode(p) > 0 ||
-		task_numa_local_fault_sampling_enabled(p) ||
-		task_numa_remote_fault_sampling_enabled(p));
+		task_numa_local_fault_sampling_enabled(p));
 }
 
 #define NUMA_LOCAL_FAULT_RETARGET_PERIODS	4U
@@ -3439,34 +3416,6 @@ static int task_numa_local_fault_next_node(int nid)
 	return NUMA_NO_NODE;
 }
 
-static bool task_numa_remote_fault_eligible_node(int nid)
-{
-	if (nid < 0 || nid >= nr_node_ids)
-		return false;
-	if (!node_state(nid, N_MEMORY))
-		return false;
-	if (cpusets_enabled() && !node_isset(nid, cpuset_current_mems_allowed))
-		return false;
-	if (!node_is_promotion_source(nid))
-		return false;
-
-	return true;
-}
-
-static int task_numa_remote_fault_next_node(int nid)
-{
-	int i;
-
-	for (i = 1; i <= nr_node_ids; i++) {
-		int next = (nid + i + nr_node_ids) % nr_node_ids;
-
-		if (task_numa_remote_fault_eligible_node(next))
-			return next;
-	}
-
-	return NUMA_NO_NODE;
-}
-
 static struct numa_local_fault_mm_state *
 task_numa_local_fault_state(struct mm_struct *mm)
 {
@@ -3484,7 +3433,6 @@ task_numa_local_fault_state(struct mm_struct *mm)
 
 	spin_lock_init(&state->lock);
 	state->target_nid = NUMA_NO_NODE;
-	state->remote_target_nid = NUMA_NO_NODE;
 	old = cmpxchg(&mm->numa_local_fault_state, NULL, state);
 	if (old) {
 		kfree(state);
@@ -3509,22 +3457,6 @@ static void task_numa_local_fault_pull_next_scan(struct mm_struct *mm)
 	spin_unlock_irqrestore(&state->lock, flags);
 }
 
-static void task_numa_remote_fault_pull_next_scan(struct mm_struct *mm)
-{
-	struct numa_local_fault_mm_state *state;
-	unsigned long flags;
-
-	state = READ_ONCE(mm->numa_local_fault_state);
-	if (!state)
-		return;
-
-	spin_lock_irqsave(&state->lock, flags);
-	if (!state->remote_next_scan ||
-	    time_after(state->remote_next_scan, jiffies))
-		state->remote_next_scan = jiffies;
-	spin_unlock_irqrestore(&state->lock, flags);
-}
-
 static bool task_numa_local_fault_scan_due(struct task_struct *p)
 {
 	struct numa_local_fault_mm_state *state;
@@ -3540,19 +3472,9 @@ static bool task_numa_local_fault_scan_due(struct task_struct *p)
 	return !time_before(jiffies, READ_ONCE(state->next_scan));
 }
 
-static bool task_numa_remote_fault_scan_due(struct task_struct *p)
+static unsigned int task_numa_sampler_scan_period_ms(struct task_struct *p)
 {
-	struct numa_local_fault_mm_state *state;
-
-	if (!task_numa_remote_fault_sampling_enabled(p) ||
-	    !task_numa_remote_fault_scan_size_mb(p))
-		return false;
-
-	state = READ_ONCE(p->mm->numa_local_fault_state);
-	if (!state)
-		return true;
-
-	return !time_before(jiffies, READ_ONCE(state->remote_next_scan));
+	return task_numa_local_fault_scan_period_ms(p);
 }
 
 static bool task_numa_try_scan_local_faults(struct task_struct *p,
@@ -3562,7 +3484,6 @@ static bool task_numa_try_scan_local_faults(struct task_struct *p,
 	struct numa_local_fault_node_state *scan_state;
 	unsigned long flags;
 	unsigned long period;
-	unsigned long installed;
 	unsigned int local_scan_mb;
 	unsigned int period_ms;
 	int local_nid, target_nid, next_nid;
@@ -3601,13 +3522,11 @@ static bool task_numa_try_scan_local_faults(struct task_struct *p,
 
 	if (target_nid != local_nid) {
 		state->misses++;
-		numa_account_local_fault_target_miss(target_nid);
-		if (time_before(now, state->next_scan +
-				NUMA_LOCAL_FAULT_RETARGET_PERIODS * period)) {
+		if (state->misses < NUMA_LOCAL_FAULT_RETARGET_PERIODS) {
+			state->next_scan = now + period;
 			spin_unlock_irqrestore(&state->lock, flags);
 			return false;
 		}
-		numa_account_local_fault_retarget(target_nid, local_nid);
 		target_nid = local_nid;
 		state->target_nid = target_nid;
 		state->misses = 0;
@@ -3622,89 +3541,45 @@ static bool task_numa_try_scan_local_faults(struct task_struct *p,
 	state->misses = 0;
 	spin_unlock_irqrestore(&state->lock, flags);
 
-	installed = task_numa_scan_local_faults(
+	task_numa_scan_local_faults(
 		p, local_nid,
 		(unsigned long)local_scan_mb << (20 - PAGE_SHIFT),
 		scan_state);
-	numa_account_local_fault_scan(local_nid, installed);
 
 	return true;
 }
 
-static bool task_numa_try_scan_remote_faults(struct task_struct *p,
-					     unsigned long now)
+static void task_numa_sampler_work(struct callback_head *work)
 {
-	struct numa_local_fault_mm_state *state;
-	struct numa_local_fault_node_state *scan_state;
-	unsigned long flags;
-	unsigned long period;
-	unsigned long installed;
-	unsigned int remote_scan_mb;
-	unsigned int period_ms;
-	int target_nid, next_nid;
+	unsigned long now = jiffies;
+	struct task_struct *p = current;
+	u64 runtime = p->se.sum_exec_runtime;
+	bool scanned = false;
 
-	if (!task_numa_remote_fault_sampling_enabled(p))
-		return false;
+	work->next = work;
+	if (p->flags & PF_EXITING)
+		return;
+	if (!p->mm)
+		return;
 
-	remote_scan_mb = task_numa_remote_fault_scan_size_mb(p);
-	period_ms = task_numa_remote_fault_scan_period_ms(p);
-	if (!remote_scan_mb || !period_ms)
-		return false;
+	if (!task_numa_local_fault_sampling_enabled(p))
+		return;
 
-	state = task_numa_local_fault_state(p->mm);
-	if (!state)
-		return false;
+	if (cpusets_enabled() && nodes_weight(cpuset_current_mems_allowed) == 1)
+		return;
 
-	period = msecs_to_jiffies(period_ms);
-	spin_lock_irqsave(&state->lock, flags);
-	if (!state->remote_next_scan)
-		state->remote_next_scan = now;
-	if (time_before(now, state->remote_next_scan)) {
-		spin_unlock_irqrestore(&state->lock, flags);
-		return false;
+	if (task_numa_local_fault_scan_due(p))
+		scanned = task_numa_try_scan_local_faults(p, now);
+
+	if (scanned)
+		p->numa_sampler_stamp += 2 * TICK_NSEC;
+
+	if (!task_numa_fast_scan(p) &&
+	    unlikely(p->se.sum_exec_runtime != runtime)) {
+		u64 diff = p->se.sum_exec_runtime - runtime;
+
+		p->numa_sampler_stamp += 32 * diff;
 	}
-
-	target_nid = state->remote_target_nid;
-	if (!task_numa_remote_fault_eligible_node(target_nid))
-		target_nid = task_numa_remote_fault_next_node(NUMA_NO_NODE);
-	if (target_nid == NUMA_NO_NODE) {
-		state->remote_next_scan = now + period;
-		spin_unlock_irqrestore(&state->lock, flags);
-		return false;
-	}
-
-	scan_state = &state->node[target_nid];
-	next_nid = task_numa_remote_fault_next_node(target_nid);
-	if (next_nid == NUMA_NO_NODE)
-		next_nid = target_nid;
-	state->remote_target_nid = next_nid;
-	state->remote_next_scan = now + period;
-	spin_unlock_irqrestore(&state->lock, flags);
-
-	installed = task_numa_scan_remote_faults(
-		p, target_nid,
-		(unsigned long)remote_scan_mb << (20 - PAGE_SHIFT),
-		scan_state);
-	numa_account_remote_fault_scan(target_nid, installed);
-
-	return true;
-}
-
-static bool task_numa_choose_remote_sampler(struct task_struct *p)
-{
-	struct numa_local_fault_mm_state *state;
-	unsigned long flags;
-	bool remote;
-
-	state = task_numa_local_fault_state(p->mm);
-	if (!state)
-		return false;
-
-	spin_lock_irqsave(&state->lock, flags);
-	remote = state->sampler_rr++ & 1;
-	spin_unlock_irqrestore(&state->lock, flags);
-
-	return remote;
 }
 
 static void task_numa_sync_scan_policy(struct task_struct *p)
@@ -3714,10 +3589,8 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	unsigned long next_scan;
 	unsigned int scan_min, scan_max;
 	unsigned int local_scan_period;
-	unsigned int remote_scan_period;
-	unsigned int sampler_scan_period = 0;
 	bool fast_scan, stale, same_policy, period_ok;
-	bool mode_started, fast_started, pull_next_scan, scan_enabled;
+	bool mode_started, fast_started, pull_next_scan;
 	int mode, old_mode;
 	bool old_fast_scan;
 
@@ -3727,17 +3600,11 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	policy_seq = task_numa_balancing_policy_seq(p);
 	mode = task_numa_balancing_mode(p);
 	fast_scan = task_numa_fast_scan(p);
-	scan_enabled = task_numa_balancing_enabled(p);
 	stale = READ_ONCE(p->numa_scan_policy_stale);
 
 	scan_min = task_scan_min(p);
 	scan_max = task_scan_max(p);
 	local_scan_period = task_numa_local_fault_scan_period_ms(p);
-	remote_scan_period = task_numa_remote_fault_scan_period_ms(p);
-	if (local_scan_period && remote_scan_period)
-		sampler_scan_period = min(local_scan_period, remote_scan_period);
-	else
-		sampler_scan_period = local_scan_period ?: remote_scan_period;
 	same_policy = p->numa_scan_policy_seq == policy_seq &&
 		      p->numa_scan_policy_mode == mode &&
 		      p->numa_scan_policy_fast_scan == fast_scan;
@@ -3751,8 +3618,8 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 
 	old_mode = p->numa_scan_policy_mode;
 	old_fast_scan = p->numa_scan_policy_fast_scan;
-	mode_started = old_mode <= 0 && scan_enabled;
-	fast_started = !old_fast_scan && fast_scan;
+	mode_started = old_mode <= 0 && mode > 0;
+	fast_started = mode > 0 && !old_fast_scan && fast_scan;
 
 	p->numa_scan_policy_seq = policy_seq;
 	p->numa_scan_policy_mode = mode;
@@ -3768,15 +3635,11 @@ static void task_numa_sync_scan_policy(struct task_struct *p)
 	} else if (p->numa_scan_period > scan_max) {
 		p->numa_scan_period = scan_max;
 	}
-	if (sampler_scan_period && p->numa_scan_period > sampler_scan_period)
-		p->numa_scan_period = sampler_scan_period;
 
 	if (local_scan_period)
 		task_numa_local_fault_pull_next_scan(mm);
-	if (remote_scan_period)
-		task_numa_remote_fault_pull_next_scan(mm);
 
-	pull_next_scan = scan_enabled && (mode_started || fast_started);
+	pull_next_scan = mode > 0 && (mode_started || fast_started);
 	if (!pull_next_scan)
 		return;
 
@@ -3804,9 +3667,6 @@ static void task_numa_work(struct callback_head *work)
 	struct vma_iterator vmi;
 	bool vma_pids_skipped;
 	bool vma_pids_forced = false;
-	bool local_fault_scanned = false;
-	bool remote_fault_scanned = false;
-	bool sampler_scanned = false;
 
 	WARN_ON_ONCE(p != container_of(work, struct task_struct, numa_work));
 
@@ -3826,6 +3686,8 @@ static void task_numa_work(struct callback_head *work)
 	if (!task_numa_balancing_enabled(p))
 		return;
 	task_numa_sync_scan_policy(p);
+	if (task_numa_balancing_mode(p) <= 0)
+		return;
 #endif
 
 	/*
@@ -3837,27 +3699,6 @@ static void task_numa_work(struct callback_head *work)
 		return;
 	}
 
-#ifdef CONFIG_NUMA_BALANCING_MT
-	if (task_numa_local_fault_scan_due(p) &&
-	    task_numa_remote_fault_scan_due(p)) {
-		if (task_numa_choose_remote_sampler(p))
-			remote_fault_scanned =
-				task_numa_try_scan_remote_faults(p, now);
-		else
-			local_fault_scanned =
-				task_numa_try_scan_local_faults(p, now);
-	} else {
-		local_fault_scanned = task_numa_try_scan_local_faults(p, now);
-		remote_fault_scanned = task_numa_try_scan_remote_faults(p, now);
-	}
-	sampler_scanned = local_fault_scanned || remote_fault_scanned;
-	if (sampler_scanned)
-		p->node_stamp += 2 * TICK_NSEC;
-
-	if (task_numa_balancing_mode(p) <= 0)
-		goto out_account_scan_cost;
-#endif
-
 	if (!mm->numa_next_scan) {
 		mm->numa_next_scan = now +
 			msecs_to_jiffies(task_numa_scan_delay(p));
@@ -3868,8 +3709,6 @@ static void task_numa_work(struct callback_head *work)
 	 */
 	migrate = mm->numa_next_scan;
 	if (time_before(now, migrate)) {
-		if (sampler_scanned)
-			goto out_account_scan_cost;
 		return;
 	}
 
@@ -3880,8 +3719,6 @@ static void task_numa_work(struct callback_head *work)
 
 	next_scan = now + msecs_to_jiffies(p->numa_scan_period);
 	if (!try_cmpxchg(&mm->numa_next_scan, &migrate, next_scan)) {
-		if (sampler_scanned)
-			goto out_account_scan_cost;
 		return;
 	}
 
@@ -3889,22 +3726,17 @@ static void task_numa_work(struct callback_head *work)
 	 * Delay this task enough that another task of this mm will likely win
 	 * the next time around.
 	 */
-	if (!sampler_scanned)
-		p->node_stamp += 2 * TICK_NSEC;
+	p->node_stamp += 2 * TICK_NSEC;
 
 	pages = sysctl_numa_balancing_scan_size;
 	pages <<= 20 - PAGE_SHIFT; /* MB in pages */
 	virtpages = pages * 8;	   /* Scan up to this much virtual space */
 	if (!pages) {
-		if (sampler_scanned)
-			goto out_account_scan_cost;
 		return;
 	}
 
 
 	if (!mmap_read_trylock(mm)) {
-		if (sampler_scanned)
-			goto out_account_scan_cost;
 		return;
 	}
 
@@ -4080,7 +3912,6 @@ out:
 		reset_ptenuma_scan(p);
 	mmap_read_unlock(mm);
 
-out_account_scan_cost:
 	/*
 	 * Make sure tasks use at least 32x as much time to run other code
 	 * than they used here, to limit NUMA PTE scanning overhead to 3% max.
@@ -4108,6 +3939,9 @@ void init_numa_balancing(u64 clone_flags, struct task_struct *p)
 		}
 	}
 	p->node_stamp			= 0;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	p->numa_sampler_stamp		= 0;
+#endif
 	p->numa_scan_seq		= mm ? mm->numa_scan_seq : 0;
 	p->numa_scan_period		= task_numa_scan_delay(p);
 	p->numa_migrate_retry		= 0;
@@ -4126,6 +3960,9 @@ void init_numa_balancing(u64 clone_flags, struct task_struct *p)
 #endif
 	/* Protect against double add, see task_tick_numa and task_numa_work */
 	p->numa_work.next		= &p->numa_work;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	p->numa_sampler_work.next	= &p->numa_sampler_work;
+#endif
 	p->numa_faults			= NULL;
 	p->numa_pages_migrated		= 0;
 	p->total_numa_faults		= 0;
@@ -4134,6 +3971,9 @@ void init_numa_balancing(u64 clone_flags, struct task_struct *p)
 	p->last_sum_exec_runtime	= 0;
 
 	init_task_work(&p->numa_work, task_numa_work);
+#ifdef CONFIG_NUMA_BALANCING_MT
+	init_task_work(&p->numa_sampler_work, task_numa_sampler_work);
+#endif
 
 	/* New address space, reset the preferred nid */
 	if (!(clone_flags & CLONE_VM)) {
@@ -4152,6 +3992,9 @@ void init_numa_balancing(u64 clone_flags, struct task_struct *p)
 			current->numa_scan_period * mm_users * NSEC_PER_MSEC);
 		delay += 2 * TICK_NSEC;
 		p->node_stamp = delay;
+#ifdef CONFIG_NUMA_BALANCING_MT
+		p->numa_sampler_stamp = delay;
+#endif
 	}
 }
 
@@ -4163,11 +4006,16 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	struct callback_head *work = &curr->numa_work;
 	bool scan_due;
 	u64 period, now;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	struct callback_head *sampler_work = &curr->numa_sampler_work;
+	unsigned int sampler_scan_period;
+	u64 sampler_period;
+#endif
 
 	/*
 	 * We don't care about NUMA placement if we don't have memory.
 	 */
-	if (!curr->mm || (curr->flags & (PF_EXITING | PF_KTHREAD)) || work->next != work)
+	if (!curr->mm || (curr->flags & (PF_EXITING | PF_KTHREAD)))
 		return;
 
 	/*
@@ -4179,7 +4027,25 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	now = curr->se.sum_exec_runtime;
 #ifdef CONFIG_NUMA_BALANCING_MT
 	task_numa_sync_scan_policy(curr);
+
+	sampler_scan_period = task_numa_sampler_scan_period_ms(curr);
+	if (sampler_scan_period && sampler_work->next == sampler_work) {
+		sampler_period = (u64)sampler_scan_period * NSEC_PER_MSEC;
+		if (!curr->numa_sampler_stamp)
+			curr->numa_sampler_stamp = now;
+		if (now > curr->numa_sampler_stamp + sampler_period) {
+			curr->numa_sampler_stamp += sampler_period;
+			if (task_numa_local_fault_scan_due(curr))
+				task_work_add(curr, sampler_work, TWA_RESUME);
+		}
+	}
+
+	if (task_numa_balancing_mode(curr) <= 0)
+		return;
 #endif
+	if (work->next != work)
+		return;
+
 	period = (u64)curr->numa_scan_period * NSEC_PER_MSEC;
 
 	if (now > curr->node_stamp + period) {
@@ -4188,12 +4054,6 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 		curr->node_stamp += period;
 
 		scan_due = !time_before(jiffies, curr->mm->numa_next_scan);
-#ifdef CONFIG_NUMA_BALANCING_MT
-		if (task_numa_local_fault_scan_due(curr))
-			scan_due = true;
-		if (task_numa_remote_fault_scan_due(curr))
-			scan_due = true;
-#endif
 		if (scan_due)
 			task_work_add(curr, work, TWA_RESUME);
 	}
@@ -4205,7 +4065,7 @@ static void update_scan_period(struct task_struct *p, int new_cpu)
 	int dst_nid = cpu_to_node(new_cpu);
 
 #ifdef CONFIG_NUMA_BALANCING_MT
-	if (!task_numa_balancing_enabled(p))
+	if (task_numa_balancing_mode(p) <= 0)
 		return;
 #else
 	if (!static_branch_likely(&sched_numa_balancing))
@@ -9877,7 +9737,7 @@ static long migrate_degrades_locality(struct task_struct *p, struct lb_env *env)
 	int src_nid, dst_nid, dist;
 
 #ifdef CONFIG_NUMA_BALANCING_MT
-	if (!task_numa_balancing_enabled(p))
+	if (task_numa_balancing_mode(p) <= 0)
 		return 0;
 #else
 	if (!static_branch_likely(&sched_numa_balancing))

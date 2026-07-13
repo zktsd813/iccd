@@ -5868,7 +5868,9 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 {
 	struct vm_area_struct *vma = vmf->vma;
 	bool local_fault_refault = false;
+#ifdef CONFIG_NUMA_BALANCING_MT
 	unsigned int sample_refault_latency = 0;
+#endif
 	int target_nid;
 
 	if (sample_refault)
@@ -6062,23 +6064,6 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 		goto out_map;
 	}
 
-	if (task_numa_balancing_mode(current) <= 0 &&
-	    numa_remote_fault_sampled(folio)) {
-		int time = jiffies_to_msecs(jiffies);
-		int last_time = folio_xchg_access_time(folio, time);
-		unsigned int latency = (time - last_time) &
-				       PAGE_ACCESS_TIME_MASK;
-
-		vma_set_access_pid_bit(vma);
-		count_vm_numa_event(NUMA_HINT_FAULTS);
-#ifdef CONFIG_NUMA_BALANCING
-		count_memcg_folio_events(folio, NUMA_HINT_FAULTS, 1);
-#endif
-		numa_account_remote_fault_sample_refault(folio, nr_pages,
-							 latency);
-		nid = NUMA_NO_NODE;
-		goto out_map;
-	}
 #endif
 
 	if (task_numa_balancing_mode(current) <= 0) {
@@ -6093,6 +6078,10 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 		nid = NUMA_NO_NODE;
 	if (target_nid == NUMA_NO_NODE)
 		goto out_map;
+#ifdef CONFIG_NUMA_BALANCING_MT
+	if (!numa_balancing_migration_enabled())
+		goto out_map;
+#endif
 	if (migrate_misplaced_folio_prepare(folio, vma, target_nid)) {
 		flags |= TNF_MIGRATE_FAIL;
 		goto out_map;

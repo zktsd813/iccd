@@ -40,6 +40,7 @@ struct mm_struct init_mm = {
 	.arg_lock	=  __SPIN_LOCK_UNLOCKED(init_mm.arg_lock),
 #ifdef CONFIG_NUMA_BALANCING_MT
 	.numa_local_fault_state = NULL,
+	.numa_remote_scan_seen = false,
 #endif
 	.mmlist		= LIST_HEAD_INIT(init_mm.mmlist),
 #ifdef CONFIG_PER_VMA_LOCK

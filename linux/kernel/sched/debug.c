@@ -488,50 +488,8 @@ static void debugfs_fair_server_init(void)
 	}
 }
 
-#ifdef CONFIG_NUMA_BALANCING
-static int numa_promotion_thresholds_show(struct seq_file *m, void *v)
-{
-	unsigned int ref_th = READ_ONCE(sysctl_numa_balancing_hot_threshold);
-	int node;
-
-	seq_printf(m, "reference_hot_threshold_ms %u\n", ref_th);
-	seq_printf(m, "scan_period_max_ms %u\n",
-		   READ_ONCE(sysctl_numa_balancing_scan_period_max));
-	seq_puts(m,
-		 "node effective_hot_threshold_ms raw_nbp_threshold_ms pgpromote_candidate pgpromote_candidate_nrl\n");
-
-	for_each_node_state(node, N_MEMORY) {
-		struct pglist_data *pgdat = NODE_DATA(node);
-		unsigned int raw_th = READ_ONCE(pgdat->nbp_threshold);
-
-		seq_printf(m, "%d %u %u %lu %lu\n",
-			   node, raw_th ?: ref_th, raw_th,
-			   node_page_state(pgdat, PGPROMOTE_CANDIDATE),
-			   node_page_state(pgdat, PGPROMOTE_CANDIDATE_NRL));
-	}
-
-	return 0;
-}
-
-static int numa_promotion_thresholds_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, numa_promotion_thresholds_show,
-			   inode->i_private);
-}
-
-static const struct file_operations numa_promotion_thresholds_fops = {
-	.owner = THIS_MODULE,
-	.open = numa_promotion_thresholds_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-#endif
-
 static __init int sched_init_debug(void)
 {
-	struct dentry __maybe_unused *numa;
-
 	debugfs_sched = debugfs_create_dir("sched", NULL);
 
 	debugfs_create_file("features", 0644, debugfs_sched, NULL, &sched_feat_fops);
@@ -552,19 +510,6 @@ static __init int sched_init_debug(void)
 	sched_domains_mutex_lock();
 	update_sched_domain_debugfs();
 	sched_domains_mutex_unlock();
-
-#ifdef CONFIG_NUMA_BALANCING
-	numa = debugfs_create_dir("numa_balancing", debugfs_sched);
-
-	debugfs_create_u32("scan_delay_ms", 0644, numa, &sysctl_numa_balancing_scan_delay);
-	debugfs_create_u32("scan_period_min_ms", 0644, numa, &sysctl_numa_balancing_scan_period_min);
-	debugfs_create_u32("scan_period_max_ms", 0644, numa, &sysctl_numa_balancing_scan_period_max);
-	debugfs_create_u32("scan_size_mb", 0644, numa, &sysctl_numa_balancing_scan_size);
-	debugfs_create_u32("hot_threshold_ms", 0644, numa, &sysctl_numa_balancing_hot_threshold);
-	debugfs_create_file("promotion_thresholds", 0444, numa, NULL,
-			    &numa_promotion_thresholds_fops);
-#endif /* CONFIG_NUMA_BALANCING */
-
 	debugfs_create_file("debug", 0444, debugfs_sched, NULL, &sched_debug_fops);
 
 	debugfs_fair_server_init();

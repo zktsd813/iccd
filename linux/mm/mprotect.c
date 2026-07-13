@@ -329,9 +329,9 @@ static long change_pte_range(struct mmu_gather *tlb,
 
 			nr_ptes = mprotect_folio_pte_batch(folio, pte, oldpte, max_nr_ptes, flags);
 			if (prot_numa && folio && folio_use_access_time(folio)) {
+				numa_account_remote_scan_pte(vma->vm_mm);
 				folio_xchg_access_time(folio,
 						       jiffies_to_msecs(jiffies));
-				numa_account_remote_fault_pte(folio, nr_ptes);
 			}
 
 			oldpte = modify_prot_start_ptes(vma, addr, pte, nr_ptes);

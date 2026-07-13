@@ -438,8 +438,7 @@ static bool remove_migration_pte(struct folio *folio,
 			if (!rmap_walk_arg->local_tiering_sample_armed &&
 			    folio_test_local_tiering_sampled(folio)) {
 				pte = pte_modify(pte, PAGE_NONE);
-				numa_account_local_fault_pte(
-					folio, folio_nr_pages(folio));
+				numa_account_local_fault_pte(folio);
 				rmap_walk_arg->local_tiering_sample_armed = true;
 			}
 #endif
@@ -485,7 +484,6 @@ void remove_migration_ptes(struct folio *src, struct folio *dst, int flags)
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (folio_test_local_tiering_sampled(dst) &&
 	    !rmap_walk_arg.local_tiering_sample_armed) {
-		numa_account_local_fault_lost(dst, folio_nr_pages(dst));
 		folio_clear_local_tiering_sampled(dst);
 	}
 #endif
@@ -804,9 +802,7 @@ void folio_migrate_flags(struct folio *newfolio, struct folio *folio)
 		folio_set_idle(newfolio);
 
 #ifdef CONFIG_NUMA_BALANCING_MT
-	if (folio_test_clear_local_tiering_sampled(folio)) {
-		numa_account_local_fault_lost(folio, folio_nr_pages(folio));
-	}
+	folio_clear_local_tiering_sampled(folio);
 #endif
 
 	folio_migrate_refs(newfolio, folio);
@@ -1464,25 +1460,6 @@ static int migrate_folio_move(free_folio_t put_new_folio, unsigned long private,
 	folio_add_lru(dst);
 	if (old_page_state & PAGE_WAS_MLOCKED)
 		lru_add_drain();
-
-#ifdef CONFIG_NUMA_BALANCING_MT
-	if ((old_page_state & PAGE_WAS_MAPPED) &&
-	    reason == MR_NUMA_MISPLACED &&
-	    memory_tiering_enabled(dst) &&
-	    node_is_promotion_target(folio_nid(src), folio_nid(dst))) {
-		unsigned long nr_pages = folio_nr_pages(dst);
-
-		/*
-		 * The sample identity is a folio flag while the forced fault is
-		 * attached to one mapping. Keep sampling to order-0 folios until
-		 * split-time accounting has per-subfolio state.
-		 */
-		if (nr_pages == 1 && numa_should_sample_local_fault(dst)) {
-			folio_set_local_tiering_sampled(dst);
-			folio_xchg_access_time(dst, jiffies_to_msecs(jiffies));
-		}
-	}
-#endif
 
 	if (old_page_state & PAGE_WAS_MAPPED)
 		remove_migration_ptes(src, dst, 0);
