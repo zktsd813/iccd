@@ -47,42 +47,41 @@ WORKDIR="${WORKDIR:-/root/realworld-work}"
 CPU_NODE="${CPU_NODE:-0}"
 OMP_THREADS="${OMP_THREADS:-32}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-21600}"
-SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-5}"
+TIMEOUT_KILL_AFTER_SEC="${TIMEOUT_KILL_AFTER_SEC:-60}"
 MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
 DEMOTION_ENABLED="${DEMOTION_ENABLED:-true}"
 DEMOTION_TARGET="${DEMOTION_TARGET:-0 1}"
-NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-}"
-NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-}"
-LOCAL_FAULT_RATE="${LOCAL_FAULT_RATE:-}"
-REMOTE_FAULT_RATE="${REMOTE_FAULT_RATE:-}"
-LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-}"
-LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-}"
-REMOTE_FAULT_SCAN_PERIOD_MS="${REMOTE_FAULT_SCAN_PERIOD_MS:-}"
-REMOTE_FAULT_SCAN_SIZE_MB="${REMOTE_FAULT_SCAN_SIZE_MB:-}"
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-256}"
+NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+NUMA_SCAN_PERIOD_MAX_MS="${NUMA_SCAN_PERIOD_MAX_MS:-}"
+NUMA_SCAN_DELAY_MS="${NUMA_SCAN_DELAY_MS:-}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-64}"
 THP_MODE="${THP_MODE:-}"
 THP_DEFRAG="${THP_DEFRAG:-${THP_MODE}}"
 REALWORLD_SIZE_PROFILE="${REALWORLD_SIZE_PROFILE:-rss60}"
 VERIFY_REQUIRED_STATE="${VERIFY_REQUIRED_STATE:-1}"
 LOCAL_SIZE_GIB="${LOCAL_SIZE_GIB:-}"
-TRACE_BC_TRIAL_PROMOTIONS="${TRACE_BC_TRIAL_PROMOTIONS:-0}"
 CONTROLLER_DIR="${CONTROLLER_DIR:-/root/design/fault_bucket_controller}"
 CONTROLLER_RUNNER="${CONTROLLER_RUNNER:-${CONTROLLER_DIR}/run_guest.sh}"
-CONTROLLER_WINDOW_SEC="${CONTROLLER_WINDOW_SEC:-5}"
-CONTROLLER_LOCAL_RATE="${CONTROLLER_LOCAL_RATE:-5}"
-CONTROLLER_REMOTE_RATE="${CONTROLLER_REMOTE_RATE:-5}"
-CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS="${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
-CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB="${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB:-256}"
-CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS="${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS:-${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}}"
-CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB="${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB:-${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}}"
-CONTROLLER_MIN_LOCAL_PAGES="${CONTROLLER_MIN_LOCAL_PAGES:-1024}"
-CONTROLLER_MIN_REMOTE_PAGES="${CONTROLLER_MIN_REMOTE_PAGES:-1024}"
-CONTROLLER_CONSECUTIVE_EFFECTIVE="${CONTROLLER_CONSECUTIVE_EFFECTIVE:-2}"
-CONTROLLER_CONSECUTIVE_NO_IMPROVE="${CONTROLLER_CONSECUTIVE_NO_IMPROVE:-2}"
-CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD="${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD:-1.2}"
-CONTROLLER_CONSECUTIVE_RESTART="${CONTROLLER_CONSECUTIVE_RESTART:-2}"
-CONTROLLER_RESTART_GRACE_WINDOWS="${CONTROLLER_RESTART_GRACE_WINDOWS:-1}"
-CONTROLLER_NUMA_BALANCING_ON="${CONTROLLER_NUMA_BALANCING_ON:-2}"
-CONTROLLER_NUMA_BALANCING_OFF="${CONTROLLER_NUMA_BALANCING_OFF:-0}"
+WINDOW_SEC="${WINDOW_SEC:-1}"
+CYCLE_WINDOW_MIN_SEC="${CYCLE_WINDOW_MIN_SEC:-5}"
+CYCLE_WINDOW_MAX_SEC="${CYCLE_WINDOW_MAX_SEC:-20}"
+LOCAL_RATE="${LOCAL_RATE:-5}"
+MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
+MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
+START_CONSECUTIVE="${START_CONSECUTIVE:-2}"
+START_CAPACITY_MARGIN_PCT="${START_CAPACITY_MARGIN_PCT:-10}"
+STOP_CAPACITY_RATIO_THRESHOLD="${STOP_CAPACITY_RATIO_THRESHOLD:-0.9}"
+P75_STAGNATION_REQUIRED_DECREASE_PCT="${P75_STAGNATION_REQUIRED_DECREASE_PCT:-10}"
+P75_STAGNATION_REQUIRED_WINDOWS="${P75_STAGNATION_REQUIRED_WINDOWS:-3}"
+P75_STAGNATION_RESTART_DEGRADATION_PCT="${P75_STAGNATION_RESTART_DEGRADATION_PCT:-10}"
+P75_STAGNATION_RESTART_REQUIRED_WINDOWS="${P75_STAGNATION_RESTART_REQUIRED_WINDOWS:-3}"
+REMOTE_RESTART_IMPROVEMENT_PCT="${REMOTE_RESTART_IMPROVEMENT_PCT:-10}"
+CONTROLLER_POLICY="capacity_rank_latency_local_remote_restart_v3"
+LOCAL_NODE="${LOCAL_NODE:-0}"
+REMOTE_NODE="${REMOTE_NODE:-1}"
+MIGRATION_ENABLED_PATH="${MIGRATION_ENABLED_PATH:-/sys/kernel/mm/numa_balancing/migration_enabled}"
 
 PR_ITERATIONS="${PR_ITERATIONS:-20}"
 PR_TOLERANCE="${PR_TOLERANCE:-1e-4}"
@@ -92,14 +91,19 @@ BC_TRIALS="${BC_TRIALS:-8}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
 DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-1}"
 COMPACT_GUEST_MEMORY="${COMPACT_GUEST_MEMORY:-1}"
+DISABLE_SWAP="${DISABLE_SWAP:-1}"
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
 XSBENCH_PARTICLES="${XSBENCH_PARTICLES:-90000000}"
 SILO_SCALE_FACTOR="${SILO_SCALE_FACTOR:-800000}"
 SILO_OPS_PER_WORKER="${SILO_OPS_PER_WORKER:-100000000}"
+SILO_ZIPF_THETA="${SILO_ZIPF_THETA:-}"
+SILO_ZIPF_REVERSE="${SILO_ZIPF_REVERSE:-1}"
+SILO_WORKLOAD_MIX="${SILO_WORKLOAD_MIX:-}"
 LIBLINEAR_DATASET="${LIBLINEAR_DATASET:-kdd12}"
 LIBLINEAR_SOLVER="${LIBLINEAR_SOLVER:-6}"
+LIBLINEAR_THREADS="${LIBLINEAR_THREADS:-${OMP_THREADS}}"
 
 mkdir -p "${OUTDIR}" "${WORKDIR}"
 
@@ -130,46 +134,43 @@ write_requested_knob() {
   printf '%s\n' "${value}" > "${path}"
 }
 
-mount_debugfs() {
-  mkdir -p /sys/kernel/debug
-  mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug || true
-}
-
 policy_numa_value() {
   case "$1" in
-    migration_on|tiering_0x2|controller_0x2) printf '2\n' ;;
-    tpp|tpp_0x4) printf '4\n' ;;
-    migration_off|all_local|all_slow) printf '0\n' ;;
+    on|ours) printf '2\n' ;;
+    tpp) printf '4\n' ;;
+    off) printf '0\n' ;;
     *) echo "unknown config: $1" >&2; return 2 ;;
   esac
 }
 
 policy_demotion_enabled() {
   case "$1" in
-    migration_off|all_local|all_slow) printf 'false\n' ;;
-    migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf 'true\n' ;;
+    off) printf 'false\n' ;;
+    on|tpp|ours) printf 'true\n' ;;
     *) echo "unknown config: $1" >&2; return 2 ;;
   esac
 }
 
 policy_demotion_target() {
   case "$1" in
-    migration_off|all_local|all_slow) printf '%s\n' "${DEMOTION_TARGET_OFF:-0 -1}" ;;
-    migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf '%s\n' "${DEMOTION_TARGET}" ;;
+    off) printf '%s\n' "${DEMOTION_TARGET_OFF:-0 -1}" ;;
+    on|tpp|ours) printf '%s\n' "${DEMOTION_TARGET}" ;;
+    *) echo "unknown config: $1" >&2; return 2 ;;
+  esac
+}
+
+policy_migration_enabled() {
+  case "$1" in
+    off) printf '0\n' ;;
+    on|tpp|ours) printf '1\n' ;;
     *) echo "unknown config: $1" >&2; return 2 ;;
   esac
 }
 
 placement_args() {
   case "$1" in
-    migration_on|tiering_0x2|migration_off|tpp|tpp_0x4|controller_0x2)
+    off|on|tpp|ours)
       printf '%s\0' numactl "--cpunodebind=${CPU_NODE}"
-      ;;
-    all_local)
-      printf '%s\0' numactl "--cpunodebind=${CPU_NODE}" --membind=0
-      ;;
-    all_slow)
-      printf '%s\0' numactl "--cpunodebind=${CPU_NODE}" --membind=1
       ;;
     *)
       echo "unknown config: $1" >&2
@@ -180,7 +181,7 @@ placement_args() {
 
 is_controller_config() {
   case "$1" in
-    controller_0x2) return 0 ;;
+    ours) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -238,18 +239,7 @@ set_workload_cmd() {
     bc|gapbs_bc)
       need_exec_path "${BENCHMARK_DIR}/gapbs/bc" || return $?
       mapfile -d '' -t graph_args < <(gapbs_graph_args)
-      if [[ "${TRACE_BC_TRIAL_PROMOTIONS}" == "1" ]]; then
-        need_exec_path /root/vm32_realworld/scripts/trace_gapbs_trial_promotions.sh || return $?
-        WORKLOAD_CMD=(
-          env
-          "TRIAL_PROMOTION_OUT=${OUTDIR}/trial_promotion.csv"
-          "TRIAL_PROMOTION_RAW_OUT=${OUTDIR}/trial_promotion.raw.log"
-          /root/vm32_realworld/scripts/trace_gapbs_trial_promotions.sh
-          "${BENCHMARK_DIR}/gapbs/bc" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}"
-        )
-      else
-        WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/bc" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
-      fi
+      WORKLOAD_CMD=("${BENCHMARK_DIR}/gapbs/bc" "${graph_args[@]}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
       ;;
     gups|gups_64g)
       need_exec_path "${BENCHMARK_DIR}/vmitosis-workloads/bin/bench_gups_mt" || return $?
@@ -265,6 +255,19 @@ set_workload_cmd() {
       ;;
     silo)
       need_exec_path "${BENCHMARK_DIR}/silo/out-perf.masstree/benchmarks/dbtest" || return $?
+      local -a silo_bench_opts=()
+      local silo_bench_opts_text=""
+      if [[ -n "${SILO_WORKLOAD_MIX}" ]]; then
+        silo_bench_opts+=("--workload-mix=${SILO_WORKLOAD_MIX}")
+      fi
+      if [[ -n "${SILO_ZIPF_THETA}" ]]; then
+        silo_bench_opts+=("--zipf-theta=${SILO_ZIPF_THETA}")
+      fi
+      case "${SILO_ZIPF_REVERSE}" in
+        1|true|TRUE|yes|YES|on|ON)
+          silo_bench_opts+=("--zipf-reverse")
+          ;;
+      esac
       WORKLOAD_CMD=(
         "${BENCHMARK_DIR}/silo/out-perf.masstree/benchmarks/dbtest"
         --verbose
@@ -273,6 +276,10 @@ set_workload_cmd() {
         --scale-factor "${SILO_SCALE_FACTOR}"
         "--ops-per-worker=${SILO_OPS_PER_WORKER}"
       )
+      if ((${#silo_bench_opts[@]} > 0)); then
+        printf -v silo_bench_opts_text '%s ' "${silo_bench_opts[@]}"
+        WORKLOAD_CMD+=("--bench-opts=${silo_bench_opts_text% }")
+      fi
       ;;
     liblinear)
       need_exec_path "${BENCHMARK_DIR}/liblinear-multicore-2.47/train" || return $?
@@ -304,27 +311,40 @@ set_workload_cmd() {
 
 set_common_knobs() {
   local config="$1"
-  mount_debugfs
   write_if_writable /sys/kernel/mm/lru_gen/enabled "${MGLRU_ENABLED}"
   write_if_writable /sys/kernel/mm/numa/demotion_enabled "$(policy_demotion_enabled "${config}")"
   write_if_writable /sys/kernel/mm/numa/demotion_target "$(policy_demotion_target "${config}")"
   if [[ -n "${NUMA_SCAN_SIZE_MB}" ]]; then
-    write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_size_mb "${NUMA_SCAN_SIZE_MB}"
+    write_if_writable /sys/kernel/mm/numa_balancing/numa_scan_size_mb "${NUMA_SCAN_SIZE_MB}"
   fi
   if [[ -n "${NUMA_SCAN_PERIOD_MIN_MS}" ]]; then
-    write_if_writable /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms "${NUMA_SCAN_PERIOD_MIN_MS}"
+    write_if_writable /sys/kernel/mm/numa_balancing/numa_scan_period_min_ms "${NUMA_SCAN_PERIOD_MIN_MS}"
   fi
-  write_requested_knob /sys/kernel/mm/numa_balancing/local_fault_rate "${LOCAL_FAULT_RATE}"
-  write_requested_knob /sys/kernel/mm/numa_balancing/remote_fault_rate "${REMOTE_FAULT_RATE}"
+  if [[ -n "${NUMA_SCAN_PERIOD_MAX_MS}" ]]; then
+    write_if_writable /sys/kernel/mm/numa_balancing/numa_scan_period_max_ms "${NUMA_SCAN_PERIOD_MAX_MS}"
+  fi
+  if [[ -n "${NUMA_SCAN_DELAY_MS}" ]]; then
+    write_if_writable /sys/kernel/mm/numa_balancing/numa_scan_delay_ms "${NUMA_SCAN_DELAY_MS}"
+  fi
+  write_requested_knob /sys/kernel/mm/numa_balancing/local_fault_rate 0
   write_requested_knob /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms "${LOCAL_FAULT_SCAN_PERIOD_MS}"
   write_requested_knob /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb "${LOCAL_FAULT_SCAN_SIZE_MB}"
-  write_requested_knob /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms "${REMOTE_FAULT_SCAN_PERIOD_MS}"
-  write_requested_knob /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb "${REMOTE_FAULT_SCAN_SIZE_MB}"
+  write_if_writable "${MIGRATION_ENABLED_PATH}" "$(policy_migration_enabled "${config}")"
   if [[ -n "${THP_MODE}" ]]; then
     write_if_writable /sys/kernel/mm/transparent_hugepage/enabled "${THP_MODE}"
   fi
   if [[ -n "${THP_DEFRAG}" ]]; then
     write_if_writable /sys/kernel/mm/transparent_hugepage/defrag "${THP_DEFRAG}"
+  fi
+}
+
+disable_swap_if_requested() {
+  if [[ "${DISABLE_SWAP}" != "1" ]]; then
+    return 0
+  fi
+  if swapon --noheadings --show=NAME 2>/dev/null | grep -q .; then
+    log "disable swap before workload"
+    swapoff -a || log "warning: swapoff -a failed"
   fi
 }
 
@@ -372,8 +392,22 @@ verify_memory_tier_split() {
 }
 
 verify_required_state() {
-  local actual target expected_demotion
+  local actual target expected_demotion expected_migration expected_numa
   [[ "${VERIFY_REQUIRED_STATE}" == "1" ]] || return 0
+
+  expected_numa="$(policy_numa_value "${CONFIG}")"
+  actual="$(tr -d '[:space:]' < /proc/sys/kernel/numa_balancing)"
+  if [[ "${actual}" != "${expected_numa}" ]]; then
+    printf 'unexpected numa_balancing: expected=%s actual=%s\n' "${expected_numa}" "${actual}" >&2
+    return 78
+  fi
+
+  expected_migration="$(policy_migration_enabled "${CONFIG}")"
+  actual="$(tr -d '[:space:]' < "${MIGRATION_ENABLED_PATH}")"
+  if [[ "${actual}" != "${expected_migration}" ]]; then
+    printf 'unexpected migration_enabled: expected=%s actual=%s\n' "${expected_migration}" "${actual}" >&2
+    return 78
+  fi
 
   if [[ ! -r /sys/kernel/mm/lru_gen/enabled ]]; then
     printf 'missing /sys/kernel/mm/lru_gen/enabled\n' >&2
@@ -382,6 +416,24 @@ verify_required_state() {
   actual="$(tr -d '[:space:]' < /sys/kernel/mm/lru_gen/enabled)"
   if [[ "${actual}" != "${MGLRU_ENABLED}" ]]; then
     printf 'unexpected MGLRU state: expected=%s actual=%s\n' "${MGLRU_ENABLED}" "${actual}" >&2
+    return 78
+  fi
+
+  actual="$(tr -d '[:space:]' < /sys/kernel/mm/numa_balancing/numa_scan_size_mb)"
+  if [[ "${actual}" != "${NUMA_SCAN_SIZE_MB}" ]]; then
+    printf 'unexpected NUMA scan size: expected=%s actual=%s\n' "${NUMA_SCAN_SIZE_MB}" "${actual}" >&2
+    return 78
+  fi
+
+  actual="$(tr -d '[:space:]' < /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)"
+  if [[ "${actual}" != "${LOCAL_FAULT_SCAN_SIZE_MB}" ]]; then
+    printf 'unexpected local fault scan size: expected=%s actual=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}" "${actual}" >&2
+    return 78
+  fi
+
+  actual="$(tr -d '[:space:]' < /sys/kernel/mm/numa_balancing/local_fault_rate)"
+  if [[ "${actual}" != "0" ]]; then
+    printf 'unexpected baseline local fault rate: expected=0 actual=%s\n' "${actual}" >&2
     return 78
   fi
 
@@ -431,174 +483,34 @@ verify_required_state() {
 
 require_controller_environment() {
   need_exec_path "${CONTROLLER_RUNNER}" || return $?
-  need_readable_path /sys/kernel/mm/numa_balancing/fault_latency_histograms || return $?
+  need_readable_path /sys/kernel/mm/numa_balancing/fault_latency_quantiles || return $?
+  need_readable_path /sys/kernel/mm/numa_balancing/remote_scan_cycles || return $?
   need_writable_path /sys/kernel/mm/numa_balancing/local_fault_window || return $?
   need_writable_path /sys/kernel/mm/numa_balancing/local_fault_rate || return $?
-  need_writable_path /sys/kernel/mm/numa_balancing/remote_fault_rate || return $?
   need_writable_path /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms || return $?
   need_writable_path /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb || return $?
-  need_writable_path /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms || return $?
-  need_writable_path /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb || return $?
-}
-
-record_memory_tiers() {
-  local out="$1"
-  {
-    for tier in /sys/devices/virtual/memory_tiering/memory_tier*; do
-      [[ -d "${tier}" ]] || continue
-      printf '%s=' "$(basename "${tier}")"
-      cat "${tier}/nodelist" 2>/dev/null || printf 'NA\n'
-    done
-  } > "${out}" 2>/dev/null || true
-}
-
-record_node_meminfo() {
-  local out="$1"
-  {
-    for node in /sys/devices/system/node/node[0-9]*; do
-      [[ -d "${node}" ]] || continue
-      printf -- '--- %s ---\n' "$(basename "${node}")"
-      cat "${node}/meminfo" 2>/dev/null || true
-    done
-  } > "${out}" 2>/dev/null || true
+  need_writable_path "${MIGRATION_ENABLED_PATH}" || return $?
 }
 
 snapshot() {
   local tag="$1"
   {
-    printf 'tag=%s\n' "${tag}"
-    printf 'date_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'uname=%s\n' "$(uname -a)"
-    printf 'cmdline=%s\n' "$(cat /proc/cmdline 2>/dev/null || true)"
     printf 'numa_balancing=%s\n' "$(read_file /proc/sys/kernel/numa_balancing)"
+    printf 'migration_enabled=%s\n' "$(read_file "${MIGRATION_ENABLED_PATH}")"
     printf 'lru_gen_enabled=%s\n' "$(read_file /sys/kernel/mm/lru_gen/enabled)"
     printf 'demotion_enabled=%s\n' "$(read_file /sys/kernel/mm/numa/demotion_enabled)"
     printf 'demotion_target=%s\n' "$(read_file /sys/kernel/mm/numa/demotion_target | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     printf 'thp_enabled=%s\n' "$(read_file /sys/kernel/mm/transparent_hugepage/enabled | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     printf 'thp_defrag=%s\n' "$(read_file /sys/kernel/mm/transparent_hugepage/defrag | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    printf 'scan_size_mb=%s\n' "$(read_file /sys/kernel/debug/sched/numa_balancing/scan_size_mb)"
-    printf 'scan_period_min_ms=%s\n' "$(read_file /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms)"
-    printf 'hot_threshold_ms=%s\n' "$(read_file /sys/kernel/debug/sched/numa_balancing/hot_threshold_ms)"
+    printf 'scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_size_mb)"
+    printf 'scan_period_min_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_period_min_ms)"
+    printf 'scan_period_max_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_period_max_ms)"
+    printf 'scan_delay_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_delay_ms)"
     printf 'local_fault_rate=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_rate)"
-    printf 'remote_fault_rate=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_rate)"
     printf 'local_fault_scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)"
     printf 'local_fault_scan_period_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms)"
-    printf 'remote_fault_scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_size_mb)"
-    printf 'remote_fault_scan_period_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_fault_scan_period_ms)"
   } > "${OUTDIR}/${tag}.meta"
-  numactl -H > "${OUTDIR}/${tag}.numactl" 2>&1 || true
   cp /proc/vmstat "${OUTDIR}/${tag}.vmstat" 2>/dev/null || true
-  cp /proc/zoneinfo "${OUTDIR}/${tag}.zoneinfo" 2>/dev/null || true
-  cat /sys/kernel/mm/numa_balancing/local_fault_stats > "${OUTDIR}/${tag}.local_fault_stats" 2>/dev/null || true
-  cat /sys/kernel/mm/numa_balancing/remote_fault_stats > "${OUTDIR}/${tag}.remote_fault_stats" 2>/dev/null || true
-  cat /sys/kernel/mm/numa_balancing/fault_latency_histograms > "${OUTDIR}/${tag}.fault_latency_histograms" 2>/dev/null || true
-  cat /sys/kernel/debug/sched/numa_balancing/promotion_thresholds > "${OUTDIR}/${tag}.promotion_thresholds" 2>/dev/null || true
-  record_memory_tiers "${OUTDIR}/${tag}.memory_tiers"
-  record_node_meminfo "${OUTDIR}/${tag}.node_meminfo"
-}
-
-collect_descendants() {
-  local pid="$1" child
-  [[ "${pid}" =~ ^[0-9]+$ ]] || return 0
-  printf '%s\n' "${pid}"
-  while read -r child; do
-    [[ -n "${child}" ]] || continue
-    collect_descendants "${child}"
-  done < <(pgrep -P "${pid}" 2>/dev/null || true)
-}
-
-server_pid_files() {
-  case "${WORKLOAD}" in
-    redis_uniform|redis_ycsb_a)
-      printf '%s\n' "${WORKDIR}/redis-${REDIS_PORT:-6380}/redis.pid"
-      ;;
-    memcached_ycsb_uniform)
-      printf '%s\n' "${WORKDIR}/memcached-${MEMCACHED_PORT:-11211}.pid"
-      ;;
-  esac
-}
-
-collect_sample_pids() {
-  local root_pid="$1" pidfile pid
-  {
-    collect_descendants "${root_pid}"
-    while read -r pidfile; do
-      [[ -n "${pidfile}" && -r "${pidfile}" ]] || continue
-      pid="$(cat "${pidfile}" 2>/dev/null || true)"
-      [[ "${pid}" =~ ^[0-9]+$ ]] || continue
-      collect_descendants "${pid}"
-    done < <(server_pid_files)
-  } | awk '!seen[$0]++'
-}
-
-aggregate_numa_maps() {
-  local -a pids=("$@")
-  local -a files=()
-  local pid
-  for pid in "${pids[@]}"; do
-    [[ -r "/proc/${pid}/numa_maps" ]] || continue
-    files+=("/proc/${pid}/numa_maps")
-  done
-  if ((${#files[@]} == 0)); then
-    printf '0,0'
-    return 0
-  fi
-  awk '
-    {
-      for (i = 1; i <= NF; i++) {
-        if ($i ~ /^N[0-9]+=/) {
-          split($i, a, "=")
-          pages[a[1]] += a[2]
-        }
-      }
-    }
-    END {
-      printf "%d,%d", pages["N0"] + 0, pages["N1"] + 0
-    }
-  ' "${files[@]}" 2>/dev/null || printf '0,0'
-}
-
-node_mem_csv_fields() {
-  local node="$1"
-  local file="/sys/devices/system/node/node${node}/meminfo"
-  if [[ ! -r "${file}" ]]; then
-    printf '0,0,0'
-    return 0
-  fi
-  awk -v node="${node}" '
-    $1 == "Node" && $2 == node && $3 == "MemTotal:" { total = $4 }
-    $1 == "Node" && $2 == node && $3 == "MemFree:" { free = $4 }
-    END {
-      used = total - free
-      if (used < 0) used = 0
-      printf "%.6f,%.6f,%.6f", total / 1048576, free / 1048576, used / 1048576
-    }
-  ' "${file}" 2>/dev/null || printf '0,0,0'
-}
-
-sample_memory() {
-  local root_pid="$1" out="$2"
-  local start_s now elapsed pids joined numa n0_pages n1_pages n0_gib n1_gib node0 node1
-  start_s="$(date +%s)"
-  printf 'timestamp,elapsed_s,pids,N0_pages,N1_pages,N0_GiB,N1_GiB,node0_total_GiB,node0_free_GiB,node0_used_GiB,node1_total_GiB,node1_free_GiB,node1_used_GiB\n' > "${out}"
-  while kill -0 "${root_pid}" 2>/dev/null; do
-    now="$(date +%s)"
-    elapsed=$((now - start_s))
-    mapfile -t pids < <(collect_sample_pids "${root_pid}")
-    joined="$(IFS=';'; printf '%s' "${pids[*]:-}")"
-    numa="$(aggregate_numa_maps "${pids[@]:-}")"
-    n0_pages="${numa%%,*}"
-    n1_pages="${numa#*,}"
-    n0_gib="$(awk -v p="${n0_pages}" 'BEGIN { printf "%.6f", p * 4096 / 1024 / 1024 / 1024 }')"
-    n1_gib="$(awk -v p="${n1_pages}" 'BEGIN { printf "%.6f", p * 4096 / 1024 / 1024 / 1024 }')"
-    node0="$(node_mem_csv_fields 0)"
-    node1="$(node_mem_csv_fields 1)"
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${elapsed}" "${joined}" \
-      "${n0_pages}" "${n1_pages}" "${n0_gib}" "${n1_gib}" "${node0}" "${node1}" \
-      >> "${out}"
-    sleep "${SAMPLE_INTERVAL_SEC}"
-  done
 }
 
 read_vmstat_value() {
@@ -617,38 +529,6 @@ read_vmstat_value() {
   ' /proc/vmstat 2>/dev/null || printf '0\n'
 }
 
-append_promotion_sample() {
-  local out="$1" start_s="$2" tag="${3:-sample}"
-  local now elapsed
-  now="$(date +%s.%N)"
-  elapsed="$(awk -v now="${now}" -v start="${start_s}" 'BEGIN { printf "%.6f", now - start }')"
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" \
-    "${elapsed}" \
-    "${tag}" \
-    "$(read_vmstat_value pgpromote_success)" \
-    "$(read_vmstat_value pgpromote_candidate)" \
-    "$(read_vmstat_value pgpromote_candidate_nrl)" \
-    "$(read_vmstat_value pgpromote_candidate_demoted)" \
-    "$(read_vmstat_value numa_hint_faults)" \
-    "$(read_vmstat_value pgdemote_kswapd)" \
-    "$(read_vmstat_value pgdemote_direct)" \
-    >> "${out}"
-}
-
-sample_promotion() {
-  local root_pid="$1" out="$2"
-  local start_s
-  start_s="$(date +%s.%N)"
-  printf '%s\n' "${start_s}" > "${out}.start"
-  printf 'timestamp,elapsed_s,tag,pgpromote_success,pgpromote_candidate,pgpromote_candidate_nrl,pgpromote_candidate_demoted,numa_hint_faults,pgdemote_kswapd,pgdemote_direct\n' > "${out}"
-  while kill -0 "${root_pid}" 2>/dev/null; do
-    append_promotion_sample "${out}" "${start_s}" sample
-    sleep "${SAMPLE_INTERVAL_SEC}"
-  done
-  append_promotion_sample "${out}" "${start_s}" exit
-}
-
 drop_caches() {
   if [[ "${DROP_GUEST_CACHES}" == "1" ]]; then
     sync || true
@@ -661,11 +541,19 @@ drop_caches() {
 
 write_status() {
   local rc="$1" elapsed="$2" start_utc="$3" end_utc="$4"
+  local timed_out="${5:-0}" oom_before="${6:-}" oom_after="${7:-}" oom_delta="${8:-}" oom_confirmed="${9:-0}"
   {
     printf 'returncode=%s\n' "${rc}"
     printf 'elapsed_s=%s\n' "${elapsed}"
     printf 'start_utc=%s\n' "${start_utc}"
     printf 'end_utc=%s\n' "${end_utc}"
+    printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
+    printf 'timeout_kill_after_sec=%s\n' "${TIMEOUT_KILL_AFTER_SEC}"
+    printf 'timed_out=%s\n' "${timed_out}"
+    printf 'oom_kill_before=%s\n' "${oom_before}"
+    printf 'oom_kill_after=%s\n' "${oom_after}"
+    printf 'oom_kill_delta=%s\n' "${oom_delta}"
+    printf 'oom_confirmed=%s\n' "${oom_confirmed}"
   } > "${OUTDIR}/status.txt"
 }
 
@@ -673,10 +561,12 @@ run_case() {
   local numa_value
   local -a place cmd
   local cmd_display placement_display start_s end_s elapsed_s start_utc end_utc status
+  local timed_out=0 oom_kill_before=0 oom_kill_after=0 oom_kill_delta=0 oom_confirmed=0
   local controller_enabled=0 controller_out="" workload_command_quoted=""
 
   numa_value="$(policy_numa_value "${CONFIG}")"
   set_common_knobs "${CONFIG}"
+  disable_swap_if_requested
   write_if_writable /proc/sys/kernel/numa_balancing "${numa_value}"
   set +e
   verify_required_state
@@ -704,7 +594,6 @@ run_case() {
     snapshot after
     return "${status}"
   fi
-
   if is_controller_config "${CONFIG}"; then
     controller_enabled=1
     set +e
@@ -726,27 +615,32 @@ run_case() {
       "WORKLOAD_COMMAND=${workload_command_quoted}"
       "CPU_NODE=${CPU_NODE}"
       "OMP_THREADS=${OMP_THREADS}"
-      "WINDOW_SEC=${CONTROLLER_WINDOW_SEC}"
-      "LOCAL_RATE=${CONTROLLER_LOCAL_RATE}"
-      "REMOTE_RATE=${CONTROLLER_REMOTE_RATE}"
-      "LOCAL_FAULT_SCAN_PERIOD_MS=${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}"
-      "LOCAL_FAULT_SCAN_SIZE_MB=${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}"
-      "REMOTE_FAULT_SCAN_PERIOD_MS=${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS}"
-      "REMOTE_FAULT_SCAN_SIZE_MB=${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB}"
-      "MIN_LOCAL_PAGES=${CONTROLLER_MIN_LOCAL_PAGES}"
-      "MIN_REMOTE_PAGES=${CONTROLLER_MIN_REMOTE_PAGES}"
-      "CONSECUTIVE_EFFECTIVE=${CONTROLLER_CONSECUTIVE_EFFECTIVE}"
-      "CONSECUTIVE_NO_IMPROVE=${CONTROLLER_CONSECUTIVE_NO_IMPROVE}"
-      "RESTART_REMOTE_SHARE_THRESHOLD=${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD}"
-      "CONSECUTIVE_RESTART=${CONTROLLER_CONSECUTIVE_RESTART}"
-      "RESTART_GRACE_WINDOWS=${CONTROLLER_RESTART_GRACE_WINDOWS}"
-      "NUMA_BALANCING_ON=${CONTROLLER_NUMA_BALANCING_ON}"
-      "NUMA_BALANCING_OFF=${CONTROLLER_NUMA_BALANCING_OFF}"
+      "WINDOW_SEC=${WINDOW_SEC}"
+      "CYCLE_WINDOW_MIN_SEC=${CYCLE_WINDOW_MIN_SEC}"
+      "CYCLE_WINDOW_MAX_SEC=${CYCLE_WINDOW_MAX_SEC}"
+      "LOCAL_RATE=${LOCAL_RATE}"
+      "LOCAL_FAULT_SCAN_PERIOD_MS=${LOCAL_FAULT_SCAN_PERIOD_MS}"
+      "LOCAL_FAULT_SCAN_SIZE_MB=${LOCAL_FAULT_SCAN_SIZE_MB}"
+      "MIN_LOCAL_PAGES=${MIN_LOCAL_PAGES}"
+      "MIN_REMOTE_PAGES=${MIN_REMOTE_PAGES}"
+      "START_CONSECUTIVE=${START_CONSECUTIVE}"
+      "START_CAPACITY_MARGIN_PCT=${START_CAPACITY_MARGIN_PCT}"
+      "STOP_CAPACITY_RATIO_THRESHOLD=${STOP_CAPACITY_RATIO_THRESHOLD}"
+      "P75_STAGNATION_REQUIRED_DECREASE_PCT=${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
+      "P75_STAGNATION_REQUIRED_WINDOWS=${P75_STAGNATION_REQUIRED_WINDOWS}"
+      "P75_STAGNATION_RESTART_DEGRADATION_PCT=${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
+      "P75_STAGNATION_RESTART_REQUIRED_WINDOWS=${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
+      "REMOTE_RESTART_IMPROVEMENT_PCT=${REMOTE_RESTART_IMPROVEMENT_PCT}"
+      "LOCAL_NODE=${LOCAL_NODE}"
+      "REMOTE_NODE=${REMOTE_NODE}"
+      "MIGRATION_ENABLED_PATH=${MIGRATION_ENABLED_PATH}"
       "MGLRU_ENABLED=${MGLRU_ENABLED}"
       "DEMOTION_ENABLED=$(policy_demotion_enabled "${CONFIG}")"
       "DEMOTION_TARGET=$(policy_demotion_target "${CONFIG}")"
       "NUMA_SCAN_SIZE_MB=${NUMA_SCAN_SIZE_MB}"
       "NUMA_SCAN_PERIOD_MIN_MS=${NUMA_SCAN_PERIOD_MIN_MS}"
+      "NUMA_SCAN_PERIOD_MAX_MS=${NUMA_SCAN_PERIOD_MAX_MS}"
+      "NUMA_SCAN_DELAY_MS=${NUMA_SCAN_DELAY_MS}"
       "THP_MODE=${THP_MODE}"
       "THP_DEFRAG=${THP_DEFRAG}"
       "${CONTROLLER_RUNNER}"
@@ -769,12 +663,12 @@ run_case() {
     printf 'demotion_target=%s\n' "$(policy_demotion_target "${CONFIG}")"
     printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
     printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
-    printf 'local_fault_rate_override=%s\n' "${LOCAL_FAULT_RATE}"
-    printf 'remote_fault_rate_override=%s\n' "${REMOTE_FAULT_RATE}"
+    printf 'numa_scan_period_max_ms=%s\n' "${NUMA_SCAN_PERIOD_MAX_MS}"
+    printf 'numa_scan_delay_ms=%s\n' "${NUMA_SCAN_DELAY_MS}"
     printf 'local_fault_scan_period_ms_override=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
     printf 'local_fault_scan_size_mb_override=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
-    printf 'remote_fault_scan_period_ms_override=%s\n' "${REMOTE_FAULT_SCAN_PERIOD_MS}"
-    printf 'remote_fault_scan_size_mb_override=%s\n' "${REMOTE_FAULT_SCAN_SIZE_MB}"
+    printf 'migration_enabled=%s\n' "$(read_file "${MIGRATION_ENABLED_PATH}")"
+    printf 'disable_swap=%s\n' "${DISABLE_SWAP}"
     printf 'placement=%s\n' "${placement_display}"
     printf 'command=%s\n' "${cmd_display}"
     printf 'controller_enabled=%s\n' "${controller_enabled}"
@@ -784,33 +678,37 @@ run_case() {
       printf 'controller_outdir=%s\n' "${controller_out}"
       printf 'controller_csv=%s\n' "${controller_out}/controller.csv"
       printf 'controller_workload_command=%s\n' "${workload_command_quoted}"
-      printf 'controller_window_sec=%s\n' "${CONTROLLER_WINDOW_SEC}"
-      printf 'controller_local_rate=%s\n' "${CONTROLLER_LOCAL_RATE}"
-      printf 'controller_remote_rate=%s\n' "${CONTROLLER_REMOTE_RATE}"
-      printf 'controller_local_fault_scan_period_ms=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}"
-      printf 'controller_local_fault_scan_size_mb=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}"
-      printf 'controller_remote_fault_scan_period_ms=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS}"
-      printf 'controller_remote_fault_scan_size_mb=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB}"
-      printf 'controller_min_local_pages=%s\n' "${CONTROLLER_MIN_LOCAL_PAGES}"
-      printf 'controller_min_remote_pages=%s\n' "${CONTROLLER_MIN_REMOTE_PAGES}"
-      printf 'controller_consecutive_effective=%s\n' "${CONTROLLER_CONSECUTIVE_EFFECTIVE}"
-      printf 'controller_consecutive_no_improve=%s\n' "${CONTROLLER_CONSECUTIVE_NO_IMPROVE}"
-      printf 'controller_restart_remote_share_threshold=%s\n' "${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD}"
-      printf 'controller_consecutive_restart=%s\n' "${CONTROLLER_CONSECUTIVE_RESTART}"
-      printf 'controller_restart_grace_windows=%s\n' "${CONTROLLER_RESTART_GRACE_WINDOWS}"
-      printf 'controller_numa_balancing_on=%s\n' "${CONTROLLER_NUMA_BALANCING_ON}"
-      printf 'controller_numa_balancing_off=%s\n' "${CONTROLLER_NUMA_BALANCING_OFF}"
+      printf 'controller_policy=%s\n' "${CONTROLLER_POLICY}"
+      printf 'controller_csv_schema=%s\n' "${CONTROLLER_POLICY}"
+      printf 'controller_window_sec=%s\n' "${WINDOW_SEC}"
+      printf 'controller_cycle_window_min_sec=%s\n' "${CYCLE_WINDOW_MIN_SEC}"
+      printf 'controller_cycle_window_max_sec=%s\n' "${CYCLE_WINDOW_MAX_SEC}"
+      printf 'controller_local_rate=%s\n' "${LOCAL_RATE}"
+      printf 'controller_local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+      printf 'controller_local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+      printf 'controller_min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
+      printf 'controller_min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
+      printf 'controller_start_consecutive=%s\n' "${START_CONSECUTIVE}"
+      printf 'controller_start_capacity_margin_pct=%s\n' "${START_CAPACITY_MARGIN_PCT}"
+      printf 'controller_stop_capacity_ratio_threshold=%s\n' "${STOP_CAPACITY_RATIO_THRESHOLD}"
+      printf 'controller_p75_stagnation_required_decrease_pct=%s\n' "${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
+      printf 'controller_p75_stagnation_required_windows=%s\n' "${P75_STAGNATION_REQUIRED_WINDOWS}"
+      printf 'controller_p75_stagnation_restart_degradation_pct=%s\n' "${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
+      printf 'controller_p75_stagnation_restart_required_windows=%s\n' "${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
+      printf 'controller_remote_restart_improvement_pct=%s\n' "${REMOTE_RESTART_IMPROVEMENT_PCT}"
+      printf 'controller_local_node=%s\n' "${LOCAL_NODE}"
+      printf 'controller_remote_node=%s\n' "${REMOTE_NODE}"
+      printf 'controller_migration_enabled_path=%s\n' "${MIGRATION_ENABLED_PATH}"
     fi
     printf 'cpu_node=%s\n' "${CPU_NODE}"
     printf 'omp_threads=%s\n' "${OMP_THREADS}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
-    printf 'sample_interval_sec=%s\n' "${SAMPLE_INTERVAL_SEC}"
+    printf 'timeout_kill_after_sec=%s\n' "${TIMEOUT_KILL_AFTER_SEC}"
     printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
     printf 'compact_guest_memory=%s\n' "${COMPACT_GUEST_MEMORY}"
     printf 'thp_mode=%s\n' "${THP_MODE}"
     printf 'thp_defrag=%s\n' "${THP_DEFRAG}"
     printf 'realworld_size_profile=%s\n' "${REALWORLD_SIZE_PROFILE}"
-    printf 'trace_bc_trial_promotions=%s\n' "${TRACE_BC_TRIAL_PROMOTIONS}"
     case "${WORKLOAD}" in
       pr|gapbs_pr|bc|gapbs_bc)
         printf 'gapbs_graph_mode=generated\n'
@@ -828,6 +726,9 @@ run_case() {
         printf 'silo_scale_factor=%s\n' "${SILO_SCALE_FACTOR}"
         printf 'silo_ops_per_worker=%s\n' "${SILO_OPS_PER_WORKER}"
         printf 'silo_threads=%s\n' "${SILO_THREADS:-${OMP_THREADS}}"
+        printf 'silo_zipf_theta=%s\n' "${SILO_ZIPF_THETA}"
+        printf 'silo_zipf_reverse=%s\n' "${SILO_ZIPF_REVERSE}"
+        printf 'silo_workload_mix=%s\n' "${SILO_WORKLOAD_MIX}"
         ;;
       liblinear)
         printf 'liblinear_dataset=%s\n' "${LIBLINEAR_DATASET}"
@@ -843,6 +744,9 @@ run_case() {
   log "starting config=${CONFIG} workload=${WORKLOAD}: ${cmd_display}"
   start_s="$(date +%s)"
   start_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\n' "${start_s}" > "${OUTDIR}/workload.start.epoch"
+  printf '%s\n' "${start_utc}" > "${OUTDIR}/workload.start.utc"
+  oom_kill_before="$(read_vmstat_value oom_kill)"
   set +e
   (
     export OMP_NUM_THREADS="${OMP_THREADS}"
@@ -851,35 +755,24 @@ run_case() {
     export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-4}"
     export BENCHMARK_DIR TOOLS_DIR WORKDIR REALWORLD_SIZE_PROFILE
     /usr/bin/time -v -o "${OUTDIR}/time.txt" \
-      timeout "${TIMEOUT_SEC}" "${cmd[@]}" \
-      > "${OUTDIR}/workload.stdout.log" 2> "${OUTDIR}/workload.stderr.log" &
-    child=$!
-    sample_memory "${child}" "${OUTDIR}/memory_samples.csv" &
-    sampler=$!
-    sample_promotion "${child}" "${OUTDIR}/promotion_samples.csv" &
-    promotion_sampler=$!
-    wait "${child}"
-    child_status=$?
-    if [[ -r "${OUTDIR}/promotion_samples.csv.start" ]]; then
-      append_promotion_sample \
-        "${OUTDIR}/promotion_samples.csv" \
-        "$(cat "${OUTDIR}/promotion_samples.csv.start")" \
-        final
-    fi
-    kill "${sampler}" 2>/dev/null || true
-    kill "${promotion_sampler}" 2>/dev/null || true
-    wait "${sampler}" 2>/dev/null || true
-    wait "${promotion_sampler}" 2>/dev/null || true
-    exit "${child_status}"
+      timeout --signal=TERM --kill-after="${TIMEOUT_KILL_AFTER_SEC}s" "${TIMEOUT_SEC}" "${cmd[@]}" \
+      > "${OUTDIR}/workload.stdout.log" 2> "${OUTDIR}/workload.stderr.log"
   )
   status=$?
   set -e
   end_s="$(date +%s)"
   end_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   elapsed_s=$((end_s - start_s))
+  oom_kill_after="$(read_vmstat_value oom_kill)"
+  oom_kill_delta=$((oom_kill_after - oom_kill_before))
+  ((oom_kill_delta < 0)) && oom_kill_delta=0
+  [[ "${status}" == "124" ]] && timed_out=1
+  ((oom_kill_delta > 0)) && oom_confirmed=1
+  dmesg --ctime > "${OUTDIR}/dmesg.after.log" 2>&1 || true
 
   printf '%s\n' "${status}" > "${OUTDIR}/exit.status"
-  write_status "${status}" "${elapsed_s}" "${start_utc}" "${end_utc}"
+  write_status "${status}" "${elapsed_s}" "${start_utc}" "${end_utc}" \
+    "${timed_out}" "${oom_kill_before}" "${oom_kill_after}" "${oom_kill_delta}" "${oom_confirmed}"
   snapshot after
   log "finished config=${CONFIG} workload=${WORKLOAD} status=${status} elapsed_s=${elapsed_s}"
   return "${status}"

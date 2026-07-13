@@ -13,6 +13,7 @@ fi
 
 VMCTL="${VMCTL:-${ICCD_VMCTL:-${REPO_ROOT}/VM/vmctl.sh}}"
 KERNEL="${KERNEL:-${ICCD_KERNEL:-${REPO_ROOT}/linux-global-build/arch/x86/boot/bzImage}}"
+KERNEL_CMDLINE_EXTRA="${KERNEL_CMDLINE_EXTRA:-systemd.mask=systemd-networkd-wait-online.service}"
 BASE_ROOTFS="${BASE_ROOTFS:-/Serverless/Migration-friendly/qemu/build/ubuntu.img}"
 BASE_ROOTFS_FORMAT="${BASE_ROOTFS_FORMAT:-raw}"
 ROOT_DEVICE="${ROOT_DEVICE:-/dev/vda2}"
@@ -34,8 +35,8 @@ VM_RUN_TAG="${VM_RUN_TAG:-$(printf '%s' "${RUN_ID}" | cksum | awk '{print $1}')}
 VM_RUN_DIR_HOST="${VM_RUN_DIR_HOST:-/tmp/vm32-realworld-${VM_RUN_TAG}}"
 
 LOCAL_SIZES_GIB="${LOCAL_SIZES_GIB:-16 32 48}"
-CONFIGS="${CONFIGS:-migration_off tiering_0x2 tpp_0x4}"
-WORKLOADS="${WORKLOADS:-pr bc gups graph500 btree redis_uniform redis_ycsb_a faster_uniform faster_ycsb_a}"
+CONFIGS="${CONFIGS:-off on tpp ours}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 silo}"
 FAULT_BUCKET_CONTROLLER_DIR="${FAULT_BUCKET_CONTROLLER_DIR:-${REPO_ROOT}/design/fault_bucket_controller}"
 
 HOST_CPUS="${HOST_CPUS:-${ICCD_HOST_CPUS:-0-31}}"
@@ -48,60 +49,51 @@ HMAT_FAST_LATENCY_NS="${HMAT_FAST_LATENCY_NS:-${ICCD_HMAT_FAST_LATENCY_NS:-80}}"
 HMAT_SLOW_LATENCY_NS="${HMAT_SLOW_LATENCY_NS:-${ICCD_HMAT_SLOW_LATENCY_NS:-250}}"
 HMAT_FAST_BANDWIDTH="${HMAT_FAST_BANDWIDTH:-${ICCD_HMAT_FAST_BANDWIDTH:-40000M}}"
 HMAT_SLOW_BANDWIDTH="${HMAT_SLOW_BANDWIDTH:-${ICCD_HMAT_SLOW_BANDWIDTH:-10000M}}"
-ALL_LOCAL_FAST_MEM="${ALL_LOCAL_FAST_MEM:-152G}"
-ALL_LOCAL_SLOW_MEM="${ALL_LOCAL_SLOW_MEM:-4G}"
-ALL_SLOW_FAST_MEM="${ALL_SLOW_FAST_MEM:-4G}"
-ALL_SLOW_SLOW_MEM="${ALL_SLOW_SLOW_MEM:-152G}"
 MIGRATION_FAST_MEM="${MIGRATION_FAST_MEM:-16G}"
 MIGRATION_SLOW_MEM="${MIGRATION_SLOW_MEM:-128G}"
-ALL_LOCAL_FAST_HOST_NODE="${ALL_LOCAL_FAST_HOST_NODE:-0}"
-ALL_LOCAL_SLOW_HOST_NODE="${ALL_LOCAL_SLOW_HOST_NODE:-${SLOW_HOST_NODE}}"
-ALL_SLOW_FAST_HOST_NODE="${ALL_SLOW_FAST_HOST_NODE:-${FAST_HOST_NODE}}"
-ALL_SLOW_SLOW_HOST_NODE="${ALL_SLOW_SLOW_HOST_NODE:-${SLOW_HOST_NODE}}"
 MIGRATION_FAST_HOST_NODE="${MIGRATION_FAST_HOST_NODE:-${FAST_HOST_NODE}}"
 MIGRATION_SLOW_HOST_NODE="${MIGRATION_SLOW_HOST_NODE:-${SLOW_HOST_NODE}}"
 
-MIGRATION_OFF_PORT="${MIGRATION_OFF_PORT:-10160}"
-MIGRATION_ON_PORT="${MIGRATION_ON_PORT:-10161}"
-ALL_LOCAL_PORT="${ALL_LOCAL_PORT:-10162}"
-ALL_SLOW_PORT="${ALL_SLOW_PORT:-10163}"
-CONTROLLER_PORT="${CONTROLLER_PORT:-10165}"
+OFF_PORT="${OFF_PORT:-10160}"
+ON_PORT="${ON_PORT:-10161}"
+TPP_PORT="${TPP_PORT:-10164}"
+OURS_PORT="${OURS_PORT:-10165}"
 
 BENCHMARK_DIR="${BENCHMARK_DIR:-/Serverless/benchmark}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-21600}"
-SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-5}"
+TIMEOUT_KILL_AFTER_SEC="${TIMEOUT_KILL_AFTER_SEC:-60}"
 OMP_THREADS="${OMP_THREADS:-32}"
 MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
-NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-}"
-NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-}"
-LOCAL_FAULT_RATE="${LOCAL_FAULT_RATE:-}"
-REMOTE_FAULT_RATE="${REMOTE_FAULT_RATE:-}"
-LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-}"
-LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-}"
-REMOTE_FAULT_SCAN_PERIOD_MS="${REMOTE_FAULT_SCAN_PERIOD_MS:-}"
-REMOTE_FAULT_SCAN_SIZE_MB="${REMOTE_FAULT_SCAN_SIZE_MB:-}"
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-256}"
+NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+NUMA_SCAN_PERIOD_MAX_MS="${NUMA_SCAN_PERIOD_MAX_MS:-}"
+NUMA_SCAN_DELAY_MS="${NUMA_SCAN_DELAY_MS:-}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-64}"
 THP_MODE="${THP_MODE:-}"
 THP_DEFRAG="${THP_DEFRAG:-${THP_MODE}}"
 REALWORLD_SIZE_PROFILE="${REALWORLD_SIZE_PROFILE:-rss60}"
 VERIFY_REQUIRED_STATE="${VERIFY_REQUIRED_STATE:-1}"
-TRACE_BC_TRIAL_PROMOTIONS="${TRACE_BC_TRIAL_PROMOTIONS:-0}"
-FORBID_HOST_NODE1="${FORBID_HOST_NODE1:-1}"
-CONTROLLER_WINDOW_SEC="${CONTROLLER_WINDOW_SEC:-5}"
-CONTROLLER_LOCAL_RATE="${CONTROLLER_LOCAL_RATE:-5}"
-CONTROLLER_REMOTE_RATE="${CONTROLLER_REMOTE_RATE:-5}"
-CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS="${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
-CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB="${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB:-256}"
-CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS="${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS:-${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}}"
-CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB="${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB:-${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}}"
-CONTROLLER_MIN_LOCAL_PAGES="${CONTROLLER_MIN_LOCAL_PAGES:-1024}"
-CONTROLLER_MIN_REMOTE_PAGES="${CONTROLLER_MIN_REMOTE_PAGES:-1024}"
-CONTROLLER_CONSECUTIVE_EFFECTIVE="${CONTROLLER_CONSECUTIVE_EFFECTIVE:-2}"
-CONTROLLER_CONSECUTIVE_NO_IMPROVE="${CONTROLLER_CONSECUTIVE_NO_IMPROVE:-2}"
-CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD="${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD:-1.2}"
-CONTROLLER_CONSECUTIVE_RESTART="${CONTROLLER_CONSECUTIVE_RESTART:-2}"
-CONTROLLER_RESTART_GRACE_WINDOWS="${CONTROLLER_RESTART_GRACE_WINDOWS:-1}"
-CONTROLLER_NUMA_BALANCING_ON="${CONTROLLER_NUMA_BALANCING_ON:-2}"
-CONTROLLER_NUMA_BALANCING_OFF="${CONTROLLER_NUMA_BALANCING_OFF:-0}"
+DISABLE_SWAP="${DISABLE_SWAP:-1}"
+FORBID_HOST_NODE1="${FORBID_HOST_NODE1:-0}"
+
+WINDOW_SEC="${WINDOW_SEC:-1}"
+CYCLE_WINDOW_MIN_SEC="${CYCLE_WINDOW_MIN_SEC:-5}"
+CYCLE_WINDOW_MAX_SEC="${CYCLE_WINDOW_MAX_SEC:-20}"
+LOCAL_RATE="${LOCAL_RATE:-5}"
+MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
+MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
+START_CONSECUTIVE="${START_CONSECUTIVE:-2}"
+START_CAPACITY_MARGIN_PCT="${START_CAPACITY_MARGIN_PCT:-10}"
+STOP_CAPACITY_RATIO_THRESHOLD="${STOP_CAPACITY_RATIO_THRESHOLD:-0.9}"
+P75_STAGNATION_REQUIRED_DECREASE_PCT="${P75_STAGNATION_REQUIRED_DECREASE_PCT:-10}"
+P75_STAGNATION_REQUIRED_WINDOWS="${P75_STAGNATION_REQUIRED_WINDOWS:-3}"
+P75_STAGNATION_RESTART_DEGRADATION_PCT="${P75_STAGNATION_RESTART_DEGRADATION_PCT:-10}"
+P75_STAGNATION_RESTART_REQUIRED_WINDOWS="${P75_STAGNATION_RESTART_REQUIRED_WINDOWS:-3}"
+REMOTE_RESTART_IMPROVEMENT_PCT="${REMOTE_RESTART_IMPROVEMENT_PCT:-10}"
+LOCAL_NODE="${LOCAL_NODE:-0}"
+REMOTE_NODE="${REMOTE_NODE:-1}"
+MIGRATION_ENABLED_PATH="${MIGRATION_ENABLED_PATH:-/sys/kernel/mm/numa_balancing/migration_enabled}"
 RESUME="${RESUME:-1}"
 CLEAN_STAGE="${CLEAN_STAGE:-0}"
 CLEAN_SCRIPTS="${CLEAN_SCRIPTS:-1}"
@@ -111,10 +103,11 @@ SSH_RETRY_DELAY_SEC="${SSH_RETRY_DELAY_SEC:-10}"
 SSH_READY_ATTEMPTS="${SSH_READY_ATTEMPTS:-30}"
 SSH_READY_DELAY_SEC="${SSH_READY_DELAY_SEC:-10}"
 POST_STAGE_SSH_SETTLE_SEC="${POST_STAGE_SSH_SETTLE_SEC:-30}"
-REBOOT_AFTER_STAGE="${REBOOT_AFTER_STAGE:-1}"
+REBOOT_AFTER_STAGE="${REBOOT_AFTER_STAGE:-0}"
 STOP_VM_ON_SUCCESS="${STOP_VM_ON_SUCCESS:-1}"
 STOP_VM_ON_FAILURE="${STOP_VM_ON_FAILURE:-1}"
 STOP_VM_ON_EXIT="${STOP_VM_ON_EXIT:-1}"
+STOP_VM_WAIT_SEC="${STOP_VM_WAIT_SEC:-90}"
 DRY_RUN="${DRY_RUN:-0}"
 
 PR_ITERATIONS="${PR_ITERATIONS:-20}"
@@ -123,28 +116,33 @@ PR_TRIALS="${PR_TRIALS:-8}"
 BC_ITERATIONS="${BC_ITERATIONS:-1}"
 BC_TRIALS="${BC_TRIALS:-8}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
-GRAPH=""
 DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-1}"
 COMPACT_GUEST_MEMORY="${COMPACT_GUEST_MEMORY:-1}"
+DROP_HOST_CACHES_BEFORE_VM_BOOT="${DROP_HOST_CACHES_BEFORE_VM_BOOT:-1}"
+DROP_HOST_CACHES_BEFORE_GUEST_RUN="${DROP_HOST_CACHES_BEFORE_GUEST_RUN:-1}"
 GUPS_MEMORY_GB="${GUPS_MEMORY_GB:-64}"
 GRAPH500_SCALE="${GRAPH500_SCALE:-28}"
 XSBENCH_GRID="${XSBENCH_GRID:-130000}"
 XSBENCH_PARTICLES="${XSBENCH_PARTICLES:-90000000}"
 DELETE_VM_IMAGES="${DELETE_VM_IMAGES:-1}"
-DISABLE_SMT="${DISABLE_SMT:-1}"
-RESTORE_SMT="${RESTORE_SMT:-1}"
+DISABLE_SMT="${DISABLE_SMT:-0}"
+RESTORE_SMT="${RESTORE_SMT:-0}"
 SILO_BIN_HOST="${SILO_BIN_HOST:-${BENCHMARK_DIR}/silo/out-perf.masstree/benchmarks/dbtest}"
 SILO_LZ4_HOST="${SILO_LZ4_HOST:-${BENCHMARK_DIR}/silo/third-party/lz4/liblz4.so}"
+SILO_ZIPF_THETA="${SILO_ZIPF_THETA:-}"
+SILO_ZIPF_REVERSE="${SILO_ZIPF_REVERSE:-1}"
+SILO_WORKLOAD_MIX="${SILO_WORKLOAD_MIX:-}"
 LIBLINEAR_ROOT_HOST="${LIBLINEAR_ROOT_HOST:-${BENCHMARK_DIR}/liblinear-multicore-2.47}"
 LIBLINEAR_DATASET="${LIBLINEAR_DATASET:-kdd12}"
 LIBLINEAR_TRAIN_HOST="${LIBLINEAR_TRAIN_HOST:-${LIBLINEAR_ROOT_HOST}/train}"
 LIBLINEAR_DATASET_HOST="${LIBLINEAR_DATASET_HOST:-${LIBLINEAR_ROOT_HOST}/datasets/${LIBLINEAR_DATASET}}"
+LIBLINEAR_SOLVER="${LIBLINEAR_SOLVER:-6}"
+LIBLINEAR_THREADS="${LIBLINEAR_THREADS:-${OMP_THREADS}}"
 
 CURRENT_VM_NAME=""
 CURRENT_LOCAL_SIZE_GIB=""
 CURRENT_LOCAL_LABEL=""
 CURRENT_FAST_MEM=""
-EXPERIMENT_SCRIPTS_STAGED=0
 ORIG_SMT_CONTROL=""
 TOTAL_WORKLOAD_CASES=0
 CURRENT_PROGRESS_BASE=0
@@ -159,7 +157,90 @@ die() {
 }
 
 vmctl_cmd() {
-  VM_RUN_DIR="${VM_RUN_DIR_HOST}" "${VMCTL}" "$@"
+  local subcmd="${1:-}"
+  if VM_RUN_DIR="${VM_RUN_DIR_HOST}" "${VMCTL}" "$@"; then
+    return 0
+  fi
+  local rc=$?
+  case "${subcmd}" in
+    boot|stop)
+      if [[ "$(id -u)" != "0" ]]; then
+        log "vmctl ${subcmd} failed, retrying with sudo -n"
+        sudo -n env VM_RUN_DIR="${VM_RUN_DIR_HOST}" "${VMCTL}" "$@"
+        return $?
+      fi
+      ;;
+  esac
+  return "${rc}"
+}
+
+qemu_active_pids_for_name() {
+  local name="$1"
+  ps -eo pid=,stat=,args= |
+    awk -v name="${name}" '
+      index($0, "qemu-system-") && index($0, "-name " name) {
+        if ($2 !~ /^Z/) {
+          print $1
+        }
+      }'
+}
+
+wait_qemu_stopped() {
+  local name="$1" timeout="${2:-${STOP_VM_WAIT_SEC}}" elapsed=0
+  local -a pids=()
+
+  while ((elapsed < timeout)); do
+    mapfile -t pids < <(qemu_active_pids_for_name "${name}")
+    if ((${#pids[@]} == 0)); then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  mapfile -t pids < <(qemu_active_pids_for_name "${name}")
+  printf 'active qemu pids after %ss for %s: %s\n' "${timeout}" "${name}" "${pids[*]:-none}" >&2
+  return 1
+}
+
+kill_qemu_pids() {
+  local signal="$1"
+  shift
+  (($# > 0)) || return 0
+
+  if kill "-${signal}" "$@" 2>/dev/null; then
+    return 0
+  fi
+  if [[ "$(id -u)" != "0" ]]; then
+    sudo -n kill "-${signal}" "$@" 2>/dev/null
+    return $?
+  fi
+  return 1
+}
+
+force_stop_qemu_name() {
+  local name="$1"
+  local -a pids=()
+
+  mapfile -t pids < <(qemu_active_pids_for_name "${name}")
+  if ((${#pids[@]} == 0)); then
+    return 0
+  fi
+
+  printf 'force TERM qemu name=%s pids=%s\n' "${name}" "${pids[*]}"
+  kill_qemu_pids TERM "${pids[@]}" || true
+  if wait_qemu_stopped "${name}" 15; then
+    return 0
+  fi
+
+  mapfile -t pids < <(qemu_active_pids_for_name "${name}")
+  if ((${#pids[@]} == 0)); then
+    return 0
+  fi
+
+  printf 'force KILL qemu name=%s pids=%s\n' "${name}" "${pids[*]}"
+  kill_qemu_pids KILL "${pids[@]}" || true
+  wait_qemu_stopped "${name}" 15
 }
 
 as_root() {
@@ -216,13 +297,10 @@ expand_configs() {
   for item in "$@"; do
     case "${item}" in
       all|default)
-        printf '%s\n' migration_off tiering_0x2 tpp_0x4
+        printf '%s\n' off on tpp ours
         ;;
-      migration_off|tiering_0x2|migration_on|tpp_0x4|tpp|all_local|all_slow|controller_0x2)
+      off|on|tpp|ours)
         printf '%s\n' "${item}"
-        ;;
-      controller)
-        printf '%s\n' controller_0x2
         ;;
       *)
         die "unknown config '${item}'"
@@ -308,8 +386,7 @@ expand_workloads() {
     case "${item}" in
       all|default)
         printf '%s\n' \
-          pr bc gups graph500 btree \
-          redis_uniform redis_ycsb_a faster_uniform faster_ycsb_a
+          pr bc gups btree graph500 silo
         ;;
       *)
         printf '%s\n' "${item}"
@@ -318,109 +395,86 @@ expand_workloads() {
   done | awk '!seen[$0]++'
 }
 
-configs_need_controller() {
+configs_need_ours() {
   local config
   while read -r config; do
-    case "${config}" in
-      controller_0x2)
-        return 0
-        ;;
-    esac
+    [[ "${config}" == "ours" ]] && return 0
   done < <(expand_configs ${CONFIGS})
   return 1
 }
 
-workloads_need_gapbs_graph() {
-  local workload
-  while read -r workload; do
-    case "${workload}" in
-      pr|bc|gapbs_pr|gapbs_bc|gapbs_bfs|gapbs_cc|gapbs_sssp|bfs|cc|sssp)
-        return 0
-        ;;
-    esac
-  done < <(expand_workloads ${WORKLOADS})
-  return 1
-}
-
-use_gapbs_data_disk() {
-  return 1
-}
-
 drop_host_page_cache() {
+  log "drop host page cache"
   sync || true
   as_root sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 }
 
-mount_gapbs_data_disk_guest() {
-  return 0
-}
-
-unmount_gapbs_data_disk_guest() {
-  return 0
-}
-
 config_fast_mem() {
   case "$1" in
-    migration_off|migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf '%s\n' "${CURRENT_FAST_MEM:-${MIGRATION_FAST_MEM}}" ;;
-    all_local) printf '%s\n' "${ALL_LOCAL_FAST_MEM}" ;;
-    all_slow) printf '%s\n' "${ALL_SLOW_FAST_MEM}" ;;
+    off|on|tpp|ours) printf '%s\n' "${CURRENT_FAST_MEM:-${MIGRATION_FAST_MEM}}" ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_slow_mem() {
   case "$1" in
-    migration_off|migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf '%s\n' "${MIGRATION_SLOW_MEM}" ;;
-    all_local) printf '%s\n' "${ALL_LOCAL_SLOW_MEM}" ;;
-    all_slow) printf '%s\n' "${ALL_SLOW_SLOW_MEM}" ;;
+    off|on|tpp|ours) printf '%s\n' "${MIGRATION_SLOW_MEM}" ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_fast_host_node() {
   case "$1" in
-    migration_off|migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf '%s\n' "${MIGRATION_FAST_HOST_NODE}" ;;
-    all_local) printf '%s\n' "${ALL_LOCAL_FAST_HOST_NODE}" ;;
-    all_slow) printf '%s\n' "${ALL_SLOW_FAST_HOST_NODE}" ;;
+    off|on|tpp|ours) printf '%s\n' "${MIGRATION_FAST_HOST_NODE}" ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_slow_host_node() {
   case "$1" in
-    migration_off|migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf '%s\n' "${MIGRATION_SLOW_HOST_NODE}" ;;
-    all_local) printf '%s\n' "${ALL_LOCAL_SLOW_HOST_NODE}" ;;
-    all_slow) printf '%s\n' "${ALL_SLOW_SLOW_HOST_NODE}" ;;
+    off|on|tpp|ours) printf '%s\n' "${MIGRATION_SLOW_HOST_NODE}" ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_port() {
   case "$1" in
-    migration_off) printf '%s\n' "${MIGRATION_OFF_PORT}" ;;
-    migration_on|tiering_0x2) printf '%s\n' "${MIGRATION_ON_PORT}" ;;
-    tpp|tpp_0x4) printf '%s\n' "${TPP_PORT:-10164}" ;;
-    controller_0x2) printf '%s\n' "${CONTROLLER_PORT}" ;;
-    all_local) printf '%s\n' "${ALL_LOCAL_PORT}" ;;
-    all_slow) printf '%s\n' "${ALL_SLOW_PORT}" ;;
+    off) printf '%s\n' "${OFF_PORT}" ;;
+    on) printf '%s\n' "${ON_PORT}" ;;
+    tpp) printf '%s\n' "${TPP_PORT}" ;;
+    ours) printf '%s\n' "${OURS_PORT}" ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_numa_balancing() {
   case "$1" in
-    migration_on|tiering_0x2|controller_0x2) printf '2\n' ;;
-    tpp|tpp_0x4) printf '4\n' ;;
-    all_local|all_slow|migration_off) printf '0\n' ;;
+    off) printf '0\n' ;;
+    on|ours) printf '2\n' ;;
+    tpp) printf '4\n' ;;
+    *) die "unknown config '$1'" ;;
+  esac
+}
+
+config_migration_enabled() {
+  case "$1" in
+    off) printf '0\n' ;;
+    on|tpp|ours) printf '1\n' ;;
+    *) die "unknown config '$1'" ;;
+  esac
+}
+
+config_demotion_enabled() {
+  case "$1" in
+    off) printf 'false\n' ;;
+    on|tpp|ours) printf 'true\n' ;;
     *) die "unknown config '$1'" ;;
   esac
 }
 
 config_placement() {
   case "$1" in
-    all_local) printf 'numactl --cpunodebind=0 --membind=0\n' ;;
-    all_slow) printf 'numactl --cpunodebind=0 --membind=1\n' ;;
-    migration_off|migration_on|tiering_0x2|tpp|tpp_0x4|controller_0x2) printf 'numactl --cpunodebind=0\n' ;;
+    off|on|tpp|ours) printf 'numactl --cpunodebind=0\n' ;;
     *) die "unknown config '$1'" ;;
   esac
 }
@@ -429,6 +483,8 @@ cleanup_current_vm() {
   if [[ -n "${CURRENT_VM_NAME}" && "${STOP_VM_ON_EXIT}" == "1" && -x "${VMCTL}" ]]; then
     log "cleanup stop ${CURRENT_VM_NAME}"
     vmctl_cmd stop --name "${CURRENT_VM_NAME}" >/dev/null 2>&1 || true
+    force_stop_qemu_name "${CURRENT_VM_NAME}" >/dev/null 2>&1 || true
+    CURRENT_VM_NAME=""
   fi
 }
 
@@ -462,11 +518,12 @@ Default slow host node: ${SLOW_HOST_NODE}
 HMAT:            fast ${HMAT_FAST_LATENCY_NS}ns/${HMAT_FAST_BANDWIDTH}, slow ${HMAT_SLOW_LATENCY_NS}ns/${HMAT_SLOW_BANDWIDTH}
 GAPBS graph:     generated g${GAPBS_GRAPH_SCALE}
 GAPBS data disk: disabled
+NUMA scan:       ${NUMA_SCAN_SIZE_MB}MB, min period ${NUMA_SCAN_PERIOD_MIN_MS}ms
+Local sample:    ${LOCAL_FAULT_SCAN_SIZE_MB}MB/${LOCAL_FAULT_SCAN_PERIOD_MS}ms
 THP:             mode=${THP_MODE:-default} defrag=${THP_DEFRAG:-default}
 Delete images:   ${DELETE_VM_IMAGES}
 Forbid host n1:  ${FORBID_HOST_NODE1}
-Controller:      dir=${FAULT_BUCKET_CONTROLLER_DIR} window=${CONTROLLER_WINDOW_SEC}s local_rate=${CONTROLLER_LOCAL_RATE} remote_rate=${CONTROLLER_REMOTE_RATE}
-Controller scan: local=${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}MB/${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}ms remote=${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB}MB/${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS}ms
+Ours controller: window=${WINDOW_SEC}s cycle=${CYCLE_WINDOW_MIN_SEC}-${CYCLE_WINDOW_MAX_SEC}s local_rate=${LOCAL_RATE} min_pages=${MIN_LOCAL_PAGES}/${MIN_REMOTE_PAGES} start_consecutive=${START_CONSECUTIVE} start_margin_pct=${START_CAPACITY_MARGIN_PCT} stop_capacity_ratio=${STOP_CAPACITY_RATIO_THRESHOLD} p75_stagnation=${P75_STAGNATION_REQUIRED_DECREASE_PCT}%/${P75_STAGNATION_REQUIRED_WINDOWS}windows restart=local+${P75_STAGNATION_RESTART_DEGRADATION_PCT}%+remote-${REMOTE_RESTART_IMPROVEMENT_PCT}%/${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}windows nodes=${LOCAL_NODE}/${REMOTE_NODE}
 
 VM plan:
 EOF
@@ -476,10 +533,11 @@ EOF
     CURRENT_LOCAL_LABEL="local${local_size}"
     CURRENT_FAST_MEM="${local_size}G"
     for config in "${config_list[@]}"; do
-      printf '  %-7s %-14s port=%s fast=%s@host[%s] slow=%s@host[%s] numa_balancing=%s placement="%s"\n' \
+      printf '  %-7s %-5s port=%s fast=%s@host[%s] slow=%s@host[%s] numa=%s migration=%s demotion=%s placement="%s"\n' \
         "${CURRENT_LOCAL_LABEL}" "${config}" "$(config_port "${config}")" "$(config_fast_mem "${config}")" \
         "$(config_fast_host_node "${config}")" "$(config_slow_mem "${config}")" \
         "$(config_slow_host_node "${config}")" "$(config_numa_balancing "${config}")" \
+        "$(config_migration_enabled "${config}")" "$(config_demotion_enabled "${config}")" \
         "$(config_placement "${config}")"
     done
   done
@@ -489,7 +547,7 @@ EOF
   for local_size in "${local_size_list[@]}"; do
     for config in "${config_list[@]}"; do
       for workload in "${workload_list[@]}"; do
-        printf '  local%-3s %-14s %s\n' "${local_size}" "${config}" "${workload}"
+        printf '  local%-3s %-5s %s\n' "${local_size}" "${config}" "${workload}"
         total=$((total + 1))
       done
     done
@@ -510,7 +568,7 @@ preflight() {
   [[ -x "${REPO_ROOT}/scripts/stage_workloads_to_vm.sh" ]] || die "missing stage script"
   [[ -x "${SCRIPT_DIR}/run_vm_sweep_guest.sh" ]] || die "missing guest runner"
   [[ -x "${SCRIPT_DIR}/run_workload_case_guest.sh" ]] || die "missing case runner"
-  if configs_need_controller; then
+  if configs_need_ours; then
     [[ -d "${FAULT_BUCKET_CONTROLLER_DIR}" ]] || die "missing fault bucket controller dir: ${FAULT_BUCKET_CONTROLLER_DIR}"
     [[ -x "${FAULT_BUCKET_CONTROLLER_DIR}/bucket_latency_controller.py" ]] || die "missing executable controller: ${FAULT_BUCKET_CONTROLLER_DIR}/bucket_latency_controller.py"
     [[ -x "${FAULT_BUCKET_CONTROLLER_DIR}/run_guest.sh" ]] || die "missing executable controller runner: ${FAULT_BUCKET_CONTROLLER_DIR}/run_guest.sh"
@@ -521,10 +579,6 @@ preflight() {
   [[ -d "/sys/devices/system/node/node${FAST_HOST_NODE}" ]] || die "missing fast host node ${FAST_HOST_NODE}"
   [[ -d "/sys/devices/system/node/node${SLOW_HOST_NODE}" ]] || die "missing slow host node ${SLOW_HOST_NODE}"
   [[ "${DISABLE_SMT}" != "1" || "$(id -u)" == "0" ]] || sudo -n true >/dev/null 2>&1 || die "sudo -n is required to disable SMT"
-  if use_gapbs_data_disk; then
-    sudo -n true >/dev/null 2>&1 || die "sudo -n is required to create/mount GAPBS data disk"
-    ensure_gapbs_data_disk
-  fi
   if expand_workloads ${WORKLOADS} | grep -qx silo; then
     [[ -d "${BENCHMARK_DIR}/silo" ]] || die "missing Silo source tree: ${BENCHMARK_DIR}/silo"
   fi
@@ -534,19 +588,17 @@ preflight() {
   fi
 }
 
-ensure_gapbs_data_disk() {
-  return 0
-}
-
 write_host_config() {
   mkdir -p "${IMAGES_DIR}" "${HOST_LOG_DIR}" "${GUEST_RESULTS_DIR}" "${SUMMARY_DIR}" "${VM_RUN_DIR_HOST}"
   {
     printf 'date_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'run_id=%s\n' "${RUN_ID}"
     printf 'required_protocol_doc=%s\n' "${ICCD_REQUIRED_PROTOCOL_DOC:-}"
+    printf 'baseline_reference_doc=%s\n' "${ICCD_BASELINE_REFERENCE_DOC:-}"
     printf 'repo_root=%s\n' "${REPO_ROOT}"
     printf 'experiment_root=%s\n' "${EXP_ROOT}"
     printf 'kernel=%s\n' "${KERNEL}"
+    printf 'kernel_cmdline_extra=%s\n' "${KERNEL_CMDLINE_EXTRA}"
     printf 'base_rootfs=%s\n' "${BASE_ROOTFS}"
     printf 'base_rootfs_format=%s\n' "${BASE_ROOTFS_FORMAT}"
     printf 'root_device=%s\n' "${ROOT_DEVICE}"
@@ -559,10 +611,6 @@ write_host_config() {
     printf 'guest_node0_cpus=%s\n' "${GUEST_NODE0_CPUS}"
     printf 'fast_host_node=%s\n' "${FAST_HOST_NODE}"
     printf 'slow_host_node=%s\n' "${SLOW_HOST_NODE}"
-    printf 'all_local_fast_host_node=%s\n' "${ALL_LOCAL_FAST_HOST_NODE}"
-    printf 'all_local_slow_host_node=%s\n' "${ALL_LOCAL_SLOW_HOST_NODE}"
-    printf 'all_slow_fast_host_node=%s\n' "${ALL_SLOW_FAST_HOST_NODE}"
-    printf 'all_slow_slow_host_node=%s\n' "${ALL_SLOW_SLOW_HOST_NODE}"
     printf 'migration_fast_host_node=%s\n' "${MIGRATION_FAST_HOST_NODE}"
     printf 'migration_slow_host_node=%s\n' "${MIGRATION_SLOW_HOST_NODE}"
     printf 'slow_memory_mode=%s\n' "${SLOW_MEMORY_MODE}"
@@ -575,55 +623,62 @@ write_host_config() {
     printf 'migration_fast_mem_default=%s\n' "${MIGRATION_FAST_MEM}"
     printf 'migration_slow_mem=%s\n' "${MIGRATION_SLOW_MEM}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
-    printf 'sample_interval_sec=%s\n' "${SAMPLE_INTERVAL_SEC}"
+    printf 'timeout_kill_after_sec=%s\n' "${TIMEOUT_KILL_AFTER_SEC}"
     printf 'omp_threads=%s\n' "${OMP_THREADS}"
     printf 'mglru_enabled=%s\n' "${MGLRU_ENABLED}"
     printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
     printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
-    printf 'local_fault_rate=%s\n' "${LOCAL_FAULT_RATE}"
-    printf 'remote_fault_rate=%s\n' "${REMOTE_FAULT_RATE}"
+    printf 'numa_scan_period_max_ms=%s\n' "${NUMA_SCAN_PERIOD_MAX_MS}"
+    printf 'numa_scan_delay_ms=%s\n' "${NUMA_SCAN_DELAY_MS}"
     printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
     printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
-    printf 'remote_fault_scan_period_ms=%s\n' "${REMOTE_FAULT_SCAN_PERIOD_MS}"
-    printf 'remote_fault_scan_size_mb=%s\n' "${REMOTE_FAULT_SCAN_SIZE_MB}"
     printf 'thp_mode=%s\n' "${THP_MODE}"
     printf 'thp_defrag=%s\n' "${THP_DEFRAG}"
     printf 'realworld_size_profile=%s\n' "${REALWORLD_SIZE_PROFILE}"
     printf 'verify_required_state=%s\n' "${VERIFY_REQUIRED_STATE}"
-    printf 'trace_bc_trial_promotions=%s\n' "${TRACE_BC_TRIAL_PROMOTIONS}"
+    printf 'disable_swap=%s\n' "${DISABLE_SWAP}"
     printf 'forbid_host_node1=%s\n' "${FORBID_HOST_NODE1}"
     printf 'fault_bucket_controller_dir=%s\n' "${FAULT_BUCKET_CONTROLLER_DIR}"
-    printf 'controller_window_sec=%s\n' "${CONTROLLER_WINDOW_SEC}"
-    printf 'controller_local_rate=%s\n' "${CONTROLLER_LOCAL_RATE}"
-    printf 'controller_remote_rate=%s\n' "${CONTROLLER_REMOTE_RATE}"
-    printf 'controller_local_fault_scan_period_ms=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}"
-    printf 'controller_local_fault_scan_size_mb=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}"
-    printf 'controller_remote_fault_scan_period_ms=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS}"
-    printf 'controller_remote_fault_scan_size_mb=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB}"
-    printf 'controller_min_local_pages=%s\n' "${CONTROLLER_MIN_LOCAL_PAGES}"
-    printf 'controller_min_remote_pages=%s\n' "${CONTROLLER_MIN_REMOTE_PAGES}"
-    printf 'controller_consecutive_effective=%s\n' "${CONTROLLER_CONSECUTIVE_EFFECTIVE}"
-    printf 'controller_consecutive_no_improve=%s\n' "${CONTROLLER_CONSECUTIVE_NO_IMPROVE}"
-    printf 'controller_restart_remote_share_threshold=%s\n' "${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD}"
-    printf 'controller_consecutive_restart=%s\n' "${CONTROLLER_CONSECUTIVE_RESTART}"
-    printf 'controller_restart_grace_windows=%s\n' "${CONTROLLER_RESTART_GRACE_WINDOWS}"
-    printf 'controller_numa_balancing_on=%s\n' "${CONTROLLER_NUMA_BALANCING_ON}"
-    printf 'controller_numa_balancing_off=%s\n' "${CONTROLLER_NUMA_BALANCING_OFF}"
+    printf 'window_sec=%s\n' "${WINDOW_SEC}"
+    printf 'cycle_window_min_sec=%s\n' "${CYCLE_WINDOW_MIN_SEC}"
+    printf 'cycle_window_max_sec=%s\n' "${CYCLE_WINDOW_MAX_SEC}"
+    printf 'local_rate=%s\n' "${LOCAL_RATE}"
+    printf 'min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
+    printf 'min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
+    printf 'start_consecutive=%s\n' "${START_CONSECUTIVE}"
+    printf 'start_capacity_margin_pct=%s\n' "${START_CAPACITY_MARGIN_PCT}"
+    printf 'stop_capacity_ratio_threshold=%s\n' "${STOP_CAPACITY_RATIO_THRESHOLD}"
+    printf 'p75_stagnation_required_decrease_pct=%s\n' "${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
+    printf 'p75_stagnation_required_windows=%s\n' "${P75_STAGNATION_REQUIRED_WINDOWS}"
+    printf 'p75_stagnation_restart_degradation_pct=%s\n' "${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
+    printf 'p75_stagnation_restart_required_windows=%s\n' "${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
+    printf 'remote_restart_improvement_pct=%s\n' "${REMOTE_RESTART_IMPROVEMENT_PCT}"
+    printf 'local_node=%s\n' "${LOCAL_NODE}"
+    printf 'remote_node=%s\n' "${REMOTE_NODE}"
+    printf 'migration_enabled_path=%s\n' "${MIGRATION_ENABLED_PATH}"
     printf 'gapbs_graph_mode=generated\n'
     printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE}"
     printf 'gapbs_graph_path=generated:g%s\n' "${GAPBS_GRAPH_SCALE}"
     printf 'gapbs_data_disk=0\n'
     printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
     printf 'compact_guest_memory=%s\n' "${COMPACT_GUEST_MEMORY}"
+    printf 'drop_host_caches_before_vm_boot=%s\n' "${DROP_HOST_CACHES_BEFORE_VM_BOOT}"
+    printf 'drop_host_caches_before_guest_run=%s\n' "${DROP_HOST_CACHES_BEFORE_GUEST_RUN}"
     printf 'graph_build_included=1\n'
     printf 'pr_trials=%s\n' "${PR_TRIALS}"
     printf 'bc_trials=%s\n' "${BC_TRIALS}"
     printf 'silo_bin_host=%s\n' "${SILO_BIN_HOST}"
+    printf 'silo_zipf_theta=%s\n' "${SILO_ZIPF_THETA}"
+    printf 'silo_zipf_reverse=%s\n' "${SILO_ZIPF_REVERSE}"
+    printf 'silo_workload_mix=%s\n' "${SILO_WORKLOAD_MIX}"
     printf 'liblinear_train_host=%s\n' "${LIBLINEAR_TRAIN_HOST}"
     printf 'liblinear_dataset_host=%s\n' "${LIBLINEAR_DATASET_HOST}"
+    printf 'liblinear_solver=%s\n' "${LIBLINEAR_SOLVER}"
+    printf 'liblinear_threads=%s\n' "${LIBLINEAR_THREADS}"
     printf 'disable_smt=%s\n' "${DISABLE_SMT}"
     printf 'smt_control=%s\n' "$(read_smt_control)"
     printf 'delete_vm_images=%s\n' "${DELETE_VM_IMAGES}"
+    printf 'stop_vm_wait_sec=%s\n' "${STOP_VM_WAIT_SEC}"
     [[ -z "${CXL_FMW_SIZE:-}" ]] || printf 'cxl_fmw_size=%s\n' "${CXL_FMW_SIZE}"
     numactl -H 2>/dev/null || true
   } > "${HOST_LOG_DIR}/host-config.log"
@@ -668,6 +723,7 @@ boot_vm() {
     --qemu-bin "${QEMU_BIN}"
     --name "${name}"
     --kernel "${KERNEL}"
+    --cmdline-extra "${KERNEL_CMDLINE_EXTRA}"
     --rootfs "${overlay}"
     --rootfs-format qcow2
     --root-device "${ROOT_DEVICE}"
@@ -690,6 +746,9 @@ boot_vm() {
   [[ -z "${INITRD:-}" ]] || args+=(--initrd "${INITRD}")
   [[ -z "${CXL_FMW_SIZE:-}" ]] || args+=(--cxl-fmw-size "${CXL_FMW_SIZE}")
   CURRENT_VM_NAME="${name}"
+  if [[ "${DROP_HOST_CACHES_BEFORE_VM_BOOT}" == "1" ]]; then
+    drop_host_page_cache
+  fi
   log "boot ${CURRENT_LOCAL_LABEL}/${config} name=${name} port=${port} fast=${fast_mem}@host[${fast_host_node}] slow=${slow_mem}@host[${slow_host_node}]"
   vmctl_cmd "${args[@]}" > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.boot.log" 2>&1
 }
@@ -876,10 +935,6 @@ stage_extra_workloads() {
 
 stage_common_workloads_once() {
   local config="$1" common_workloads="$2"
-  local stage_gapbs_graph=0
-  if use_gapbs_data_disk; then
-    stage_gapbs_graph=0
-  fi
   env \
     VM_ACTION=stage \
     VMCTL="${VMCTL}" \
@@ -889,7 +944,7 @@ stage_common_workloads_once() {
     WORKLOADS="${common_workloads}" \
     BENCHMARK_DIR="${BENCHMARK_DIR}" \
     GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE}" \
-    STAGE_GAPBS_GRAPH="${stage_gapbs_graph}" \
+    STAGE_GAPBS_GRAPH=0 \
     LIBLINEAR_DATASET="${LIBLINEAR_DATASET}" \
     CLEAN="${CLEAN_STAGE}" \
     CLEAN_SCRIPTS="${CLEAN_SCRIPTS}" \
@@ -921,27 +976,19 @@ stage_workloads() {
 stage_experiment_scripts() {
   local config="$1"
   log "stage experiment scripts for ${config}"
-  if [[ "${EXPERIMENT_SCRIPTS_STAGED}" == "1" ]]; then
-    printf 'already staged by workload staging step\n' \
-      > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.stage-experiment-scripts.log"
-    return 0
-  fi
   {
     ssh_vm_retry "${config}" "mkdir -p /root/vm32_realworld/scripts /root/design/fault_bucket_controller" || return $?
     copy_to_vm_retry "${config}" \
       "${SCRIPT_DIR}/run_vm_sweep_guest.sh" \
       "${SCRIPT_DIR}/run_workload_case_guest.sh" \
-      "${SCRIPT_DIR}/trace_gapbs_trial_promotions.sh" \
-      "${SCRIPT_DIR}/summarize_vm_results.py" \
       /root/vm32_realworld/scripts/ || return $?
-    if [[ -d "${FAULT_BUCKET_CONTROLLER_DIR}" ]]; then
+    if [[ "${config}" == "ours" ]]; then
       copy_to_vm_retry "${config}" \
         "${FAULT_BUCKET_CONTROLLER_DIR}/bucket_latency_controller.py" \
-        "${FAULT_BUCKET_CONTROLLER_DIR}/plot_controller.py" \
         "${FAULT_BUCKET_CONTROLLER_DIR}/run_guest.sh" \
         /root/design/fault_bucket_controller/ || return $?
     fi
-    ssh_vm_retry "${config}" "chmod +x /root/vm32_realworld/scripts/run_vm_sweep_guest.sh /root/vm32_realworld/scripts/run_workload_case_guest.sh /root/vm32_realworld/scripts/trace_gapbs_trial_promotions.sh; find /root/design/fault_bucket_controller -maxdepth 1 -type f \\( -name '*.py' -o -name 'run_guest.sh' \\) -exec chmod +x {} +" || return $?
+    ssh_vm_retry "${config}" "chmod +x /root/vm32_realworld/scripts/run_vm_sweep_guest.sh /root/vm32_realworld/scripts/run_workload_case_guest.sh; find /root/design/fault_bucket_controller -maxdepth 1 -type f \\( -name '*.py' -o -name 'run_guest.sh' \\) -exec chmod +x {} +" || return $?
   } > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.stage-experiment-scripts.log" 2>&1
 }
 
@@ -958,26 +1005,72 @@ run_guest_config() {
   local guest_base="/root/vm32_realworld/${RUN_ID}/${CURRENT_LOCAL_LABEL}"
   local guest_out="${guest_base}/${config}"
   local guest_cmd rc attempt
-
-  printf -v guest_cmd \
-    'OUTROOT=%q LOCAL_SIZE_GIB=%q CONFIGS=%q WORKLOADS=%q PROGRESS_BASE=%q PROGRESS_TOTAL=%q TIMEOUT_SEC=%q SAMPLE_INTERVAL_SEC=%q OMP_THREADS=%q MGLRU_ENABLED=%q NUMA_SCAN_SIZE_MB=%q NUMA_SCAN_PERIOD_MIN_MS=%q LOCAL_FAULT_RATE=%q REMOTE_FAULT_RATE=%q LOCAL_FAULT_SCAN_PERIOD_MS=%q LOCAL_FAULT_SCAN_SIZE_MB=%q REMOTE_FAULT_SCAN_PERIOD_MS=%q REMOTE_FAULT_SCAN_SIZE_MB=%q THP_MODE=%q THP_DEFRAG=%q REALWORLD_SIZE_PROFILE=%q VERIFY_REQUIRED_STATE=%q TRACE_BC_TRIAL_PROMOTIONS=%q RESUME=%q BENCHMARK_DIR=%q REALWORLD_CASE_RUNNER=%q GAPBS_GRAPH_SCALE=%q DROP_GUEST_CACHES=%q COMPACT_GUEST_MEMORY=%q PR_ITERATIONS=%q PR_TOLERANCE=%q PR_TRIALS=%q BC_ITERATIONS=%q BC_TRIALS=%q GUPS_MEMORY_GB=%q GRAPH500_SCALE=%q XSBENCH_GRID=%q XSBENCH_PARTICLES=%q SILO_SCALE_FACTOR=%q SILO_OPS_PER_WORKER=%q LIBLINEAR_DATASET=%q CONTROLLER_WINDOW_SEC=%q CONTROLLER_LOCAL_RATE=%q CONTROLLER_REMOTE_RATE=%q CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB=%q CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS=%q CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB=%q CONTROLLER_MIN_LOCAL_PAGES=%q CONTROLLER_MIN_REMOTE_PAGES=%q CONTROLLER_CONSECUTIVE_EFFECTIVE=%q CONTROLLER_CONSECUTIVE_NO_IMPROVE=%q CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD=%q CONTROLLER_CONSECUTIVE_RESTART=%q CONTROLLER_RESTART_GRACE_WINDOWS=%q CONTROLLER_NUMA_BALANCING_ON=%q CONTROLLER_NUMA_BALANCING_OFF=%q /root/vm32_realworld/scripts/run_vm_sweep_guest.sh' \
-    "${guest_base}" "${CURRENT_LOCAL_SIZE_GIB}" "${config}" "${WORKLOADS}" "${CURRENT_PROGRESS_BASE}" "${TOTAL_WORKLOAD_CASES}" \
-    "${TIMEOUT_SEC}" "${SAMPLE_INTERVAL_SEC}" "${OMP_THREADS}" "${MGLRU_ENABLED}" "${NUMA_SCAN_SIZE_MB}" "${NUMA_SCAN_PERIOD_MIN_MS}" \
-    "${LOCAL_FAULT_RATE}" "${REMOTE_FAULT_RATE}" "${LOCAL_FAULT_SCAN_PERIOD_MS}" "${LOCAL_FAULT_SCAN_SIZE_MB}" \
-    "${REMOTE_FAULT_SCAN_PERIOD_MS}" "${REMOTE_FAULT_SCAN_SIZE_MB}" \
-    "${THP_MODE}" "${THP_DEFRAG}" "${REALWORLD_SIZE_PROFILE}" "${VERIFY_REQUIRED_STATE}" "${TRACE_BC_TRIAL_PROMOTIONS}" "${RESUME}" "/root/benchmark" \
-    "/root/scripts/run_workload_case_guest.sh" "${GAPBS_GRAPH_SCALE}" "${DROP_GUEST_CACHES}" "${COMPACT_GUEST_MEMORY}" \
-    "${PR_ITERATIONS}" "${PR_TOLERANCE}" "${PR_TRIALS}" "${BC_ITERATIONS}" "${BC_TRIALS}" \
-    "${GUPS_MEMORY_GB}" "${GRAPH500_SCALE}" "${XSBENCH_GRID}" "${XSBENCH_PARTICLES}" \
-    "${SILO_SCALE_FACTOR:-800000}" "${SILO_OPS_PER_WORKER:-100000000}" "${LIBLINEAR_DATASET}" \
-    "${CONTROLLER_WINDOW_SEC}" "${CONTROLLER_LOCAL_RATE}" "${CONTROLLER_REMOTE_RATE}" \
-    "${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS}" "${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB}" \
-    "${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS}" "${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB}" \
-    "${CONTROLLER_MIN_LOCAL_PAGES}" "${CONTROLLER_MIN_REMOTE_PAGES}" \
-    "${CONTROLLER_CONSECUTIVE_EFFECTIVE}" "${CONTROLLER_CONSECUTIVE_NO_IMPROVE}" \
-    "${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD}" "${CONTROLLER_CONSECUTIVE_RESTART}" \
-    "${CONTROLLER_RESTART_GRACE_WINDOWS}" "${CONTROLLER_NUMA_BALANCING_ON}" \
-    "${CONTROLLER_NUMA_BALANCING_OFF}"
+  local -a guest_env=(
+    "OUTROOT=${guest_base}"
+    "LOCAL_SIZE_GIB=${CURRENT_LOCAL_SIZE_GIB}"
+    "CONFIGS=${config}"
+    "WORKLOADS=${WORKLOADS}"
+    "PROGRESS_BASE=${CURRENT_PROGRESS_BASE}"
+    "PROGRESS_TOTAL=${TOTAL_WORKLOAD_CASES}"
+    "TIMEOUT_SEC=${TIMEOUT_SEC}"
+    "TIMEOUT_KILL_AFTER_SEC=${TIMEOUT_KILL_AFTER_SEC}"
+    "OMP_THREADS=${OMP_THREADS}"
+    "MGLRU_ENABLED=${MGLRU_ENABLED}"
+    "NUMA_SCAN_SIZE_MB=${NUMA_SCAN_SIZE_MB}"
+    "NUMA_SCAN_PERIOD_MIN_MS=${NUMA_SCAN_PERIOD_MIN_MS}"
+    "NUMA_SCAN_PERIOD_MAX_MS=${NUMA_SCAN_PERIOD_MAX_MS}"
+    "NUMA_SCAN_DELAY_MS=${NUMA_SCAN_DELAY_MS}"
+    "LOCAL_FAULT_SCAN_PERIOD_MS=${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    "LOCAL_FAULT_SCAN_SIZE_MB=${LOCAL_FAULT_SCAN_SIZE_MB}"
+    "THP_MODE=${THP_MODE}"
+    "THP_DEFRAG=${THP_DEFRAG}"
+    "REALWORLD_SIZE_PROFILE=${REALWORLD_SIZE_PROFILE}"
+    "VERIFY_REQUIRED_STATE=${VERIFY_REQUIRED_STATE}"
+    "DISABLE_SWAP=${DISABLE_SWAP}"
+    "RESUME=${RESUME}"
+    "BENCHMARK_DIR=/root/benchmark"
+    "REALWORLD_CASE_RUNNER=/root/scripts/run_workload_case_guest.sh"
+    "GAPBS_GRAPH_MODE=generated"
+    "GAPBS_GRAPH_SCALE=${GAPBS_GRAPH_SCALE}"
+    "DROP_GUEST_CACHES=${DROP_GUEST_CACHES}"
+    "COMPACT_GUEST_MEMORY=${COMPACT_GUEST_MEMORY}"
+    "PR_ITERATIONS=${PR_ITERATIONS}"
+    "PR_TOLERANCE=${PR_TOLERANCE}"
+    "PR_TRIALS=${PR_TRIALS}"
+    "BC_ITERATIONS=${BC_ITERATIONS}"
+    "BC_TRIALS=${BC_TRIALS}"
+    "GUPS_MEMORY_GB=${GUPS_MEMORY_GB}"
+    "GRAPH500_SCALE=${GRAPH500_SCALE}"
+    "XSBENCH_GRID=${XSBENCH_GRID}"
+    "XSBENCH_PARTICLES=${XSBENCH_PARTICLES}"
+    "SILO_SCALE_FACTOR=${SILO_SCALE_FACTOR:-800000}"
+    "SILO_OPS_PER_WORKER=${SILO_OPS_PER_WORKER:-100000000}"
+    "SILO_ZIPF_THETA=${SILO_ZIPF_THETA}"
+    "SILO_ZIPF_REVERSE=${SILO_ZIPF_REVERSE}"
+    "SILO_WORKLOAD_MIX=${SILO_WORKLOAD_MIX}"
+    "LIBLINEAR_DATASET=${LIBLINEAR_DATASET}"
+    "LIBLINEAR_SOLVER=${LIBLINEAR_SOLVER}"
+    "LIBLINEAR_THREADS=${LIBLINEAR_THREADS}"
+    "WINDOW_SEC=${WINDOW_SEC}"
+    "CYCLE_WINDOW_MIN_SEC=${CYCLE_WINDOW_MIN_SEC}"
+    "CYCLE_WINDOW_MAX_SEC=${CYCLE_WINDOW_MAX_SEC}"
+    "LOCAL_RATE=${LOCAL_RATE}"
+    "MIN_LOCAL_PAGES=${MIN_LOCAL_PAGES}"
+    "MIN_REMOTE_PAGES=${MIN_REMOTE_PAGES}"
+    "START_CONSECUTIVE=${START_CONSECUTIVE}"
+    "START_CAPACITY_MARGIN_PCT=${START_CAPACITY_MARGIN_PCT}"
+    "STOP_CAPACITY_RATIO_THRESHOLD=${STOP_CAPACITY_RATIO_THRESHOLD}"
+    "P75_STAGNATION_REQUIRED_DECREASE_PCT=${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
+    "P75_STAGNATION_REQUIRED_WINDOWS=${P75_STAGNATION_REQUIRED_WINDOWS}"
+    "P75_STAGNATION_RESTART_DEGRADATION_PCT=${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
+    "P75_STAGNATION_RESTART_REQUIRED_WINDOWS=${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
+    "REMOTE_RESTART_IMPROVEMENT_PCT=${REMOTE_RESTART_IMPROVEMENT_PCT}"
+    "LOCAL_NODE=${LOCAL_NODE}"
+    "REMOTE_NODE=${REMOTE_NODE}"
+    "MIGRATION_ENABLED_PATH=${MIGRATION_ENABLED_PATH}"
+  )
+  printf -v guest_cmd '%q ' env "${guest_env[@]}" \
+    /root/vm32_realworld/scripts/run_vm_sweep_guest.sh
 
   log "run guest matrix for ${config}"
   : > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.guest-run.log"
@@ -1017,28 +1110,46 @@ run_guest_config() {
 
 stop_vm_for_config() {
   local config="$1" rc="$2"
-  local should_stop=0
+  local should_stop=0 vm_name="" stop_log=""
   if [[ "${rc}" == "0" && "${STOP_VM_ON_SUCCESS}" == "1" ]]; then
     should_stop=1
   elif [[ "${rc}" != "0" && "${STOP_VM_ON_FAILURE}" == "1" ]]; then
     should_stop=1
   fi
   if [[ "${should_stop}" == "1" && -n "${CURRENT_VM_NAME}" ]]; then
-    log "stop ${config} name=${CURRENT_VM_NAME}"
-    vmctl_cmd stop --name "${CURRENT_VM_NAME}" > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.stop.log" 2>&1 || true
+    vm_name="${CURRENT_VM_NAME}"
+    stop_log="${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.stop.log"
+    log "stop ${config} name=${vm_name}"
+    vmctl_cmd stop --name "${vm_name}" > "${stop_log}" 2>&1 || true
+    if ! wait_qemu_stopped "${vm_name}" "${STOP_VM_WAIT_SEC}" >> "${stop_log}" 2>&1; then
+      log "force stop ${config} name=${vm_name}; previous QEMU still active"
+      force_stop_qemu_name "${vm_name}" >> "${stop_log}" 2>&1 || {
+        log "failed to stop ${config} name=${vm_name}; refusing to start next config"
+        return 1
+      }
+    fi
     CURRENT_VM_NAME=""
   fi
 }
 
 restart_vm_after_stage() {
-  local config="$1" overlay="$2"
+  local config="$1" overlay="$2" vm_name="" stop_log=""
 
   [[ "${REBOOT_AFTER_STAGE}" == "1" ]] || return 0
   [[ -n "${CURRENT_VM_NAME}" ]] || return 0
 
-  log "reboot ${config} after staging name=${CURRENT_VM_NAME}"
+  vm_name="${CURRENT_VM_NAME}"
+  stop_log="${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.restart-stop.log"
+  log "reboot ${config} after staging name=${vm_name}"
   flush_guest_filesystems "${config}" || return $?
-  vmctl_cmd stop --name "${CURRENT_VM_NAME}" > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.restart-stop.log" 2>&1 || true
+  vmctl_cmd stop --name "${vm_name}" > "${stop_log}" 2>&1 || true
+  if ! wait_qemu_stopped "${vm_name}" "${STOP_VM_WAIT_SEC}" >> "${stop_log}" 2>&1; then
+    log "force stop ${config} before reboot name=${vm_name}; previous QEMU still active"
+    force_stop_qemu_name "${vm_name}" >> "${stop_log}" 2>&1 || {
+      log "failed to stop ${config} before reboot name=${vm_name}"
+      return 1
+    }
+  fi
   CURRENT_VM_NAME=""
   sleep 5
   boot_vm "${config}" "${overlay}"
@@ -1061,7 +1172,6 @@ delete_overlay_for_config() {
 run_one_config() {
   local config="$1" overlay="" rc=0
 
-  EXPERIMENT_SCRIPTS_STAGED=0
   overlay="$(create_overlay "${config}")" || rc=$?
   if [[ "${rc}" == "0" ]]; then
     boot_vm "${config}" "${overlay}" || rc=$?
@@ -1084,8 +1194,8 @@ run_one_config() {
   if [[ "${rc}" == "0" ]]; then
     wait_guest_ssh_ready "${config}" "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.ssh-ready.log" || rc=$?
   fi
-  if [[ "${rc}" == "0" ]]; then
-    mount_gapbs_data_disk_guest "${config}" || rc=$?
+  if [[ "${rc}" == "0" && "${DROP_HOST_CACHES_BEFORE_GUEST_RUN}" == "1" ]]; then
+    drop_host_page_cache > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.drop-host-caches-before-run.log" 2>&1 || rc=$?
   fi
   if [[ "${rc}" == "0" ]]; then
     set +e
@@ -1097,7 +1207,6 @@ run_one_config() {
   if [[ "${rc}" != "0" ]]; then
     log "config reported failure for ${config} rc=${rc}"
   fi
-  unmount_gapbs_data_disk_guest "${config}"
   stop_vm_for_config "${config}" "${rc}"
   [[ -z "${overlay}" ]] || delete_overlay_for_config "${config}" "${overlay}"
   return "${rc}"
@@ -1109,15 +1218,32 @@ summarize() {
     --guest-results "${GUEST_RESULTS_DIR}" \
     --outdir "${SUMMARY_DIR}" \
     > "${HOST_LOG_DIR}/summarize.log" 2>&1
+
+  log "plot controller results"
+  : > "${HOST_LOG_DIR}/plot-controller.log"
+  local controller_csv controller_dir
+  while IFS= read -r -d '' controller_csv; do
+    controller_dir="$(dirname "${controller_csv}")"
+    if ! python3 "${FAULT_BUCKET_CONTROLLER_DIR}/plot_controller.py" \
+      "${controller_csv}" \
+      --out-dir "${controller_dir}/figures" \
+      --prefix controller >> "${HOST_LOG_DIR}/plot-controller.log" 2>&1; then
+      log "controller plot failed: ${controller_csv}"
+    fi
+  done < <(find "${GUEST_RESULTS_DIR}" -type f -path '*/controller/controller.csv' -print0)
 }
 
 main() {
   local -a config_list=()
   local -a local_size_list=()
   local -a workload_list=()
-  mapfile -t config_list < <(expand_configs ${CONFIGS})
-  mapfile -t local_size_list < <(expand_local_sizes ${LOCAL_SIZES_GIB})
-  mapfile -t workload_list < <(expand_workloads ${WORKLOADS})
+  local expanded_configs expanded_local_sizes expanded_workloads
+  expanded_configs="$(expand_configs ${CONFIGS})"
+  expanded_local_sizes="$(expand_local_sizes ${LOCAL_SIZES_GIB})"
+  expanded_workloads="$(expand_workloads ${WORKLOADS})"
+  mapfile -t config_list <<< "${expanded_configs}"
+  mapfile -t local_size_list <<< "${expanded_local_sizes}"
+  mapfile -t workload_list <<< "${expanded_workloads}"
   TOTAL_WORKLOAD_CASES=$((${#local_size_list[@]} * ${#config_list[@]} * ${#workload_list[@]}))
 
   if [[ "${DRY_RUN}" == "1" ]]; then

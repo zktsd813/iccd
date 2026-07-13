@@ -5,10 +5,32 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 OUTROOT="${OUTROOT:-/root/vm32_realworld-$(date -u +%Y%m%dT%H%M%SZ)}"
 LOCAL_SIZE_GIB="${LOCAL_SIZE_GIB:-}"
-CONFIGS="${CONFIGS:-migration_off tiering_0x2 tpp_0x4}"
-WORKLOADS="${WORKLOADS:-pr bc gups graph500 btree redis_uniform redis_ycsb_a faster_uniform faster_ycsb_a}"
+CONFIGS="${CONFIGS:-off on tpp ours}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 silo}"
 CASE_RUNNER="${CASE_RUNNER:-${SCRIPT_DIR}/run_workload_case_guest.sh}"
 RESUME="${RESUME:-1}"
+
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-256}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-64}"
+
+WINDOW_SEC="${WINDOW_SEC:-1}"
+CYCLE_WINDOW_MIN_SEC="${CYCLE_WINDOW_MIN_SEC:-5}"
+CYCLE_WINDOW_MAX_SEC="${CYCLE_WINDOW_MAX_SEC:-20}"
+LOCAL_RATE="${LOCAL_RATE:-5}"
+MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
+MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
+START_CONSECUTIVE="${START_CONSECUTIVE:-2}"
+START_CAPACITY_MARGIN_PCT="${START_CAPACITY_MARGIN_PCT:-10}"
+STOP_CAPACITY_RATIO_THRESHOLD="${STOP_CAPACITY_RATIO_THRESHOLD:-0.9}"
+P75_STAGNATION_REQUIRED_DECREASE_PCT="${P75_STAGNATION_REQUIRED_DECREASE_PCT:-10}"
+P75_STAGNATION_REQUIRED_WINDOWS="${P75_STAGNATION_REQUIRED_WINDOWS:-3}"
+P75_STAGNATION_RESTART_DEGRADATION_PCT="${P75_STAGNATION_RESTART_DEGRADATION_PCT:-10}"
+P75_STAGNATION_RESTART_REQUIRED_WINDOWS="${P75_STAGNATION_RESTART_REQUIRED_WINDOWS:-3}"
+REMOTE_RESTART_IMPROVEMENT_PCT="${REMOTE_RESTART_IMPROVEMENT_PCT:-10}"
+LOCAL_NODE="${LOCAL_NODE:-0}"
+REMOTE_NODE="${REMOTE_NODE:-1}"
+MIGRATION_ENABLED_PATH="${MIGRATION_ENABLED_PATH:-/sys/kernel/mm/numa_balancing/migration_enabled}"
 
 mkdir -p "${OUTROOT}"
 
@@ -26,13 +48,10 @@ expand_configs() {
   for item in "$@"; do
     case "${item}" in
       all|default)
-        printf '%s\n' migration_off tiering_0x2 tpp_0x4
+        printf '%s\n' off on tpp ours
         ;;
-      migration_off|tiering_0x2|migration_on|tpp_0x4|tpp|all_local|all_slow|controller_0x2)
+      off|on|tpp|ours)
         printf '%s\n' "${item}"
-        ;;
-      controller)
-        printf '%s\n' controller_0x2
         ;;
       *)
         die "unknown config '${item}'"
@@ -47,8 +66,7 @@ expand_workloads() {
     case "${item}" in
       all|default)
         printf '%s\n' \
-          pr bc gups graph500 btree \
-          redis_uniform redis_ycsb_a faster_uniform faster_ycsb_a
+          pr bc gups btree graph500 silo
         ;;
       *)
         printf '%s\n' "${item}"
@@ -70,44 +88,48 @@ snapshot_environment() {
     printf 'workloads=%s\n' "${WORKLOADS}"
     printf 'case_runner=%s\n' "${CASE_RUNNER}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC:-}"
-    printf 'sample_interval_sec=%s\n' "${SAMPLE_INTERVAL_SEC:-}"
+    printf 'timeout_kill_after_sec=%s\n' "${TIMEOUT_KILL_AFTER_SEC:-60}"
     printf 'omp_threads=%s\n' "${OMP_THREADS:-}"
     printf 'mglru_enabled=%s\n' "${MGLRU_ENABLED:-}"
-    printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB:-}"
+    printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
     printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS:-}"
-    printf 'local_fault_rate=%s\n' "${LOCAL_FAULT_RATE:-}"
-    printf 'remote_fault_rate=%s\n' "${REMOTE_FAULT_RATE:-}"
-    printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS:-}"
-    printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB:-}"
-    printf 'remote_fault_scan_period_ms=%s\n' "${REMOTE_FAULT_SCAN_PERIOD_MS:-}"
-    printf 'remote_fault_scan_size_mb=%s\n' "${REMOTE_FAULT_SCAN_SIZE_MB:-}"
+    printf 'numa_scan_period_max_ms=%s\n' "${NUMA_SCAN_PERIOD_MAX_MS:-}"
+    printf 'numa_scan_delay_ms=%s\n' "${NUMA_SCAN_DELAY_MS:-}"
+    printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
     printf 'thp_mode=%s\n' "${THP_MODE:-}"
     printf 'thp_defrag=%s\n' "${THP_DEFRAG:-}"
     printf 'realworld_size_profile=%s\n' "${REALWORLD_SIZE_PROFILE:-}"
     printf 'verify_required_state=%s\n' "${VERIFY_REQUIRED_STATE:-}"
-    printf 'trace_bc_trial_promotions=%s\n' "${TRACE_BC_TRIAL_PROMOTIONS:-}"
-    printf 'controller_window_sec=%s\n' "${CONTROLLER_WINDOW_SEC:-}"
-    printf 'controller_local_rate=%s\n' "${CONTROLLER_LOCAL_RATE:-}"
-    printf 'controller_remote_rate=%s\n' "${CONTROLLER_REMOTE_RATE:-}"
-    printf 'controller_local_fault_scan_period_ms=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_PERIOD_MS:-}"
-    printf 'controller_local_fault_scan_size_mb=%s\n' "${CONTROLLER_LOCAL_FAULT_SCAN_SIZE_MB:-}"
-    printf 'controller_remote_fault_scan_period_ms=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_PERIOD_MS:-}"
-    printf 'controller_remote_fault_scan_size_mb=%s\n' "${CONTROLLER_REMOTE_FAULT_SCAN_SIZE_MB:-}"
-    printf 'controller_min_local_pages=%s\n' "${CONTROLLER_MIN_LOCAL_PAGES:-}"
-    printf 'controller_min_remote_pages=%s\n' "${CONTROLLER_MIN_REMOTE_PAGES:-}"
-    printf 'controller_consecutive_effective=%s\n' "${CONTROLLER_CONSECUTIVE_EFFECTIVE:-}"
-    printf 'controller_consecutive_no_improve=%s\n' "${CONTROLLER_CONSECUTIVE_NO_IMPROVE:-}"
-    printf 'controller_restart_remote_share_threshold=%s\n' "${CONTROLLER_RESTART_REMOTE_SHARE_THRESHOLD:-}"
-    printf 'controller_consecutive_restart=%s\n' "${CONTROLLER_CONSECUTIVE_RESTART:-}"
-    printf 'controller_restart_grace_windows=%s\n' "${CONTROLLER_RESTART_GRACE_WINDOWS:-}"
-    printf 'controller_numa_balancing_on=%s\n' "${CONTROLLER_NUMA_BALANCING_ON:-}"
-    printf 'controller_numa_balancing_off=%s\n' "${CONTROLLER_NUMA_BALANCING_OFF:-}"
-    printf 'graph=%s\n' "${GRAPH:-}"
+    printf 'disable_swap=%s\n' "${DISABLE_SWAP:-}"
+    printf 'window_sec=%s\n' "${WINDOW_SEC}"
+    printf 'cycle_window_min_sec=%s\n' "${CYCLE_WINDOW_MIN_SEC}"
+    printf 'cycle_window_max_sec=%s\n' "${CYCLE_WINDOW_MAX_SEC}"
+    printf 'local_rate=%s\n' "${LOCAL_RATE}"
+    printf 'min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
+    printf 'min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
+    printf 'start_consecutive=%s\n' "${START_CONSECUTIVE}"
+    printf 'start_capacity_margin_pct=%s\n' "${START_CAPACITY_MARGIN_PCT}"
+    printf 'stop_capacity_ratio_threshold=%s\n' "${STOP_CAPACITY_RATIO_THRESHOLD}"
+    printf 'p75_stagnation_required_decrease_pct=%s\n' "${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
+    printf 'p75_stagnation_required_windows=%s\n' "${P75_STAGNATION_REQUIRED_WINDOWS}"
+    printf 'p75_stagnation_restart_degradation_pct=%s\n' "${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
+    printf 'p75_stagnation_restart_required_windows=%s\n' "${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
+    printf 'remote_restart_improvement_pct=%s\n' "${REMOTE_RESTART_IMPROVEMENT_PCT}"
+    printf 'local_node=%s\n' "${LOCAL_NODE}"
+    printf 'remote_node=%s\n' "${REMOTE_NODE}"
+    printf 'migration_enabled_path=%s\n' "${MIGRATION_ENABLED_PATH}"
+    printf 'gapbs_graph_mode=generated\n'
     printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE:-}"
+    printf 'gapbs_graph_path=generated:g%s\n' "${GAPBS_GRAPH_SCALE:-}"
+    printf 'graph_build_included=1\n'
     printf 'pr_trials=%s\n' "${PR_TRIALS:-}"
     printf 'bc_trials=%s\n' "${BC_TRIALS:-}"
     printf 'silo_scale_factor=%s\n' "${SILO_SCALE_FACTOR:-}"
     printf 'silo_ops_per_worker=%s\n' "${SILO_OPS_PER_WORKER:-}"
+    printf 'silo_zipf_theta=%s\n' "${SILO_ZIPF_THETA:-}"
+    printf 'silo_zipf_reverse=%s\n' "${SILO_ZIPF_REVERSE:-}"
+    printf 'silo_workload_mix=%s\n' "${SILO_WORKLOAD_MIX:-}"
     printf 'liblinear_dataset=%s\n' "${LIBLINEAR_DATASET:-}"
   } > "${dir}/environment.meta"
   numactl -H > "${dir}/environment.numactl" 2>&1 || true
@@ -143,8 +165,11 @@ main() {
 
   local -a config_list=()
   local -a workload_list=()
-  mapfile -t config_list < <(expand_configs ${CONFIGS})
-  mapfile -t workload_list < <(expand_workloads ${WORKLOADS})
+  local expanded_configs expanded_workloads
+  expanded_configs="$(expand_configs ${CONFIGS})"
+  expanded_workloads="$(expand_workloads ${WORKLOADS})"
+  mapfile -t config_list <<< "${expanded_configs}"
+  mapfile -t workload_list <<< "${expanded_workloads}"
   local progress_base="${PROGRESS_BASE:-0}"
   local progress_total="${PROGRESS_TOTAL:-$((${#config_list[@]} * ${#workload_list[@]}))}"
 

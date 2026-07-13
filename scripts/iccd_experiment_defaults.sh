@@ -4,6 +4,7 @@
 
 ICCD_REPO_ROOT="${ICCD_REPO_ROOT:-/Serverless/iccd-git}"
 ICCD_REQUIRED_PROTOCOL_DOC="${ICCD_REQUIRED_PROTOCOL_DOC:-${ICCD_REPO_ROOT}/docs/iccd-experiment-protocol-20260601.md}"
+ICCD_BASELINE_REFERENCE_DOC="${ICCD_BASELINE_REFERENCE_DOC:-${ICCD_REPO_ROOT}/baseline/EXPERIMENT_BASELINE.md}"
 
 ICCD_KERNEL="${ICCD_KERNEL:-${ICCD_REPO_ROOT}/linux-global-build/arch/x86/boot/bzImage}"
 ICCD_VMCTL="${ICCD_VMCTL:-${ICCD_REPO_ROOT}/VM/vmctl.sh}"
@@ -27,9 +28,11 @@ ICCD_DEMOTION_ENABLED="${ICCD_DEMOTION_ENABLED:-true}"
 ICCD_DEMOTION_TARGET="${ICCD_DEMOTION_TARGET:-0 1}"
 ICCD_NUMA_BALANCING_ON="${ICCD_NUMA_BALANCING_ON:-2}"
 ICCD_NUMA_BALANCING_OFF="${ICCD_NUMA_BALANCING_OFF:-0}"
-ICCD_NUMA_SCAN_SIZE_MB="${ICCD_NUMA_SCAN_SIZE_MB:-4096}"
+ICCD_NUMA_SCAN_SIZE_MB="${ICCD_NUMA_SCAN_SIZE_MB:-256}"
 ICCD_NUMA_SCAN_PERIOD_MIN_MS="${ICCD_NUMA_SCAN_PERIOD_MIN_MS:-1000}"
 ICCD_LOCAL_FAULT_SCAN_PERIOD_MS="${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+ICCD_LOCAL_FAULT_SCAN_SIZE_MB="${ICCD_LOCAL_FAULT_SCAN_SIZE_MB:-64}"
+ICCD_DROP_GUEST_CACHES="${ICCD_DROP_GUEST_CACHES:-1}"
 
 ICCD_WORKLOAD_CPU_NODE="${ICCD_WORKLOAD_CPU_NODE:-0}"
 ICCD_PR_CPU_NODE="${ICCD_PR_CPU_NODE:-${ICCD_WORKLOAD_CPU_NODE}}"
@@ -42,11 +45,13 @@ iccd_workload_placement_args() {
 
 iccd_print_required_protocol() {
   printf '[iccd-defaults] required protocol: %s\n' "${ICCD_REQUIRED_PROTOCOL_DOC}" >&2
+  printf '[iccd-defaults] baseline reference: %s\n' "${ICCD_BASELINE_REFERENCE_DOC}" >&2
 }
 
 iccd_print_fixed_vm_defaults() {
   cat <<EOF
 required_protocol_doc=${ICCD_REQUIRED_PROTOCOL_DOC}
+baseline_reference_doc=${ICCD_BASELINE_REFERENCE_DOC}
 kernel=${ICCD_KERNEL}
 host_cpus=${ICCD_HOST_CPUS}
 guest_cpus=${ICCD_GUEST_CPUS}
@@ -68,6 +73,8 @@ numa_balancing_off=${ICCD_NUMA_BALANCING_OFF}
 numa_scan_size_mb=${ICCD_NUMA_SCAN_SIZE_MB}
 numa_scan_period_min_ms=${ICCD_NUMA_SCAN_PERIOD_MIN_MS}
 local_fault_scan_period_ms=${ICCD_LOCAL_FAULT_SCAN_PERIOD_MS}
+local_fault_scan_size_mb=${ICCD_LOCAL_FAULT_SCAN_SIZE_MB}
+drop_guest_caches=${ICCD_DROP_GUEST_CACHES}
 workload_cpu_node=${ICCD_WORKLOAD_CPU_NODE}
 workload_placement=numactl --cpunodebind=${ICCD_WORKLOAD_CPU_NODE}
 EOF

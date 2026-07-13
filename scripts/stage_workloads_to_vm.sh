@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+CONTROLLER_SRC_DIR="${REPO_ROOT}/design/fault_bucket_controller"
+VM_SWEEP_SRC_DIR="${REPO_ROOT}/motivation/3_realworld/VM/scripts"
 ICCD_REPO_ROOT="${ICCD_REPO_ROOT:-${REPO_ROOT}}"
 ICCD_DEFAULTS="${ICCD_DEFAULTS:-${REPO_ROOT}/scripts/iccd_experiment_defaults.sh}"
 if [[ -r "${ICCD_DEFAULTS}" ]]; then
@@ -16,7 +18,7 @@ PORT="${PORT:-10030}"
 HOST="${HOST:-127.0.0.1}"
 SSH_KEY="${SSH_KEY:-}"
 BENCHMARK_DIR="${BENCHMARK_DIR:-/Serverless/benchmark}"
-WORKLOADS="${WORKLOADS:-core}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 silo}"
 CLEAN="${CLEAN:-0}"
 CLEAN_SCRIPTS="${CLEAN_SCRIPTS:-1}"
 STAGE_JDK="${STAGE_JDK:-auto}"
@@ -24,7 +26,10 @@ STAGE_JDK17="${STAGE_JDK17:-auto}"
 STAGE_DOTNET="${STAGE_DOTNET:-auto}"
 STAGE_DLRM_VENV="${STAGE_DLRM_VENV:-1}"
 STAGE_FRAMEWORKS="${STAGE_FRAMEWORKS:-0}"
-STAGE_GAPBS_GRAPH="${STAGE_GAPBS_GRAPH:-0}"
+SILO_USE_MALLOC_MODE="${SILO_USE_MALLOC_MODE:-1}"
+SILO_EXPECTED_ALLOCATOR="${SILO_EXPECTED_ALLOCATOR:-jemalloc}"
+SILO_REQUIRE_ZIPF_OPTS="${SILO_REQUIRE_ZIPF_OPTS:-1}"
+SILO_REBUILD_ON_MISMATCH="${SILO_REBUILD_ON_MISMATCH:-0}"
 SSH_CONTROL_MASTER="${SSH_CONTROL_MASTER:-1}"
 SSH_CONTROL_PATH="${SSH_CONTROL_PATH:-/tmp/iccd-realworld-${PORT}.sock}"
 
@@ -51,22 +56,12 @@ HMAT_SLOW_BANDWIDTH="${HMAT_SLOW_BANDWIDTH:-${ICCD_HMAT_SLOW_BANDWIDTH:-10000M}}
 VERIFY_PLACEMENT="${VERIFY_PLACEMENT:-1}"
 STOP_VM_ON_SUCCESS="${STOP_VM_ON_SUCCESS:-0}"
 GUEST_OUTROOT="${GUEST_OUTROOT:-/root/script-smoke-pr}"
-GUEST_POLICIES="${GUEST_POLICIES:-off ours}"
-GUEST_CAPS="${GUEST_CAPS:-physical:0}"
-GUEST_MODE="${GUEST_MODE:-matrix}"
+GUEST_CONFIGS="${GUEST_CONFIGS:-off on tpp ours}"
 GUEST_TIMEOUT_SEC="${GUEST_TIMEOUT_SEC:-1200}"
 GUEST_OMP_THREADS="${GUEST_OMP_THREADS:-32}"
 PR_ITERATIONS="${PR_ITERATIONS:-1}"
 PR_TRIALS="${PR_TRIALS:-1}"
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
-GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-}"
-GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-}"
-GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-}"
-if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
-  GAPBS_GRAPH_NAME="${GAPBS_GRAPH_NAME:-kron_g${GAPBS_GRAPH_SCALE}.sg}"
-  GAPBS_GRAPH_HOST="${GAPBS_GRAPH_HOST:-${BENCHMARK_DIR}/gapbs/benchmark/graphs/${GAPBS_GRAPH_NAME}}"
-  GAPBS_GRAPH_GUEST="${GAPBS_GRAPH_GUEST:-/root/gapbs_graphs/${GAPBS_GRAPH_NAME}}"
-fi
 
 SSH_OPTS=(-p "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 SCP_OPTS=(-P "${PORT}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -94,6 +89,8 @@ die() {
   echo "error: $*" >&2
   exit 2
 }
+
+[[ "${GAPBS_GRAPH_SCALE}" == "29" ]] || die "GAPBS_GRAPH_SCALE must be 29"
 
 require_vm_submodule() {
   if [[ ! -x "${VMCTL}" ]]; then
@@ -173,12 +170,11 @@ run_guest_suite() {
   vm_ssh_args
   local guest_cmd
   printf -v guest_cmd \
-    'OUTROOT=%q WORKLOADS=%q POLICIES=%q CAPS=%q MODE=%q PR_ITERATIONS=%q PR_TRIALS=%q TIMEOUT_SEC=%q OMP_THREADS=%q WINDOW_SEC=2 MIN_ARM_WINDOWS=1 MAX_ARM_WINDOWS=2 OBSERVE_WINDOWS=1 /root/scripts/run_workload_suite_guest.sh' \
-    "${GUEST_OUTROOT}" "${WORKLOADS}" "${GUEST_POLICIES}" "${GUEST_CAPS}" \
-    "${GUEST_MODE}" "${PR_ITERATIONS}" "${PR_TRIALS}" \
+    'OUTROOT=%q WORKLOADS=%q CONFIGS=%q PR_ITERATIONS=%q PR_TRIALS=%q TIMEOUT_SEC=%q OMP_THREADS=%q GAPBS_GRAPH_SCALE=29 NUMA_SCAN_SIZE_MB=256 LOCAL_FAULT_SCAN_SIZE_MB=64 LOCAL_FAULT_SCAN_PERIOD_MS=1000 /root/scripts/run_workload_suite_guest.sh' \
+    "${GUEST_OUTROOT}" "${WORKLOADS}" "${GUEST_CONFIGS}" \
+    "${PR_ITERATIONS}" "${PR_TRIALS}" \
     "${GUEST_TIMEOUT_SEC}" "${GUEST_OMP_THREADS}"
   vmctl_cmd ssh "${VM_SSH_ARGS[@]}" -- "${guest_cmd}"
-  vmctl_cmd ssh "${VM_SSH_ARGS[@]}" -- "cat $(printf '%q' "${GUEST_OUTROOT}")/summary.csv"
 }
 
 stop_vm_if_requested() {
@@ -268,40 +264,6 @@ stream_ycsb_binding() {
     "tar -xzf - -C '${dst}' --strip-components=1 && chmod +x '${dst}/bin/ycsb'"
 }
 
-ensure_gapbs_graph_host() {
-  if [[ -s "${GAPBS_GRAPH_HOST}" ]]; then
-    return 0
-  fi
-
-  local converter="${BENCHMARK_DIR}/gapbs/converter"
-  [[ -x "${converter}" ]] || die "missing GAPBS converter: ${converter}"
-  mkdir -p "$(dirname -- "${GAPBS_GRAPH_HOST}")"
-  echo "build GAPBS graph g${GAPBS_GRAPH_SCALE}: ${GAPBS_GRAPH_HOST}"
-  (
-    cd "${BENCHMARK_DIR}/gapbs"
-    env OMP_NUM_THREADS="${GUEST_OMP_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores \
-      "${converter}" -g"${GAPBS_GRAPH_SCALE}" -b "${GAPBS_GRAPH_HOST}"
-  )
-  [[ -s "${GAPBS_GRAPH_HOST}" ]] || die "GAPBS graph build did not create ${GAPBS_GRAPH_HOST}"
-}
-
-stage_gapbs_graph() {
-  ensure_gapbs_graph_host
-  local expected_size
-  expected_size="$(stat -c '%s' "${GAPBS_GRAPH_HOST}")"
-
-  if remote "actual=\$(stat -c '%s' '${GAPBS_GRAPH_GUEST}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'"; then
-    return 0
-  fi
-
-  remote "rm -f '${GAPBS_GRAPH_GUEST}'"
-  copy_file "${GAPBS_GRAPH_HOST}" "${GAPBS_GRAPH_GUEST}"
-  remote "actual=\$(stat -c '%s' '${GAPBS_GRAPH_GUEST}' 2>/dev/null || echo 0); test \"\$actual\" = '${expected_size}'" || {
-    echo "GAPBS graph staging failed: expected ${expected_size} bytes at ${GAPBS_GRAPH_GUEST}" >&2
-    return 1
-  }
-}
-
 expand_workloads() {
   local out=()
   local w
@@ -372,21 +334,23 @@ needs_jdk17() {
 }
 
 stage_common_scripts() {
-  remote "mkdir -p /root/scripts /root/benchmark /root/tools /root/realworld-work"
+  remote "mkdir -p /root/scripts /root/benchmark /root/tools /root/realworld-work /root/design/fault_bucket_controller /root/motivation/3_realworld/VM/scripts"
   if [[ "${CLEAN_SCRIPTS}" == "1" ]]; then
     remote "find /root/scripts -mindepth 1 -maxdepth 1 -type f -delete"
   fi
-  copy_file "${SCRIPT_DIR}/run_ours_experiment.sh" \
-    /root/scripts/run_ours_experiment.sh
-  copy_file "${SCRIPT_DIR}/local_util_adapt_controller.py" \
-    /root/scripts/local_util_adapt_controller.py
   copy_file "${SCRIPT_DIR}/iccd_experiment_defaults.sh" \
     /root/scripts/iccd_experiment_defaults.sh
   copy_file "${SCRIPT_DIR}/run_workload_suite_guest.sh" \
     /root/scripts/run_workload_suite_guest.sh
-  copy_file "${SCRIPT_DIR}/run_workload_case_guest.sh" \
-    /root/scripts/run_workload_case_guest.sh
-  remote "chmod +x /root/scripts/run_ours_experiment.sh /root/scripts/local_util_adapt_controller.py /root/scripts/run_workload_suite_guest.sh /root/scripts/run_workload_case_guest.sh"
+  copy_file "${CONTROLLER_SRC_DIR}/run_guest.sh" \
+    /root/design/fault_bucket_controller/run_guest.sh
+  copy_file "${CONTROLLER_SRC_DIR}/bucket_latency_controller.py" \
+    /root/design/fault_bucket_controller/bucket_latency_controller.py
+  copy_file "${VM_SWEEP_SRC_DIR}/run_vm_sweep_guest.sh" \
+    /root/motivation/3_realworld/VM/scripts/run_vm_sweep_guest.sh
+  copy_file "${VM_SWEEP_SRC_DIR}/run_workload_case_guest.sh" \
+    /root/motivation/3_realworld/VM/scripts/run_workload_case_guest.sh
+  remote "chmod +x /root/scripts/run_workload_suite_guest.sh /root/design/fault_bucket_controller/run_guest.sh /root/design/fault_bucket_controller/bucket_latency_controller.py /root/motivation/3_realworld/VM/scripts/run_vm_sweep_guest.sh /root/motivation/3_realworld/VM/scripts/run_workload_case_guest.sh"
 }
 
 stage_jdk8() {
@@ -536,24 +500,38 @@ stage_vmitosis_workloads() {
   remote "cd /root/benchmark/vmitosis-workloads && (make -j\"\$(nproc)\" gups graph500 btree || true); test -x bin/bench_gups_mt && test -x bin/bench_graph500_mt && test -x bin/bench_btree_mt && chmod +x bin/bench_gups_mt bin/bench_graph500_mt bin/bench_btree_mt"
 }
 
+silo_dbtest_ready_cmd() {
+  local bin="/root/benchmark/silo/out-perf.masstree/benchmarks/dbtest"
+  local cmd="test -x ${bin} && ldd ${bin} >/dev/null 2>&1 && grep -a -q \"allocator   : ${SILO_EXPECTED_ALLOCATOR}\" ${bin}"
+  if [[ "${SILO_REQUIRE_ZIPF_OPTS}" == "1" ]]; then
+    cmd="${cmd} && grep -a -q 'zipf-theta' ${bin} && grep -a -q 'zipf-reverse' ${bin}"
+  fi
+  printf '%s' "${cmd}"
+}
+
 stage_silo() {
   echo "stage Silo source/binaries"
   remote "if test -f /usr/lib/x86_64-linux-gnu/liblz4.so.1 && ! test -e /usr/lib/x86_64-linux-gnu/liblz4.so; then ln -s liblz4.so.1 /usr/lib/x86_64-linux-gnu/liblz4.so; fi"
-  if remote "test -x /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest && ldd /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1"; then
+  if remote "$(silo_dbtest_ready_cmd)"; then
     echo "skip existing Silo dbtest"
     return 0
   fi
-  if ! remote "test -d /root/benchmark/silo && test -f /root/benchmark/silo/Makefile"; then
-    stream_dir_filtered "${BENCHMARK_DIR}/silo" /root/benchmark \
-      --exclude=silo/.git \
-      --exclude=silo/.git/\*
-  fi
+  remote "rm -rf /root/benchmark/silo"
+  stream_dir_filtered "${BENCHMARK_DIR}/silo" /root/benchmark \
+    --exclude=silo/.git \
+    --exclude=silo/.git/\*
   remote "if ! test -e /usr/lib/x86_64-linux-gnu/liblz4.so && test -f /root/benchmark/silo/third-party/lz4/liblz4.so; then cp /root/benchmark/silo/third-party/lz4/liblz4.so /usr/local/lib/liblz4.so && ldconfig; fi"
-  if remote "test -x /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest && ldd /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1"; then
-    echo "skip existing Silo dbtest after loader repair"
+  if remote "$(silo_dbtest_ready_cmd)"; then
+    echo "staged host Silo dbtest"
     return 0
   fi
-  remote "cd /root/benchmark/silo && rm -rf out-perf.masstree && make -j\"\$(nproc)\" dbtest MYSQL=0 USE_MALLOC_MODE=0; test -x out-perf.masstree/benchmarks/dbtest && ldd out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1 && chmod +x out-perf.masstree/benchmarks/dbtest"
+  if [[ "${SILO_REBUILD_ON_MISMATCH}" != "1" ]]; then
+    die "staged Silo dbtest missing required allocator/options; rebuild disabled"
+  fi
+  if [[ "${SILO_USE_MALLOC_MODE}" == "1" ]]; then
+    remote "if ! printf 'int main(void) { return 0; }\\n' | cc -x c - -ljemalloc -o /tmp/iccd-jemalloc-link-test >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive dpkg --configure -a && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y libjemalloc-dev; fi; rm -f /tmp/iccd-jemalloc-link-test"
+  fi
+  remote "cd /root/benchmark/silo && rm -rf out-perf.masstree && make -j\"\$(nproc)\" dbtest MYSQL=0 USE_MALLOC_MODE=${SILO_USE_MALLOC_MODE}; test -x out-perf.masstree/benchmarks/dbtest && ldd out-perf.masstree/benchmarks/dbtest >/dev/null 2>&1 && grep -a -q \"allocator   : ${SILO_EXPECTED_ALLOCATOR}\" out-perf.masstree/benchmarks/dbtest && chmod +x out-perf.masstree/benchmarks/dbtest"
 }
 
 stage_liblinear() {
@@ -591,17 +569,10 @@ stage_liblinear() {
 stage_candidate_microbench() {
   local w="$1"
   remote "mkdir -p /root/benchmark/vmitosis-workloads/bin /root/benchmark/XSBench/openmp-threading /root/benchmark/gapbs"
-  if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
-    remote "mkdir -p /root/gapbs_graphs"
-  fi
   case "${w}" in
     pr|bc)
       stage_gapbs_source
-      if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
-        stage_gapbs_graph
-      else
-        echo "skip GAPBS graph staging; GAPBS will generate graph at runtime: g${GAPBS_GRAPH_SCALE}"
-      fi
+      echo "GAPBS will generate graph in the measured path: -g ${GAPBS_GRAPH_SCALE}"
       ;;
     gups|graph500|btree)
       stage_vmitosis_workloads
@@ -614,11 +585,7 @@ stage_candidate_microbench() {
     gapbs_bfs|gapbs_cc|gapbs_sssp)
       stage_gapbs_source
       remote "cd /root/benchmark/gapbs && (make -j\"\$(nproc)\" '${w#gapbs_}' || true); test -x '${w#gapbs_}' && chmod +x '${w#gapbs_}'"
-      if [[ "${STAGE_GAPBS_GRAPH}" == "1" ]]; then
-        stage_gapbs_graph
-      else
-        echo "skip GAPBS graph staging; GAPBS will generate graph at runtime: g${GAPBS_GRAPH_SCALE}"
-      fi
+      echo "GAPBS will generate graph in the measured path: -g ${GAPBS_GRAPH_SCALE}"
       ;;
   esac
 }
@@ -699,6 +666,7 @@ stage_selected_workloads() {
   if [[ "${CLEAN}" == "1" ]]; then
     remote "rm -rf /root/benchmark /root/tools/dotnet7 /root/tools/dlrm-venv /root/realworld-work && mkdir -p /root/benchmark /root/tools /root/realworld-work"
   fi
+  remote "rm -rf /root/gapbs_graphs"
 
   mapfile -t workload_list < <(expand_workloads ${WORKLOADS})
 

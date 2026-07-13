@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot fault bucket controller decisions from controller.csv."""
+"""Plot the resident-capacity quantile controller CSV."""
 
 from __future__ import annotations
 
@@ -9,41 +9,28 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 
-BUCKET_LABELS = (
-    "<=1",
-    "<=16",
-    "<=64",
-    "<=128",
-    "<=256",
-    "<=512",
-    "<=1024",
-    "<=2048",
-    "<=4096",
-    "<=8192",
-    ">8192",
-)
+PPM = 1_000_000
 
 
-def to_int(value: str, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def to_float(value: str, default: float = 0.0) -> float:
+def optional_float(value: Optional[str]) -> float:
+    if value in (None, ""):
+        return float("nan")
     try:
         return float(value)
-    except (TypeError, ValueError):
-        return default
+    except ValueError:
+        return float("nan")
 
 
 def load_rows(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="ascii") as f:
-        return list(csv.DictReader(f))
+    with path.open(newline="", encoding="ascii") as source:
+        return list(csv.DictReader(source))
 
 
-def try_import_matplotlib():
+def sample_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [row for row in rows if row.get("event") not in {"start", "exit"}]
+
+
+def import_matplotlib():
     import matplotlib
 
     matplotlib.use("Agg")
@@ -58,60 +45,157 @@ def save(fig, output_base: Path) -> None:
     fig.savefig(output_base.with_suffix(".pdf"), bbox_inches="tight")
 
 
-def plot_buckets(plt, rows: list[dict[str, str]], output_base: Path) -> None:
-    samples = [row for row in rows if row.get("event") not in {"start", "exit"}]
-    x = [to_float(row.get("elapsed_ms", "0")) / 1000.0 for row in samples]
-    local = [to_int(row.get("local_p80_bucket_index", "-1"), -1) for row in samples]
-    remote = [to_int(row.get("remote_p20_bucket_index", "-1"), -1) for row in samples]
-    states = [row.get("controller_state", "") for row in samples]
+def plot_policy(plt, rows: list[dict[str, str]], output_base: Path) -> None:
+    samples = sample_rows(rows)
+    if not samples:
+        raise ValueError("controller CSV contains no policy samples")
 
-    fig, ax = plt.subplots(figsize=(8.2, 3.8))
-    ax.plot(x, local, marker="o", linewidth=1.4, markersize=3.8, label="local P80")
-    ax.plot(x, remote, marker="s", linewidth=1.4, markersize=3.8, label="remote P20")
-    for xpos, state in zip(x, states):
-        if state == "off":
-            ax.axvline(xpos, color="#D62728", linewidth=0.7, alpha=0.18)
-            break
-    ax.set_title("Fault latency bucket controller")
-    ax.set_xlabel("Elapsed time (s)")
-    ax.set_ylabel("Bucket index")
-    ax.set_yticks(range(len(BUCKET_LABELS)))
-    ax.set_yticklabels(BUCKET_LABELS)
-    ax.grid(axis="y", color="#dddddd", linewidth=0.6)
-    ax.set_axisbelow(True)
-    ax.legend(frameon=False)
-    fig.tight_layout()
-    save(fig, output_base)
-    plt.close(fig)
-
-
-def plot_gap(plt, rows: list[dict[str, str]], output_base: Path) -> None:
-    samples = [row for row in rows if row.get("event") not in {"start", "exit"}]
-    x = [to_float(row.get("elapsed_ms", "0")) / 1000.0 for row in samples]
-    gap = [
-        float("nan") if row.get("gap", "") == "" else to_float(row.get("gap", "0"))
+    elapsed = [optional_float(row.get("elapsed_ms")) / 1000 for row in samples]
+    local_p75 = [optional_float(row.get("local_p75_ns")) / 1e9 for row in samples]
+    local_reference = [
+        optional_float(row.get("p75_stagnation_reference_local_p75_ns")) / 1e9
         for row in samples
     ]
-    effective = [to_int(row.get("effective_consecutive", "0")) for row in samples]
-    no_improve = [to_int(row.get("no_improve_consecutive", "0")) for row in samples]
+    remote_query_q = [
+        optional_float(row.get("remote_query_q_ns")) / 1e9 for row in samples
+    ]
+    remote_reference = [
+        optional_float(row.get("p75_stagnation_reference_remote_q_ns")) / 1e9
+        for row in samples
+    ]
+    remote_lt = [
+        optional_float(row.get("remote_cdf_lt_local_p75_ppm")) * 100 / PPM
+        for row in samples
+    ]
+    remote_le = [
+        optional_float(row.get("remote_cdf_le_local_p75_ppm")) * 100 / PPM
+        for row in samples
+    ]
+    required = [
+        optional_float(row.get("start_remote_quantile_rank_ppm"))
+        * 100
+        / PPM
+        for row in samples
+    ]
+    stop_ratio = [optional_float(row.get("stop_capacity_ratio")) for row in samples]
+    stop_threshold = [
+        optional_float(row.get("stop_capacity_ratio_threshold")) for row in samples
+    ]
+    start_count = [optional_float(row.get("start_consecutive")) for row in samples]
+    restart_count = [
+        optional_float(row.get("p75_stagnation_forced_off_consecutive"))
+        for row in samples
+    ]
+    migration_on = [1 if row.get("controller_state") == "on" else 0 for row in samples]
 
-    fig, ax1 = plt.subplots(figsize=(8.2, 3.8))
-    ax1.plot(x, gap, marker="o", linewidth=1.4, markersize=3.8, color="#4C78A8", label="gap")
-    ax1.axhline(0, color="#222222", linewidth=0.8, alpha=0.5)
-    ax1.set_title("Controller gap and consecutive counters")
-    ax1.set_xlabel("Elapsed time (s)")
-    ax1.set_ylabel("gap = local P80 index - remote P20 index")
-    ax1.grid(axis="y", color="#dddddd", linewidth=0.6)
-    ax1.set_axisbelow(True)
+    fig, axes = plt.subplots(4, 1, figsize=(10, 9), sharex=True)
+    p75_ax, capacity_ax, stop_ax, state_ax = axes
 
-    ax2 = ax1.twinx()
-    ax2.step(x, effective, where="post", color="#54A24B", linewidth=1.2, label="effective count")
-    ax2.step(x, no_improve, where="post", color="#E45756", linewidth=1.2, label="no-improve count")
-    ax2.set_ylabel("Consecutive count")
+    p75_ax.plot(
+        elapsed, local_p75, color="#31688E", linewidth=1.5, label="Local P75"
+    )
+    p75_ax.plot(
+        elapsed,
+        local_reference,
+        color="#D95F02",
+        linewidth=1.1,
+        linestyle="--",
+        label="Latched local reference",
+    )
+    p75_ax.plot(
+        elapsed,
+        remote_query_q,
+        color="#21918C",
+        linewidth=1.3,
+        label="Remote fixed-rank query",
+    )
+    p75_ax.plot(
+        elapsed,
+        remote_reference,
+        color="#7A5195",
+        linewidth=1.1,
+        linestyle="--",
+        label="Latched remote reference",
+    )
+    p75_ax.set_ylabel("Fault latency (s)")
+    p75_ax.set_title("Resident-capacity quantile controller")
+    p75_ax.legend(frameon=False, ncol=2, fontsize=8, loc="best")
 
-    handles1, labels1 = ax1.get_legend_handles_labels()
-    handles2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(handles1 + handles2, labels1 + labels2, frameon=False, loc="best")
+    capacity_ax.plot(
+        elapsed,
+        remote_lt,
+        color="#21918C",
+        linewidth=1.4,
+        label="Remote share faster than local P75 (inverse query)",
+    )
+    capacity_ax.plot(
+        elapsed,
+        remote_le,
+        color="#35B779",
+        linewidth=1.2,
+        label="Remote share no slower than local P75",
+    )
+    capacity_ax.plot(
+        elapsed,
+        required,
+        color="#440154",
+        linewidth=1.4,
+        label="START remote latency rank (chosen by capacity)",
+    )
+    capacity_ax.axhline(100, color="#555555", linewidth=0.8, linestyle=":")
+    capacity_ax.set_ylabel("Remote rank / CDF (%)")
+    capacity_ax.legend(frameon=False, ncol=3, fontsize=8, loc="best")
+
+    stop_ax.plot(
+        elapsed,
+        stop_ratio,
+        color="#D95F02",
+        linewidth=1.5,
+        label="STOP capacity ratio",
+    )
+    stop_ax.plot(
+        elapsed,
+        stop_threshold,
+        color="#333333",
+        linewidth=1.0,
+        linestyle="--",
+        label="STOP threshold",
+    )
+    stop_ax.set_ylabel("STOP ratio")
+    stop_ax.legend(frameon=False, loc="best")
+
+    state_ax.step(
+        elapsed,
+        migration_on,
+        where="post",
+        color="#4C78A8",
+        linewidth=1.6,
+        label="Migration enabled",
+    )
+    state_ax.step(
+        elapsed,
+        start_count,
+        where="post",
+        color="#E45756",
+        linewidth=1.3,
+        label="START consecutive",
+    )
+    state_ax.step(
+        elapsed,
+        restart_count,
+        where="post",
+        color="#F2CF5B",
+        linewidth=1.3,
+        label="Joint restart consecutive",
+    )
+    state_ax.set_yticks((0, 1, 2, 3))
+    state_ax.set_ylabel("State / count")
+    state_ax.set_xlabel("Elapsed time (s)")
+    state_ax.legend(frameon=False, ncol=3, loc="best")
+
+    for axis in axes:
+        axis.grid(axis="y", color="#dddddd", linewidth=0.6)
+        axis.set_axisbelow(True)
     fig.tight_layout()
     save(fig, output_base)
     plt.close(fig)
@@ -127,10 +211,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     rows = load_rows(args.controller_csv)
     if not rows:
         raise SystemExit(f"empty controller CSV: {args.controller_csv}")
-
-    plt = try_import_matplotlib()
-    plot_buckets(plt, rows, args.out_dir / f"{args.prefix}_bucket_indices")
-    plot_gap(plt, rows, args.out_dir / f"{args.prefix}_gap_counts")
+    plot_policy(
+        import_matplotlib(),
+        rows,
+        args.out_dir / f"{args.prefix}_policy",
+    )
     return 0
 
 

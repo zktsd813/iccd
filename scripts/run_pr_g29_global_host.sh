@@ -40,6 +40,7 @@ OMP_THREADS="${OMP_THREADS:-32}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-21600}"
 RUN_LOCAL16="${RUN_LOCAL16:-1}"
 RUN_ALLFAST="${RUN_ALLFAST:-1}"
+DROP_GUEST_CACHES="${DROP_GUEST_CACHES:-${ICCD_DROP_GUEST_CACHES:-1}}"
 
 log() {
   printf '[pr-g29-host] %s\n' "$*" >&2
@@ -122,7 +123,7 @@ run_guest_matrix() {
 
   log "running ${name}: ${runs}"
   ssh_vm "${port}" \
-    "OUTROOT='${guest_out}' RUNS='${runs}' GRAPH_SCALE='${GRAPH_SCALE}' PR_ITERATIONS='${PR_ITERATIONS}' PR_TOLERANCE='${PR_TOLERANCE}' PR_TRIALS='${PR_TRIALS}' OMP_THREADS='${OMP_THREADS}' TIMEOUT_SEC='${TIMEOUT_SEC}' DROP_GUEST_CACHES='0' /root/scripts/run_pr_g29_global_guest.sh" \
+    "OUTROOT='${guest_out}' RUNS='${runs}' GRAPH_SCALE='${GRAPH_SCALE}' PR_ITERATIONS='${PR_ITERATIONS}' PR_TOLERANCE='${PR_TOLERANCE}' PR_TRIALS='${PR_TRIALS}' OMP_THREADS='${OMP_THREADS}' TIMEOUT_SEC='${TIMEOUT_SEC}' DROP_GUEST_CACHES='${DROP_GUEST_CACHES}' /root/scripts/run_pr_g29_global_guest.sh" \
     > "${EXP_ROOT}/host-logs/${name}.ssh.log" 2>&1 || true
 
   rm -rf "${host_out}"
@@ -172,6 +173,7 @@ main() {
     printf 'hmat_slow_latency_ns=%s\n' "${HMAT_SLOW_LATENCY_NS}"
     printf 'hmat_fast_bandwidth=%s\n' "${HMAT_FAST_BANDWIDTH}"
     printf 'hmat_slow_bandwidth=%s\n' "${HMAT_SLOW_BANDWIDTH}"
+    printf 'drop_guest_caches=%s\n' "${DROP_GUEST_CACHES}"
     printf 'workload_cpu_node=%s\n' "${ICCD_WORKLOAD_CPU_NODE:-}"
     printf 'workload_placement=numactl --cpunodebind=%s\n' "${ICCD_WORKLOAD_CPU_NODE:-0}"
     [[ -z "${CXL_FMW_SIZE:-}" ]] || printf 'cxl_fmw_size=%s\n' "${CXL_FMW_SIZE}"

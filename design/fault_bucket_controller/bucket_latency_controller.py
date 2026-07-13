@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Fault-latency bucket controller for global NUMA balancing.
-
-The controller is intentionally userspace-only. It advances the kernel fault
-latency window, reads the current local/remote histograms, and disables global
-NUMA balancing when the configured bucket policy says migration is no longer
-helping.
-"""
+"""Control NUMA migration with the final ICCD fault-quantile policy."""
 
 from __future__ import annotations
 
@@ -16,998 +10,1344 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Iterable, Optional, TextIO
 
 
-BUCKET_LABELS = (
-    "<=1",
-    "<=16",
-    "<=64",
-    "<=128",
-    "<=256",
-    "<=512",
-    "<=1024",
-    "<=2048",
-    "<=4096",
-    "<=8192",
-    ">8192",
-)
-
-SERIES_KEYS = ("local_pages", "remote_pages")
+PPM = 1_000_000
+LOCAL_HEAD_PPM = 750_000
+LOCAL_TAIL_PPM = 250_000
+DEFAULT_START_CAPACITY_MARGIN_PCT = 10
+DEFAULT_P75_STAGNATION_DECREASE_PCT = 10.0
+DEFAULT_P75_STAGNATION_CONSECUTIVE_WINDOWS = 3
+DEFAULT_P75_RESTART_DEGRADATION_PCT = 10.0
+DEFAULT_P75_RESTART_CONSECUTIVE_WINDOWS = 3
+DEFAULT_REMOTE_RESTART_IMPROVEMENT_PCT = 10.0
+KLL_SCHEMA = "quantile_snapshot_v4"
+KLL_ALGORITHM = "kll_weighted_ms_v1"
+KLL_VALUE_SOURCE = "sketch_latency_ms_to_ns"
 
 
-@dataclass
-class Histogram:
+@dataclass(frozen=True)
+class CycleWindowGate:
+    ready: bool
+    reason: str
+    elapsed_ms: int
+
+
+def cycle_window_gate(
+    *,
+    cycle_count: Optional[int],
+    last_cycle_count: Optional[int],
+    elapsed_ms: int,
+    min_sec: float,
+    max_sec: float,
+) -> CycleWindowGate:
+    min_ms = int(min_sec * 1000)
+    max_ms = int(max_sec * 1000)
+    advanced = (
+        cycle_count is not None
+        and last_cycle_count is not None
+        and cycle_count > last_cycle_count
+    )
+    if advanced and elapsed_ms >= min_ms:
+        return CycleWindowGate(True, "cycle", elapsed_ms)
+    if max_ms > 0 and elapsed_ms >= max_ms:
+        return CycleWindowGate(True, "max_timeout", elapsed_ms)
+    return CycleWindowGate(False, "", elapsed_ms)
+
+
+@dataclass(frozen=True)
+class QuantileSnapshot:
+    schema: str
     window_seq: int
-    local_pages: list[int]
-    remote_pages: list[int]
-
-
-@dataclass
-class BucketSignals:
+    algorithm: str
+    value_source: str
     local_total: int
     remote_total: int
-    local_p80_index: int
-    local_p80_label: str
-    remote_p20_index: int
-    remote_p20_label: str
-    valid: bool
+    local_p75_ns: Optional[int]
+    remote_query_rank_ppm: Optional[int]
+    remote_query_q_ns: Optional[int]
+    remote_query_valid: bool
+    remote_cdf_lt_local_p75_ppm: Optional[int]
+    remote_cdf_le_local_p75_ppm: Optional[int]
 
 
-@dataclass
-class Decision:
-    valid: bool
-    decision: str
+@dataclass(frozen=True)
+class PolicyObservation:
+    local_resident_pages: Optional[int]
+    remote_resident_pages: Optional[int]
+    stop_valid: bool
     stop_reason: str
-    gap: Optional[int]
-    effective_count: int
-    no_improve_count: int
+    local_tail_pages: Optional[float]
+    remote_candidate_pages: Optional[float]
+    stop_capacity_ratio: Optional[float]
+    stop_raw: bool
+    start_valid: bool
+    start_reason: str
+    local_head_pages: Optional[float]
+    start_capacity_margin_pct: int
+    start_required_pages: Optional[float]
+    start_remote_quantile_rank_ppm: Optional[int]
+    start_raw: bool
+    start_consecutive: int
+    start_confirmed: bool
+    p75_stagnation_previous_local_p75_ns: Optional[int]
+    p75_stagnation_decrease_pct: Optional[float]
+    p75_stagnation_count: int
+    p75_stagnation_state_before: str
+    p75_stagnation_state: str
+    p75_stagnation_transition: str
+    p75_stagnation_reference_local_p75_ns: Optional[int]
+    p75_stagnation_reference_remote_rank_ppm: Optional[int]
+    p75_stagnation_reference_remote_q_ns: Optional[int]
+    p75_stagnation_degradation_pct: Optional[float]
+    p75_stagnation_degradation_met: bool
+    p75_stagnation_remote_query_match: bool
+    p75_stagnation_remote_improvement_pct: Optional[float]
+    p75_stagnation_remote_improvement_met: bool
+    p75_stagnation_forced_off_consecutive: int
+    p75_stagnation_forced_stop: bool
+    p75_stagnation_restart: bool
+    arbitration: str
 
 
-@dataclass
-class RestartObservation:
-    armed: bool
-    valid: bool
-    decision: str
-    stop_remote_p20_index: Optional[int]
-    compare_bucket_index: Optional[int]
-    baseline_share: Optional[float]
-    current_share: Optional[float]
-    ratio: Optional[float]
-    consecutive_count: int
+@dataclass(frozen=True)
+class StateTransition:
+    event: str
+    state: str
+    action: str
+    migration_enabled: Optional[int]
+
+
+class StartState:
+    """Track consecutive valid raw START windows."""
+
+    def __init__(self, consecutive_windows: int):
+        self.consecutive_windows = consecutive_windows
+        self.consecutive_count = 0
+
+    def observe(self, *, valid: bool, raw: bool) -> tuple[int, bool]:
+        if not valid or not raw:
+            self.consecutive_count = 0
+        else:
+            self.consecutive_count = min(
+                self.consecutive_windows,
+                self.consecutive_count + 1,
+            )
+        return (
+            self.consecutive_count,
+            valid and raw and self.consecutive_count >= self.consecutive_windows,
+        )
+
+    def reset(self) -> None:
+        self.consecutive_count = 0
+
+    def seed_confirmed(self) -> tuple[int, bool]:
+        self.consecutive_count = self.consecutive_windows
+        return self.consecutive_count, True
+
+
+@dataclass(frozen=True)
+class P75StagnationObservation:
+    previous_local_p75_ns: Optional[int]
+    decrease_pct: Optional[float]
+    count: int
+    state_before: str
+    state: str
+    transition: str
+    reference_local_p75_ns: Optional[int]
+    reference_remote_rank_ppm: Optional[int]
+    reference_remote_q_ns: Optional[int]
+    degradation_pct: Optional[float]
+    degradation_met: bool
+    remote_query_match: bool
+    remote_improvement_pct: Optional[float]
+    remote_improvement_met: bool
+    forced_off_consecutive: int
+    forced_stop: bool
     restart: bool
 
 
-class DecisionState:
+class P75StagnationState:
+    """Latch STOP and require joint local/remote evidence before restarting."""
+
+    NORMAL = "NORMAL"
+    FORCED_OFF = "FORCED_OFF"
+
     def __init__(
         self,
-        consecutive_effective: int,
-        consecutive_no_improve: int,
-        baseline_skip_windows: int = 1,
+        required_decrease_pct: float,
+        consecutive_windows: int,
+        restart_degradation_pct: float = DEFAULT_P75_RESTART_DEGRADATION_PCT,
+        restart_consecutive_windows: int = (
+            DEFAULT_P75_RESTART_CONSECUTIVE_WINDOWS
+        ),
+        remote_restart_improvement_pct: float = (
+            DEFAULT_REMOTE_RESTART_IMPROVEMENT_PCT
+        ),
     ):
-        self.consecutive_effective = consecutive_effective
-        self.consecutive_no_improve = consecutive_no_improve
-        self.baseline_skip_windows = baseline_skip_windows
-        self.skipped_valid_windows = 0
-        self.effective_count = 0
-        self.no_improve_count = 0
-        self.previous_gap: Optional[int] = None
-        self.previous_region: Optional[str] = None
-        self.seen_remote_valid = False
+        if required_decrease_pct < 0:
+            raise ValueError("required_decrease_pct must be >= 0")
+        if consecutive_windows < 1:
+            raise ValueError("consecutive_windows must be >= 1")
+        if restart_degradation_pct < 0:
+            raise ValueError("restart_degradation_pct must be >= 0")
+        if restart_consecutive_windows < 1:
+            raise ValueError("restart_consecutive_windows must be >= 1")
+        if not 0 <= remote_restart_improvement_pct <= 100:
+            raise ValueError("remote_restart_improvement_pct must be in [0, 100]")
+        self.required_decrease_pct = required_decrease_pct
+        self.consecutive_windows = consecutive_windows
+        self.restart_degradation_pct = restart_degradation_pct
+        self.restart_consecutive_windows = restart_consecutive_windows
+        self.remote_restart_improvement_pct = remote_restart_improvement_pct
+        self.state = self.NORMAL
+        self.previous_valid_local_p75_ns: Optional[int] = None
+        self.consecutive_count = 0
+        self.trigger_local_p75_ns: list[int] = []
+        self.reference_local_p75_ns: Optional[int] = None
+        self.reference_remote_rank_ppm: Optional[int] = None
+        self.reference_remote_q_ns: Optional[int] = None
+        self.forced_off_consecutive = 0
 
-    def reset(self) -> None:
-        self.skipped_valid_windows = 0
-        self.effective_count = 0
-        self.no_improve_count = 0
-        self.previous_gap = None
-        self.previous_region = None
-        self.seen_remote_valid = False
+    def _reset_trigger(self, baseline_local_p75_ns: Optional[int] = None) -> None:
+        self.previous_valid_local_p75_ns = baseline_local_p75_ns
+        self.consecutive_count = 0
+        self.trigger_local_p75_ns.clear()
 
-    def evaluate(
+    def query_rank_ppm(self, current_capacity_rank_ppm: Optional[int]) -> int:
+        if self.state == self.FORCED_OFF:
+            frozen = self.reference_remote_rank_ppm
+            if frozen is not None and 1 <= frozen <= PPM:
+                return frozen
+            return 0
+        if (
+            current_capacity_rank_ppm is not None
+            and 1 <= current_capacity_rank_ppm <= PPM
+        ):
+            return current_capacity_rank_ppm
+        return 0
+
+    @staticmethod
+    def _remote_query_matches(
+        expected_rank_ppm: Optional[int],
+        query_rank_ppm: Optional[int],
+        query_q_ns: Optional[int],
+        query_valid: bool,
+    ) -> bool:
+        return bool(
+            query_valid
+            and expected_rank_ppm is not None
+            and 1 <= expected_rank_ppm <= PPM
+            and query_rank_ppm == expected_rank_ppm
+            and query_q_ns is not None
+            and query_q_ns >= 0
+        )
+
+    def _restart_observation(
         self,
         *,
-        local_total: int,
-        remote_total: int,
-        local_p80_index: int,
-        remote_p20_index: int,
-        min_local_pages: int,
-        min_remote_pages: int,
-    ) -> Decision:
-        remote_valid = remote_total >= min_remote_pages and remote_p20_index >= 0
-        if remote_valid:
-            self.seen_remote_valid = True
-        if self.seen_remote_valid and not remote_valid:
-            self.effective_count = 0
-            self.no_improve_count = 0
-            self.previous_gap = None
-            self.previous_region = None
-            return Decision(
-                valid=False,
-                decision="stop_remote_low_sample",
-                stop_reason="remote_low_sample",
-                gap=None,
-                effective_count=self.effective_count,
-                no_improve_count=self.no_improve_count,
-            )
-
-        valid, local_p80_index, remote_p20_index = validate_bucket_pair(
-            local_total=local_total,
-            remote_total=remote_total,
-            local_p80_index=local_p80_index,
-            remote_p20_index=remote_p20_index,
-            min_local_pages=min_local_pages,
-            min_remote_pages=min_remote_pages,
+        start_valid: bool,
+        start_raw: bool,
+        current_p75_ns: int,
+        remote_query_rank_ppm: Optional[int],
+        remote_query_q_ns: Optional[int],
+        remote_query_valid: bool,
+    ) -> tuple[
+        Optional[float],
+        bool,
+        bool,
+        Optional[float],
+        bool,
+        bool,
+    ]:
+        reference_p75_ns = self.reference_local_p75_ns
+        reference_rank_ppm = self.reference_remote_rank_ppm
+        reference_remote_q_ns = self.reference_remote_q_ns
+        remote_query_match = self._remote_query_matches(
+            reference_rank_ppm,
+            remote_query_rank_ppm,
+            remote_query_q_ns,
+            remote_query_valid,
         )
-        if not valid:
-            self.reset()
-            return Decision(
-                valid=False,
-                decision="invalid_skip",
-                stop_reason="",
-                gap=None,
-                effective_count=self.effective_count,
-                no_improve_count=self.no_improve_count,
-            )
+        if (
+            reference_p75_ns is None
+            or reference_p75_ns <= 0
+            or current_p75_ns <= 0
+            or reference_remote_q_ns is None
+            or reference_remote_q_ns <= 0
+        ):
+            return None, False, remote_query_match, None, False, False
 
-        gap = local_p80_index - remote_p20_index
-        if self.skipped_valid_windows < self.baseline_skip_windows:
-            self.skipped_valid_windows += 1
-            self.effective_count = 0
-            self.no_improve_count = 0
-            self.previous_gap = None
-            self.previous_region = None
-            return Decision(
-                valid=True,
-                decision="baseline_skip",
-                stop_reason="",
-                gap=gap,
-                effective_count=self.effective_count,
-                no_improve_count=self.no_improve_count,
-            )
-
-        if gap < 0:
-            effective_gap = remote_p20_index - local_p80_index
-            previous_effective_gap = (
-                -self.previous_gap
-                if self.previous_gap is not None
-                else None
-            )
-            self.no_improve_count = 0
-            if self.previous_region != "effective" or self.previous_gap is None:
-                self.effective_count = 0
-                decision = "effective_baseline"
-                stop_reason = ""
-            elif previous_effective_gap is not None and effective_gap > previous_effective_gap:
-                decision = "effective_improving"
-                stop_reason = ""
-            else:
-                self.effective_count += 1
-                if self.effective_count >= self.consecutive_effective:
-                    decision = "stop_effective"
-                    stop_reason = "effective"
-                else:
-                    decision = "effective_candidate"
-                    stop_reason = ""
-            self.previous_gap = gap
-            self.previous_region = "effective"
-            return Decision(
-                valid=True,
-                decision=decision,
-                stop_reason=stop_reason,
-                gap=gap,
-                effective_count=self.effective_count,
-                no_improve_count=self.no_improve_count,
-            )
-
-        self.effective_count = 0
-        if self.previous_region != "need" or self.previous_gap is None:
-            self.no_improve_count = 0
-            decision = "need_baseline"
-            stop_reason = ""
-        elif gap < self.previous_gap:
-            self.no_improve_count = 0
-            decision = "improving"
-            stop_reason = ""
-        else:
-            self.no_improve_count = 1
-            decision = "stop_no_improve"
-            stop_reason = "no_improve"
-
-        self.previous_gap = gap
-        self.previous_region = "need"
-        return Decision(
-            valid=True,
-            decision=decision,
-            stop_reason=stop_reason,
-            gap=gap,
-            effective_count=self.effective_count,
-            no_improve_count=self.no_improve_count,
+        degradation_pct = (
+            100.0 * (current_p75_ns - reference_p75_ns) / reference_p75_ns
         )
-
-
-class RestartState:
-    def __init__(
-        self,
-        threshold: float,
-        consecutive_windows: int,
-        protected_windows: int = 1,
-    ):
-        self.threshold = threshold
-        self.consecutive_windows = consecutive_windows
-        self.protected_windows = protected_windows
-        self.protecting = False
-        self.protected_count = 0
-        self.stop_reason = ""
-        self.stop_remote_p20_index: Optional[int] = None
-        self.compare_bucket_index: Optional[int] = None
-        self.baseline_share: Optional[float] = None
-        self.consecutive_count = 0
-
-    def reset(self) -> None:
-        self.protecting = False
-        self.protected_count = 0
-        self.stop_reason = ""
-        self.stop_remote_p20_index = None
-        self.compare_bucket_index = None
-        self.baseline_share = None
-        self.consecutive_count = 0
-
-    def snapshot(self) -> RestartObservation:
-        return self._observation(
-            valid=False,
-            decision="",
-            current_share=None,
-            ratio=None,
-            restart=False,
-        )
-
-    def begin_protection(self, stop_reason: str) -> RestartObservation:
-        self.reset()
-        self.stop_reason = stop_reason
-        self.protecting = stop_reason != "effective"
-        return self._observation(
-            valid=False,
-            decision="restart_protect_start",
-            current_share=None,
-            ratio=None,
-            restart=False,
-        )
-
-    def arm(self, remote_pages: list[int], remote_p20_index: int) -> RestartObservation:
-        self.reset()
-        if not remote_pages or remote_p20_index < 0:
-            return self._observation(
-                valid=False,
-                decision="restart_disarmed",
-                current_share=None,
-                ratio=None,
-                restart=False,
+        degradation_met = Decimal(current_p75_ns) * 100 >= (
+            Decimal(reference_p75_ns)
+            * (
+                Decimal(100)
+                + Decimal(str(self.restart_degradation_pct))
             )
-
-        compare_index = remote_p20_index
-        baseline = prefix_share(remote_pages, compare_index)
-        if baseline is None:
-            return self._observation(
-                valid=False,
-                decision="restart_disarmed",
-                current_share=None,
-                ratio=None,
-                restart=False,
+        )
+        remote_improvement_pct: Optional[float] = None
+        remote_improvement_met = False
+        if remote_query_match:
+            assert remote_query_q_ns is not None
+            remote_improvement_pct = (
+                100.0
+                * (reference_remote_q_ns - remote_query_q_ns)
+                / reference_remote_q_ns
             )
-
-        self.stop_remote_p20_index = remote_p20_index
-        self.compare_bucket_index = compare_index
-        self.baseline_share = baseline
-        return self._observation(
-            valid=True,
-            decision="restart_armed",
-            current_share=baseline,
-            ratio=1.0 if baseline > 0 else None,
-            restart=False,
+            remote_improvement_met = Decimal(remote_query_q_ns) * 100 <= (
+                Decimal(reference_remote_q_ns)
+                * (
+                    Decimal(100)
+                    - Decimal(str(self.remote_restart_improvement_pct))
+                )
+            )
+        restart_candidate = bool(
+            start_valid
+            and start_raw
+            and degradation_met
+            and remote_query_match
+            and remote_improvement_met
+        )
+        return (
+            degradation_pct,
+            degradation_met,
+            remote_query_match,
+            remote_improvement_pct,
+            remote_improvement_met,
+            restart_candidate,
         )
 
     def observe(
         self,
-        remote_pages: list[int],
-        min_remote_pages: int,
-        remote_p20_index: Optional[int] = None,
         *,
-        need_migration: Optional[bool] = None,
-    ) -> RestartObservation:
-        if self.stop_reason == "effective":
-            if need_migration is None:
-                return self._observation(
-                    valid=False,
-                    decision="restart_effective_invalid",
-                    current_share=None,
-                    ratio=None,
-                    restart=False,
+        start_valid: bool,
+        start_raw: bool,
+        stop_valid: bool,
+        stop_raw: bool,
+        local_p75_ns: Optional[int],
+        current_remote_rank_ppm: Optional[int],
+        remote_query_rank_ppm: Optional[int],
+        remote_query_q_ns: Optional[int],
+        remote_query_valid: bool,
+    ) -> P75StagnationObservation:
+        state_before = self.state
+        current_p75_ns = local_p75_ns or 0
+        transition = "none"
+        restart = False
+        comparison_p75_ns: Optional[int] = None
+        decrease_pct: Optional[float] = None
+        degradation_pct: Optional[float] = None
+        degradation_met = False
+        remote_query_match = False
+        remote_improvement_pct: Optional[float] = None
+        remote_improvement_met = False
+
+        if self.state == self.FORCED_OFF:
+            (
+                degradation_pct,
+                degradation_met,
+                remote_query_match,
+                remote_improvement_pct,
+                remote_improvement_met,
+                restart_candidate,
+            ) = self._restart_observation(
+                start_valid=start_valid,
+                start_raw=start_raw,
+                current_p75_ns=current_p75_ns,
+                remote_query_rank_ppm=remote_query_rank_ppm,
+                remote_query_q_ns=remote_query_q_ns,
+                remote_query_valid=remote_query_valid,
+            )
+
+            if restart_candidate:
+                self.forced_off_consecutive += 1
+                transition = "forced_off_candidate"
+            else:
+                self.forced_off_consecutive = 0
+                transition = (
+                    "forced_off_invalid"
+                    if not start_valid
+                    or current_p75_ns <= 0
+                    or not remote_query_match
+                    else "forced_off_reset"
                 )
-            return self._observation(
-                valid=True,
-                decision=(
-                    "restart_need_migration"
-                    if need_migration
-                    else "restart_effective_wait"
-                ),
-                current_share=None,
-                ratio=None,
-                restart=need_migration,
-            )
 
-        if self.protecting and self.compare_bucket_index is None:
-            if (
-                sum(remote_pages) < min_remote_pages
-                or remote_p20_index is None
-                or remote_p20_index < 0
-            ):
-                self.protected_count = 0
-                return self._observation(
-                    valid=False,
-                    decision="restart_protect_invalid",
-                    current_share=None,
-                    ratio=None,
-                    restart=False,
+            confirmed_count = self.forced_off_consecutive
+            if confirmed_count >= self.restart_consecutive_windows:
+                reference_p75_ns = self.reference_local_p75_ns
+                reference_rank_ppm = self.reference_remote_rank_ppm
+                reference_remote_q_ns = self.reference_remote_q_ns
+                self.state = self.NORMAL
+                self.reference_local_p75_ns = None
+                self.reference_remote_rank_ppm = None
+                self.reference_remote_q_ns = None
+                self.forced_off_consecutive = 0
+                self._reset_trigger(current_p75_ns)
+                transition = "restart_confirmed"
+                restart = True
+                return P75StagnationObservation(
+                    previous_local_p75_ns=None,
+                    decrease_pct=None,
+                    count=0,
+                    state_before=state_before,
+                    state=self.state,
+                    transition=transition,
+                    reference_local_p75_ns=reference_p75_ns,
+                    reference_remote_rank_ppm=reference_rank_ppm,
+                    reference_remote_q_ns=reference_remote_q_ns,
+                    degradation_pct=degradation_pct,
+                    degradation_met=degradation_met,
+                    remote_query_match=remote_query_match,
+                    remote_improvement_pct=remote_improvement_pct,
+                    remote_improvement_met=remote_improvement_met,
+                    forced_off_consecutive=confirmed_count,
+                    forced_stop=False,
+                    restart=True,
                 )
 
-            self.protected_count += 1
-            if self.protected_count < self.protected_windows:
-                return self._observation(
-                    valid=True,
-                    decision=f"restart_protect_{self.protected_count}",
-                    current_share=None,
-                    ratio=None,
-                    restart=False,
-                )
-
-            return self.arm(remote_pages, remote_p20_index)
-
-        if self.compare_bucket_index is None or self.baseline_share is None:
-            return self._observation(
-                valid=False,
-                decision="restart_not_armed",
-                current_share=None,
-                ratio=None,
-                restart=False,
-            )
-
-        if sum(remote_pages) < min_remote_pages:
-            self.consecutive_count = 0
-            return self._observation(
-                valid=False,
-                decision="restart_invalid",
-                current_share=None,
-                ratio=None,
-                restart=False,
-            )
-
-        current = prefix_share(remote_pages, self.compare_bucket_index)
-        if current is None or self.baseline_share <= 0:
-            self.consecutive_count = 0
-            return self._observation(
-                valid=False,
-                decision="restart_invalid",
-                current_share=current,
-                ratio=None,
-                restart=False,
-            )
-
-        ratio = current / self.baseline_share
-        if ratio >= self.threshold:
-            self.consecutive_count += 1
-            restart = self.consecutive_count >= self.consecutive_windows
-            return self._observation(
-                valid=True,
-                decision="restart_remote_share" if restart else "restart_candidate",
-                current_share=current,
-                ratio=ratio,
+            return P75StagnationObservation(
+                previous_local_p75_ns=None,
+                decrease_pct=None,
+                count=0,
+                state_before=state_before,
+                state=self.state,
+                transition=transition,
+                reference_local_p75_ns=self.reference_local_p75_ns,
+                reference_remote_rank_ppm=self.reference_remote_rank_ppm,
+                reference_remote_q_ns=self.reference_remote_q_ns,
+                degradation_pct=degradation_pct,
+                degradation_met=degradation_met,
+                remote_query_match=remote_query_match,
+                remote_improvement_pct=remote_improvement_pct,
+                remote_improvement_met=remote_improvement_met,
+                forced_off_consecutive=self.forced_off_consecutive,
+                forced_stop=True,
                 restart=restart,
             )
 
-        self.consecutive_count = 0
-        return self._observation(
-            valid=True,
-            decision="restart_wait",
-            current_share=current,
-            ratio=ratio,
+        remote_query_match = self._remote_query_matches(
+            current_remote_rank_ppm,
+            remote_query_rank_ppm,
+            remote_query_q_ns,
+            remote_query_valid,
+        )
+        reference_query_valid = bool(
+            remote_query_match
+            and remote_query_q_ns is not None
+            and remote_query_q_ns > 0
+        )
+        jointly_valid = start_valid and stop_valid and reference_query_valid
+        overlap = start_raw and stop_raw
+        previous_p75_ns = self.previous_valid_local_p75_ns
+        comparison_available = (
+            jointly_valid
+            and current_p75_ns > 0
+            and previous_p75_ns is not None
+            and previous_p75_ns > 0
+        )
+
+        decreased_enough = False
+        if comparison_available:
+            assert previous_p75_ns is not None
+            comparison_p75_ns = previous_p75_ns
+            decrease_pct = (
+                100.0 * (previous_p75_ns - current_p75_ns) / previous_p75_ns
+            )
+            decreased_enough = Decimal(previous_p75_ns - current_p75_ns) * 100 >= (
+                Decimal(previous_p75_ns)
+                * Decimal(str(self.required_decrease_pct))
+            )
+
+        if not jointly_valid or current_p75_ns <= 0:
+            self._reset_trigger()
+        else:
+            if overlap and comparison_available and not decreased_enough:
+                self.consecutive_count += 1
+                self.trigger_local_p75_ns.append(current_p75_ns)
+            else:
+                self.consecutive_count = 0
+                self.trigger_local_p75_ns.clear()
+            self.previous_valid_local_p75_ns = current_p75_ns
+
+        forced_stop = bool(
+            overlap and self.consecutive_count >= self.consecutive_windows
+        )
+        if forced_stop:
+            trigger_values = self.trigger_local_p75_ns[
+                -self.consecutive_windows :
+            ]
+            if len(trigger_values) != self.consecutive_windows:
+                raise RuntimeError("incomplete P75 stagnation trigger history")
+            self.reference_local_p75_ns = max(trigger_values)
+            self.reference_remote_rank_ppm = current_remote_rank_ppm
+            self.reference_remote_q_ns = remote_query_q_ns
+            self.state = self.FORCED_OFF
+            self.forced_off_consecutive = 0
+            transition = "forced_stop_latched"
+
+        return P75StagnationObservation(
+            previous_local_p75_ns=comparison_p75_ns,
+            decrease_pct=decrease_pct,
+            count=self.consecutive_count,
+            state_before=state_before,
+            state=self.state,
+            transition=transition,
+            reference_local_p75_ns=self.reference_local_p75_ns,
+            reference_remote_rank_ppm=self.reference_remote_rank_ppm,
+            reference_remote_q_ns=self.reference_remote_q_ns,
+            degradation_pct=None,
+            degradation_met=False,
+            remote_query_match=remote_query_match,
+            remote_improvement_pct=None,
+            remote_improvement_met=False,
+            forced_off_consecutive=0,
+            forced_stop=forced_stop,
             restart=False,
         )
 
-    def _observation(
-        self,
-        *,
-        valid: bool,
-        decision: str,
-        current_share: Optional[float],
-        ratio: Optional[float],
-        restart: bool,
-    ) -> RestartObservation:
-        return RestartObservation(
-            armed=self.compare_bucket_index is not None and self.baseline_share is not None,
-            valid=valid,
-            decision=decision,
-            stop_remote_p20_index=self.stop_remote_p20_index,
-            compare_bucket_index=self.compare_bucket_index,
-            baseline_share=self.baseline_share,
-            current_share=current_share,
-            ratio=ratio,
-            consecutive_count=self.consecutive_count,
-            restart=restart,
-        )
+
+def state_transition(controller_state: str, arbitration: str) -> StateTransition:
+    if arbitration == "START":
+        if controller_state == "off":
+            return StateTransition("on", "on", "migration_start", 1)
+        return StateTransition("sample", "on", "hold_on_start", None)
+    if arbitration == "STOP":
+        if controller_state == "on":
+            return StateTransition("off", "off", "migration_stop", 0)
+        return StateTransition("sample", "off", "hold_off_stop", None)
+    if arbitration == "HOLD":
+        return StateTransition("sample", controller_state, "none", None)
+    raise ValueError(f"unknown arbitration result: {arbitration}")
 
 
-def monitor_decision(
+def parse_int(value: str) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_quantile_text(text: str) -> QuantileSnapshot:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            values[parts[0]] = parts[1]
+
+    return QuantileSnapshot(
+        schema=values.get("schema", ""),
+        window_seq=parse_int(values.get("window_seq", "")) or 0,
+        algorithm=values.get("algorithm", ""),
+        value_source=values.get("value_source", ""),
+        local_total=parse_int(values.get("local_total", "")) or 0,
+        remote_total=parse_int(values.get("remote_total", "")) or 0,
+        local_p75_ns=parse_int(values.get("local_q75_ns", "")),
+        remote_query_rank_ppm=parse_int(
+            values.get("remote_query_rank_ppm", "")
+        ),
+        remote_query_q_ns=parse_int(values.get("remote_query_q_ns", "")),
+        remote_query_valid=(
+            parse_int(values.get("remote_query_valid", "")) == 1
+        ),
+        remote_cdf_lt_local_p75_ppm=parse_int(
+            values.get("remote_cdf_lt_local_q75_ppm", "")
+        ),
+        remote_cdf_le_local_p75_ppm=parse_int(
+            values.get("remote_cdf_le_local_q75_ppm", "")
+        ),
+    )
+
+
+def validate_quantile_source(snapshot: QuantileSnapshot) -> None:
+    if (
+        snapshot.schema == KLL_SCHEMA
+        and snapshot.algorithm == KLL_ALGORITHM
+        and snapshot.value_source == KLL_VALUE_SOURCE
+    ):
+        return
+    raise RuntimeError(
+        "fault_latency_quantiles is not the required v4 weighted KLL source "
+        f"(schema={snapshot.schema or 'missing'}, "
+        f"algorithm={snapshot.algorithm or 'missing'}, "
+        f"value_source={snapshot.value_source or 'missing'})"
+    )
+
+
+def valid_ppm(value: Optional[int]) -> bool:
+    return value is not None and 0 <= value <= PPM
+
+
+def capacity_selected_remote_rank_ppm(
+    local_resident_pages: Optional[int],
+    remote_resident_pages: Optional[int],
+    start_capacity_margin_pct: int,
+) -> Optional[int]:
+    local_pages = local_resident_pages or 0
+    remote_pages = remote_resident_pages or 0
+    if local_pages <= 0 or remote_pages <= 0:
+        return None
+    margin_denominator = 100
+    required_product = (
+        LOCAL_HEAD_PPM
+        * local_pages
+        * (margin_denominator + start_capacity_margin_pct)
+    )
+    remote_product = remote_pages * margin_denominator
+    return (required_product + remote_product - 1) // remote_product
+
+
+def evaluate_policy(
+    snapshot: QuantileSnapshot,
     *,
-    state: DecisionState,
-    local_total: int,
-    remote_total: int,
-    local_p80_index: int,
-    remote_p20_index: int,
+    local_resident_pages: Optional[int],
+    remote_resident_pages: Optional[int],
     min_local_pages: int,
     min_remote_pages: int,
-    decision_name: str = "monitor_off",
-    invalid_decision_name: str = "invalid_skip_off",
-) -> Decision:
-    valid, local_p80_index, remote_p20_index = validate_bucket_pair(
-        local_total=local_total,
-        remote_total=remote_total,
-        local_p80_index=local_p80_index,
-        remote_p20_index=remote_p20_index,
-        min_local_pages=min_local_pages,
-        min_remote_pages=min_remote_pages,
+    stop_capacity_ratio_threshold: float,
+    start_capacity_margin_pct: int,
+    start_state: StartState,
+    p75_stagnation_state: P75StagnationState,
+) -> PolicyObservation:
+    local_pages = local_resident_pages or 0
+    remote_pages = remote_resident_pages or 0
+
+    common_reason = "ok"
+    if snapshot.local_total < min_local_pages:
+        common_reason = "insufficient_local_samples"
+    elif snapshot.remote_total < min_remote_pages:
+        common_reason = "insufficient_remote_samples"
+    elif snapshot.local_p75_ns is None:
+        common_reason = "missing_local_p75"
+    elif local_pages <= 0 or remote_pages <= 0:
+        common_reason = "missing_resident_capacity"
+
+    stop_valid = common_reason == "ok" and valid_ppm(
+        snapshot.remote_cdf_le_local_p75_ppm
     )
-    gap = local_p80_index - remote_p20_index if valid else None
-    return Decision(
-        valid=valid,
-        decision=decision_name if valid else invalid_decision_name,
-        stop_reason="",
-        gap=gap,
-        effective_count=state.effective_count,
-        no_improve_count=state.no_improve_count,
+    stop_reason = common_reason
+    if common_reason == "ok" and not stop_valid:
+        stop_reason = "missing_inclusive_remote_cdf"
+
+    local_tail_pages: Optional[float] = None
+    remote_candidate_pages: Optional[float] = None
+    stop_capacity_ratio: Optional[float] = None
+    stop_raw = False
+    if stop_valid:
+        inclusive_cdf = snapshot.remote_cdf_le_local_p75_ppm
+        assert inclusive_cdf is not None
+        stop_numerator = inclusive_cdf * remote_pages
+        stop_denominator = LOCAL_TAIL_PPM * local_pages
+        local_tail_pages = local_pages * LOCAL_TAIL_PPM / PPM
+        remote_candidate_pages = remote_pages * inclusive_cdf / PPM
+        stop_capacity_ratio = stop_numerator / stop_denominator
+        stop_raw = Decimal(stop_numerator) > (
+            Decimal(stop_denominator)
+            * Decimal(str(stop_capacity_ratio_threshold))
+        )
+        stop_reason = "capacity_ratio" if stop_raw else "below_threshold"
+
+    start_valid = common_reason == "ok" and valid_ppm(
+        snapshot.remote_cdf_lt_local_p75_ppm
+    )
+    start_reason = common_reason
+    if common_reason == "ok" and not start_valid:
+        start_reason = "missing_strict_remote_cdf"
+
+    local_head_pages: Optional[float] = None
+    start_required_pages: Optional[float] = None
+    start_remote_quantile_rank_ppm = capacity_selected_remote_rank_ppm(
+        local_resident_pages,
+        remote_resident_pages,
+        start_capacity_margin_pct,
+    )
+    start_raw = False
+    if local_pages > 0 and remote_pages > 0:
+        margin_denominator = 100
+        margin_numerator = margin_denominator + start_capacity_margin_pct
+        required_product = LOCAL_HEAD_PPM * local_pages * margin_numerator
+        local_head_pages = local_pages * LOCAL_HEAD_PPM / PPM
+        start_required_pages = (
+            required_product / (PPM * margin_denominator)
+        )
+    if start_valid:
+        strict_cdf = snapshot.remote_cdf_lt_local_p75_ppm
+        assert strict_cdf is not None
+        if (
+            start_remote_quantile_rank_ppm is None
+            or start_remote_quantile_rank_ppm > PPM
+        ):
+            start_reason = "remote_capacity_below_start_requirement"
+        else:
+            # Semantic rule: remote Q(required capacity rank) < local Q75.
+            # The kernel exports the equivalent strict-CDF query at local Q75.
+            start_raw = (
+                strict_cdf * remote_pages * margin_denominator
+                >= required_product
+            )
+
+    p75_stagnation = p75_stagnation_state.observe(
+        start_valid=start_valid,
+        start_raw=start_raw,
+        stop_valid=stop_valid,
+        stop_raw=stop_raw,
+        local_p75_ns=snapshot.local_p75_ns,
+        current_remote_rank_ppm=start_remote_quantile_rank_ppm,
+        remote_query_rank_ppm=snapshot.remote_query_rank_ppm,
+        remote_query_q_ns=snapshot.remote_query_q_ns,
+        remote_query_valid=snapshot.remote_query_valid,
+    )
+    if p75_stagnation.restart:
+        start_consecutive, start_confirmed = start_state.seed_confirmed()
+        arbitration = "START"
+    elif p75_stagnation.forced_stop:
+        start_state.reset()
+        start_consecutive = 0
+        start_confirmed = False
+        arbitration = "STOP"
+    else:
+        start_consecutive, start_confirmed = start_state.observe(
+            valid=start_valid,
+            raw=start_raw,
+        )
+        if start_confirmed:
+            arbitration = "START"
+        elif stop_raw:
+            arbitration = "STOP"
+        else:
+            arbitration = "HOLD"
+
+    return PolicyObservation(
+        local_resident_pages=(local_pages if local_pages > 0 else None),
+        remote_resident_pages=(remote_pages if remote_pages > 0 else None),
+        stop_valid=stop_valid,
+        stop_reason=stop_reason,
+        local_tail_pages=local_tail_pages,
+        remote_candidate_pages=remote_candidate_pages,
+        stop_capacity_ratio=stop_capacity_ratio,
+        stop_raw=stop_raw,
+        start_valid=start_valid,
+        start_reason=start_reason,
+        local_head_pages=local_head_pages,
+        start_capacity_margin_pct=start_capacity_margin_pct,
+        start_required_pages=start_required_pages,
+        start_remote_quantile_rank_ppm=start_remote_quantile_rank_ppm,
+        start_raw=start_raw,
+        start_consecutive=start_consecutive,
+        start_confirmed=start_confirmed,
+        p75_stagnation_previous_local_p75_ns=(
+            p75_stagnation.previous_local_p75_ns
+        ),
+        p75_stagnation_decrease_pct=p75_stagnation.decrease_pct,
+        p75_stagnation_count=p75_stagnation.count,
+        p75_stagnation_state_before=p75_stagnation.state_before,
+        p75_stagnation_state=p75_stagnation.state,
+        p75_stagnation_transition=p75_stagnation.transition,
+        p75_stagnation_reference_local_p75_ns=(
+            p75_stagnation.reference_local_p75_ns
+        ),
+        p75_stagnation_reference_remote_rank_ppm=(
+            p75_stagnation.reference_remote_rank_ppm
+        ),
+        p75_stagnation_reference_remote_q_ns=(
+            p75_stagnation.reference_remote_q_ns
+        ),
+        p75_stagnation_degradation_pct=p75_stagnation.degradation_pct,
+        p75_stagnation_degradation_met=p75_stagnation.degradation_met,
+        p75_stagnation_remote_query_match=(
+            p75_stagnation.remote_query_match
+        ),
+        p75_stagnation_remote_improvement_pct=(
+            p75_stagnation.remote_improvement_pct
+        ),
+        p75_stagnation_remote_improvement_met=(
+            p75_stagnation.remote_improvement_met
+        ),
+        p75_stagnation_forced_off_consecutive=(
+            p75_stagnation.forced_off_consecutive
+        ),
+        p75_stagnation_forced_stop=p75_stagnation.forced_stop,
+        p75_stagnation_restart=p75_stagnation.restart,
+        arbitration=arbitration,
     )
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def parse_pid_file(pid_file: Path) -> Optional[int]:
+    try:
+        tokens = pid_file.read_text(encoding="ascii", errors="replace").split()
+    except OSError:
+        return None
+    if not tokens:
+        return None
+    return parse_int(tokens[0])
+
+
+def read_child_pids(pid: int) -> list[int]:
+    children: set[int] = set()
+    for path in Path(f"/proc/{pid}/task").glob("*/children"):
+        try:
+            tokens = path.read_text(encoding="ascii", errors="replace").split()
+        except OSError:
+            continue
+        for token in tokens:
+            child = parse_int(token)
+            if child is not None:
+                children.add(child)
+    return sorted(children)
+
+
+def collect_process_tree(root_pid: int) -> list[int]:
+    seen: set[int] = set()
+    stack = [root_pid]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(read_child_pids(pid))
+    return sorted(seen)
+
+
+def read_numa_maps_node_pages(
+    pid: int,
+    local_node: int,
+    remote_node: int,
+) -> Optional[tuple[int, int]]:
+    try:
+        lines = Path(f"/proc/{pid}/numa_maps").read_text(
+            encoding="ascii",
+            errors="replace",
+        ).splitlines()
+    except OSError:
+        return None
+
+    local_key = f"N{local_node}="
+    remote_key = f"N{remote_node}="
+    local_pages = 0
+    remote_pages = 0
+    for line in lines:
+        for token in line.split():
+            if token.startswith(local_key):
+                local_pages += parse_int(token[len(local_key) :]) or 0
+            elif token.startswith(remote_key):
+                remote_pages += parse_int(token[len(remote_key) :]) or 0
+    return local_pages, remote_pages
+
+
+def read_resident_pages_from_pid_file(
+    pid_file: Path,
+    local_node: int,
+    remote_node: int,
+) -> Optional[tuple[int, int]]:
+    root_pid = parse_pid_file(pid_file)
+    if root_pid is None:
+        return None
+
+    local_pages = 0
+    remote_pages = 0
+    readable_maps = 0
+    for pid in collect_process_tree(root_pid):
+        pages = read_numa_maps_node_pages(pid, local_node, remote_node)
+        if pages is None:
+            continue
+        readable_maps += 1
+        local_pages += pages[0]
+        remote_pages += pages[1]
+    if readable_maps == 0:
+        return None
+    return local_pages, remote_pages
 
 
 def monotonic_ms() -> int:
-    return int(time.monotonic() * 1000)
+    return time.monotonic_ns() // 1_000_000
 
 
-def read_text(path: Path, default: str = "") -> str:
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="ascii", errors="replace")
+
+
+def read_int_file(path: Path) -> Optional[int]:
     try:
-        return path.read_text(encoding="ascii", errors="replace")
+        return parse_int(read_text(path).strip())
     except OSError:
-        return default
+        return None
 
 
-def write_text(path: Path, value: object, *, dry_run: bool = False) -> None:
-    if dry_run:
-        return
+def write_text(path: Path, value: object) -> None:
     path.write_text(f"{value}\n", encoding="ascii")
 
 
-def parse_histogram_text(text: str) -> Histogram:
-    values = {
-        "local_pages": [0] * len(BUCKET_LABELS),
-        "remote_pages": [0] * len(BUCKET_LABELS),
-    }
-    window_seq = 0
-
-    for line in text.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        if parts[0] == "window_seq" and len(parts) >= 2:
-            try:
-                window_seq = int(parts[1])
-            except ValueError:
-                window_seq = 0
-            continue
-        if parts[0] not in SERIES_KEYS:
-            continue
-        parsed = []
-        for value in parts[1 : 1 + len(BUCKET_LABELS)]:
-            try:
-                parsed.append(int(value))
-            except ValueError:
-                parsed.append(0)
-        if len(parsed) < len(BUCKET_LABELS):
-            parsed.extend([0] * (len(BUCKET_LABELS) - len(parsed)))
-        values[parts[0]] = parsed
-
-    return Histogram(
-        window_seq=window_seq,
-        local_pages=values["local_pages"],
-        remote_pages=values["remote_pages"],
-    )
+def require_path(path: Path, mode: str) -> None:
+    if not path.exists():
+        raise RuntimeError(f"missing required path: {path}")
+    if "r" in mode and not os.access(path, os.R_OK):
+        raise RuntimeError(f"required path is not readable: {path}")
+    if "w" in mode and not os.access(path, os.W_OK):
+        raise RuntimeError(f"required path is not writable: {path}")
 
 
-def read_histogram(path: Path) -> Histogram:
-    return parse_histogram_text(read_text(path))
-
-
-def percentile_bucket(values: list[int], percentile: int) -> tuple[int, str]:
-    total = sum(values)
-    if total <= 0:
-        return -1, "NA"
-    threshold = total * percentile / 100.0
-    cumulative = 0
-    for index, value in enumerate(values):
-        cumulative += value
-        if cumulative >= threshold:
-            return index, BUCKET_LABELS[index]
-    return len(values) - 1, BUCKET_LABELS[-1]
-
-
-def validate_bucket_pair(
-    *,
-    local_total: int,
-    remote_total: int,
-    local_p80_index: int,
-    remote_p20_index: int,
-    min_local_pages: int,
-    min_remote_pages: int,
-) -> tuple[bool, int, int]:
-    local_valid = local_total >= min_local_pages and local_p80_index >= 0
-    remote_valid = remote_total >= min_remote_pages and remote_p20_index >= 0
-
-    return local_valid and remote_valid, local_p80_index, remote_p20_index
-
-
-def bucket_signals(
-    local_pages: list[int],
-    remote_pages: list[int],
-    min_local_pages: int,
-    min_remote_pages: int,
-) -> BucketSignals:
-    local_total = sum(local_pages)
-    remote_total = sum(remote_pages)
-    local_p80_index, _ = percentile_bucket(local_pages, 80)
-    remote_p20_index, _ = percentile_bucket(remote_pages, 20)
-    valid, local_p80_index, remote_p20_index = validate_bucket_pair(
-        local_total=local_total,
-        remote_total=remote_total,
-        local_p80_index=local_p80_index,
-        remote_p20_index=remote_p20_index,
-        min_local_pages=min_local_pages,
-        min_remote_pages=min_remote_pages,
-    )
-    local_p80_label = BUCKET_LABELS[local_p80_index] if local_p80_index >= 0 else "NA"
-    remote_p20_label = BUCKET_LABELS[remote_p20_index] if remote_p20_index >= 0 else "NA"
-    return BucketSignals(
-        local_total=local_total,
-        remote_total=remote_total,
-        local_p80_index=local_p80_index,
-        local_p80_label=local_p80_label,
-        remote_p20_index=remote_p20_index,
-        remote_p20_label=remote_p20_label,
-        valid=valid,
-    )
-
-
-def prefix_share(values: list[int], end_index: int) -> Optional[float]:
-    total = sum(values)
-    if total <= 0 or end_index < 0:
-        return None
-    clamped = min(end_index, len(values) - 1)
-    return sum(values[: clamped + 1]) / total
-
-
-def sleep_interruptible(seconds: float, stop_file: Optional[Path], stop_flag: dict) -> bool:
+def sleep_interruptible(
+    seconds: float,
+    stop_file: Optional[Path],
+    stop_flag: dict[str, bool],
+) -> bool:
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if stop_flag["stop"]:
-            return False
+    while not stop_flag["stop"]:
         if stop_file is not None and stop_file.exists():
             return False
         remaining = deadline - time.monotonic()
-        time.sleep(min(0.2, max(0.0, remaining)))
-    return not stop_flag["stop"]
+        if remaining <= 0:
+            return True
+        time.sleep(min(remaining, 0.2))
+    return False
 
 
 def open_output(path: Optional[Path]) -> tuple[TextIO, bool]:
     if path is None:
         return sys.stdout, False
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path.open("w", encoding="ascii", newline=""), True
+    return path.open("w", newline="", encoding="ascii"), True
 
 
-def write_window_files(
-    *,
-    hist_dir: Optional[Path],
-    window: int,
-    elapsed_ms: int,
-    histogram_text: str,
-    histogram: Histogram,
-    node_balancing: str,
-) -> str:
-    if hist_dir is None:
-        return ""
+CSV_FIELDS = (
+    "event",
+    "elapsed_ms",
+    "window",
+    "window_seq",
+    "cycle_count",
+    "cycle_window_reason",
+    "cycle_window_elapsed_ms",
+    "controller_state",
+    "transition_action",
+    "local_sample_pages",
+    "remote_sample_pages",
+    "local_p75_ns",
+    "remote_query_rank_ppm",
+    "remote_query_q_ns",
+    "remote_query_valid",
+    "remote_cdf_lt_local_p75_ppm",
+    "remote_cdf_le_local_p75_ppm",
+    "local_resident_pages",
+    "remote_resident_pages",
+    "stop_valid",
+    "stop_reason",
+    "local_tail_pages",
+    "remote_candidate_pages",
+    "stop_capacity_ratio",
+    "stop_capacity_ratio_threshold",
+    "stop_raw",
+    "start_valid",
+    "start_reason",
+    "local_head_pages",
+    "start_capacity_margin_pct",
+    "start_required_pages",
+    "start_remote_quantile_rank_ppm",
+    "start_raw",
+    "start_consecutive",
+    "start_confirmed",
+    "p75_stagnation_required_decrease_pct",
+    "p75_stagnation_required_windows",
+    "p75_stagnation_restart_degradation_pct",
+    "p75_stagnation_restart_required_windows",
+    "remote_restart_improvement_pct",
+    "p75_stagnation_previous_local_p75_ns",
+    "p75_stagnation_decrease_pct",
+    "p75_stagnation_count",
+    "p75_stagnation_state_before",
+    "p75_stagnation_state",
+    "p75_stagnation_transition",
+    "p75_stagnation_reference_local_p75_ns",
+    "p75_stagnation_reference_remote_rank_ppm",
+    "p75_stagnation_reference_remote_q_ns",
+    "p75_stagnation_degradation_pct",
+    "p75_stagnation_degradation_met",
+    "p75_stagnation_remote_query_match",
+    "p75_stagnation_remote_improvement_pct",
+    "p75_stagnation_remote_improvement_met",
+    "p75_stagnation_forced_off_consecutive",
+    "p75_stagnation_forced_stop",
+    "p75_stagnation_restart",
+    "arbitration",
+)
 
-    hist_dir.mkdir(parents=True, exist_ok=True)
-    label = f"window_{window:04d}"
-    hist_path = hist_dir / f"{label}.fault_latency_histograms"
-    hist_path.write_text(histogram_text, encoding="ascii")
-    (hist_dir / f"{label}.meta").write_text(
-        "\n".join(
-            (
-                f"window_index={window}",
-                f"elapsed_ms={elapsed_ms}",
-                f"date_utc={now_iso()}",
-                f"numa_balancing={node_balancing}",
-                f"local_fault_window_seq={histogram.window_seq}",
-            )
-        )
-        + "\n",
-        encoding="ascii",
-    )
-    vmstat = read_text(Path("/proc/vmstat"))
-    if vmstat:
-        (hist_dir / f"{label}.vmstat").write_text(vmstat, encoding="ascii")
-    return str(hist_path)
 
-
-def read_knob(path: Path) -> str:
-    return read_text(path).strip()
-
-
-def require_path(path: Path, mode: str) -> None:
-    if not path.exists():
-        raise FileNotFoundError(f"missing path: {path}")
-    if "r" in mode and not os.access(path, os.R_OK):
-        raise PermissionError(f"path is not readable: {path}")
-    if "w" in mode and not os.access(path, os.W_OK):
-        raise PermissionError(f"path is not writable: {path}")
+def format_optional(value: object) -> object:
+    return "" if value is None else value
 
 
 def run_controller(args: argparse.Namespace) -> int:
     sysfs_dir = args.sysfs_numa_dir
-    hist_path = sysfs_dir / "fault_latency_histograms"
+    quantile_path = sysfs_dir / "fault_latency_quantiles"
+    remote_quantile_rank_path = sysfs_dir / "remote_quantile_rank_ppm"
     window_path = sysfs_dir / "local_fault_window"
     local_rate_path = sysfs_dir / "local_fault_rate"
-    remote_rate_path = sysfs_dir / "remote_fault_rate"
-    numa_balancing_path = args.numa_balancing_path
+    cycle_path = args.remote_scan_cycles_path or sysfs_dir / "remote_scan_cycles"
+    migration_path = args.migration_enabled_path or sysfs_dir / "migration_enabled"
 
-    if args.require_knobs:
-        for path in (hist_path, window_path, local_rate_path, remote_rate_path):
-            require_path(path, "rw" if path != hist_path else "r")
-        require_path(numa_balancing_path, "rw")
+    for path, mode in (
+        (quantile_path, "r"),
+        (remote_quantile_rank_path, "w"),
+        (window_path, "w"),
+        (local_rate_path, "w"),
+        (cycle_path, "r"),
+        (args.numa_balancing_path, "w"),
+        (migration_path, "w"),
+    ):
+        require_path(path, mode)
+
+    write_text(args.numa_balancing_path, 2)
+    write_text(migration_path, 1)
+    write_text(local_rate_path, args.local_rate)
+
+    out, should_close = open_output(args.output)
+    writer = csv.DictWriter(out, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+    out.flush()
 
     stop_flag = {"stop": False}
 
-    def handle_signal(signum, frame):  # noqa: ARG001
+    def request_stop(_signum: int, _frame: object) -> None:
         stop_flag["stop"] = True
 
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
 
-    if args.hist_dir is not None:
-        args.hist_dir.mkdir(parents=True, exist_ok=True)
-        (args.hist_dir / "monitor.meta").write_text(
-            "\n".join(
-                (
-                    f"interval_s={args.window_sec}",
-                    f"local_rate={args.local_rate}",
-                    f"remote_rate={args.remote_rate}",
-                    f"min_local_pages={args.min_local_pages}",
-                    f"min_remote_pages={args.min_remote_pages}",
-                    f"baseline_skip_windows={args.baseline_skip_windows}",
-                    f"consecutive_effective={args.consecutive_effective}",
-                    f"consecutive_no_improve={args.consecutive_no_improve}",
-                    f"restart_remote_share_threshold={args.restart_remote_share_threshold}",
-                    f"consecutive_restart={args.consecutive_restart}",
-                    f"restart_grace_windows={args.restart_grace_windows}",
-                )
-            )
-            + "\n",
-            encoding="ascii",
-        )
-
-    if not args.no_set_initial_on:
-        write_text(numa_balancing_path, args.node_balancing_on, dry_run=args.dry_run)
-    write_text(local_rate_path, args.local_rate, dry_run=args.dry_run)
-    write_text(remote_rate_path, args.remote_rate, dry_run=args.dry_run)
-
-    out, should_close = open_output(args.output)
-    fields = (
-        "event",
-        "timestamp",
-        "elapsed_ms",
-        "window",
-        "window_seq",
-        "window_sec",
-        "controller_state",
-        "numa_balancing",
-        "local_rate",
-        "remote_rate",
-        "local_total_pages",
-        "remote_total_pages",
-        "local_p80_bucket_index",
-        "local_p80_bucket",
-        "remote_p20_bucket_index",
-        "remote_p20_bucket",
-        "gap",
-        "valid",
-        "decision",
-        "effective_consecutive",
-        "no_improve_consecutive",
-        "stop_reason",
-        "restart_decision",
-        "restart_armed",
-        "restart_valid",
-        "restart_stop_remote_p20_bucket_index",
-        "restart_compare_bucket_index",
-        "restart_baseline_share",
-        "restart_current_share",
-        "restart_ratio",
-        "restart_consecutive",
-        "restart_threshold",
-        "restart_grace_remaining",
-        "histogram_path",
-    )
-    writer = csv.DictWriter(out, fieldnames=fields)
-    writer.writeheader()
-
-    state = DecisionState(
-        args.consecutive_effective,
-        args.consecutive_no_improve,
-        args.baseline_skip_windows,
-    )
-    restart_state = RestartState(
-        args.restart_remote_share_threshold,
-        args.consecutive_restart,
-    )
     started_ms = monotonic_ms()
+    last_window_ms = started_ms
+    last_cycle_count = read_int_file(cycle_path)
+    if last_cycle_count is None:
+        raise RuntimeError(f"invalid remote scan cycle counter: {cycle_path}")
+
     controller_state = "on"
-    restart_grace_remaining = 0
+    start_state = StartState(args.start_consecutive)
+    p75_stagnation_state = P75StagnationState(
+        args.p75_stagnation_required_decrease_pct,
+        args.p75_stagnation_required_windows,
+        args.p75_stagnation_restart_degradation_pct,
+        args.p75_stagnation_restart_required_windows,
+        args.remote_restart_improvement_pct,
+    )
     window = 0
 
-    def format_float(value: Optional[float]) -> str:
-        if value is None:
-            return ""
-        return f"{value:.6f}"
+    def emit_base(event: str, action: str) -> dict[str, object]:
+        return {
+            "event": event,
+            "elapsed_ms": monotonic_ms() - started_ms,
+            "window": window,
+            "controller_state": controller_state,
+            "transition_action": action,
+            "stop_capacity_ratio_threshold": (
+                f"{args.stop_capacity_ratio_threshold:.6f}"
+            ),
+            "start_capacity_margin_pct": args.start_capacity_margin_pct,
+            "p75_stagnation_required_decrease_pct": (
+                args.p75_stagnation_required_decrease_pct
+            ),
+            "p75_stagnation_required_windows": (
+                args.p75_stagnation_required_windows
+            ),
+            "p75_stagnation_restart_degradation_pct": (
+                args.p75_stagnation_restart_degradation_pct
+            ),
+            "p75_stagnation_restart_required_windows": (
+                args.p75_stagnation_restart_required_windows
+            ),
+            "remote_restart_improvement_pct": (
+                args.remote_restart_improvement_pct
+            ),
+        }
 
-    def emit(
-        event: str,
-        decision: Decision,
-        histogram: Histogram,
-        hist_file: str,
-        restart: Optional[RestartObservation] = None,
-    ) -> None:
-        signals = bucket_signals(
-            histogram.local_pages,
-            histogram.remote_pages,
-            args.min_local_pages,
-            args.min_remote_pages,
-        )
-        if restart is None:
-            restart = restart_state.snapshot()
-        writer.writerow(
-            {
-                "event": event,
-                "timestamp": now_iso(),
-                "elapsed_ms": monotonic_ms() - started_ms,
-                "window": window,
-                "window_seq": histogram.window_seq,
-                "window_sec": f"{args.window_sec:.3f}",
-                "controller_state": controller_state,
-                "numa_balancing": read_knob(numa_balancing_path),
-                "local_rate": read_knob(local_rate_path),
-                "remote_rate": read_knob(remote_rate_path),
-                "local_total_pages": signals.local_total,
-                "remote_total_pages": signals.remote_total,
-                "local_p80_bucket_index": signals.local_p80_index,
-                "local_p80_bucket": signals.local_p80_label,
-                "remote_p20_bucket_index": signals.remote_p20_index,
-                "remote_p20_bucket": signals.remote_p20_label,
-                "gap": "" if decision.gap is None else decision.gap,
-                "valid": int(decision.valid),
-                "decision": decision.decision,
-                "effective_consecutive": decision.effective_count,
-                "no_improve_consecutive": decision.no_improve_count,
-                "stop_reason": decision.stop_reason,
-                "restart_decision": restart.decision,
-                "restart_armed": int(restart.armed),
-                "restart_valid": int(restart.valid),
-                "restart_stop_remote_p20_bucket_index": (
-                    "" if restart.stop_remote_p20_index is None else restart.stop_remote_p20_index
-                ),
-                "restart_compare_bucket_index": (
-                    "" if restart.compare_bucket_index is None else restart.compare_bucket_index
-                ),
-                "restart_baseline_share": format_float(restart.baseline_share),
-                "restart_current_share": format_float(restart.current_share),
-                "restart_ratio": format_float(restart.ratio),
-                "restart_consecutive": restart.consecutive_count,
-                "restart_threshold": f"{restart_state.threshold:.6f}",
-                "restart_grace_remaining": restart_grace_remaining,
-                "histogram_path": hist_file,
-            }
-        )
-        out.flush()
+    writer.writerow(emit_base("start", "initial_migration_on"))
+    out.flush()
+    write_text(window_path, 1)
 
     try:
-        empty = Histogram(0, [0] * len(BUCKET_LABELS), [0] * len(BUCKET_LABELS))
-        emit("start", Decision(False, "start", "", None, 0, 0), empty, "")
-
         while not stop_flag["stop"]:
             if args.stop_file is not None and args.stop_file.exists():
                 break
             if args.max_windows and window >= args.max_windows:
                 break
-
-            window += 1
-            if not args.no_advance_window:
-                write_text(window_path, 1, dry_run=args.dry_run)
-
             if not sleep_interruptible(args.window_sec, args.stop_file, stop_flag):
                 break
 
-            hist_text = read_text(hist_path)
-            histogram = parse_histogram_text(hist_text)
-            signals = bucket_signals(
-                histogram.local_pages,
-                histogram.remote_pages,
-                args.min_local_pages,
-                args.min_remote_pages,
+            cycle_count = read_int_file(cycle_path)
+            gate = cycle_window_gate(
+                cycle_count=cycle_count,
+                last_cycle_count=last_cycle_count,
+                elapsed_ms=monotonic_ms() - last_window_ms,
+                min_sec=args.cycle_window_min_sec,
+                max_sec=args.cycle_window_max_sec,
             )
-            restart_observation: Optional[RestartObservation] = None
-            if controller_state == "off":
-                decision = monitor_decision(
-                    state=state,
-                    local_total=signals.local_total,
-                    remote_total=signals.remote_total,
-                    local_p80_index=signals.local_p80_index,
-                    remote_p20_index=signals.remote_p20_index,
-                    min_local_pages=args.min_local_pages,
-                    min_remote_pages=args.min_remote_pages,
-                )
-                restart_observation = restart_state.observe(
-                    histogram.remote_pages,
-                    args.min_remote_pages,
-                    signals.remote_p20_index,
-                    need_migration=(
-                        decision.valid
-                        and decision.gap is not None
-                        and decision.gap >= 0
+            if not gate.ready:
+                continue
+
+            window += 1
+            elapsed_ms = monotonic_ms() - started_ms
+            resident = read_resident_pages_from_pid_file(
+                args.workload_pid_file,
+                args.local_node,
+                args.remote_node,
+            )
+            local_resident = None if resident is None else resident[0]
+            remote_resident = None if resident is None else resident[1]
+            current_remote_rank_ppm = capacity_selected_remote_rank_ppm(
+                local_resident,
+                remote_resident,
+                args.start_capacity_margin_pct,
+            )
+            query_rank_ppm = p75_stagnation_state.query_rank_ppm(
+                current_remote_rank_ppm
+            )
+            write_text(remote_quantile_rank_path, query_rank_ppm)
+            snapshot = parse_quantile_text(read_text(quantile_path))
+            validate_quantile_source(snapshot)
+            observation = evaluate_policy(
+                snapshot,
+                local_resident_pages=local_resident,
+                remote_resident_pages=remote_resident,
+                min_local_pages=args.min_local_pages,
+                min_remote_pages=args.min_remote_pages,
+                stop_capacity_ratio_threshold=args.stop_capacity_ratio_threshold,
+                start_capacity_margin_pct=args.start_capacity_margin_pct,
+                start_state=start_state,
+                p75_stagnation_state=p75_stagnation_state,
+            )
+            state_before = controller_state
+            transition = state_transition(controller_state, observation.arbitration)
+            if transition.migration_enabled is not None:
+                write_text(migration_path, transition.migration_enabled)
+            controller_state = transition.state
+
+            row = emit_base(transition.event, transition.action)
+            row.update(
+                {
+                    "elapsed_ms": elapsed_ms,
+                    "window_seq": snapshot.window_seq,
+                    "cycle_count": format_optional(cycle_count),
+                    "cycle_window_reason": gate.reason,
+                    "cycle_window_elapsed_ms": gate.elapsed_ms,
+                    "local_sample_pages": snapshot.local_total,
+                    "remote_sample_pages": snapshot.remote_total,
+                    "local_p75_ns": format_optional(snapshot.local_p75_ns),
+                    "remote_query_rank_ppm": format_optional(
+                        snapshot.remote_query_rank_ppm
                     ),
-                )
-            elif restart_grace_remaining > 0:
-                decision = monitor_decision(
-                    state=state,
-                    local_total=signals.local_total,
-                    remote_total=signals.remote_total,
-                    local_p80_index=signals.local_p80_index,
-                    remote_p20_index=signals.remote_p20_index,
-                    min_local_pages=args.min_local_pages,
-                    min_remote_pages=args.min_remote_pages,
-                    decision_name="restart_grace",
-                    invalid_decision_name="invalid_restart_grace",
-                )
-            else:
-                decision = state.evaluate(
-                    local_total=signals.local_total,
-                    remote_total=signals.remote_total,
-                    local_p80_index=signals.local_p80_index,
-                    remote_p20_index=signals.remote_p20_index,
-                    min_local_pages=args.min_local_pages,
-                    min_remote_pages=args.min_remote_pages,
-                )
-            hist_file = write_window_files(
-                hist_dir=args.hist_dir,
-                window=window,
-                elapsed_ms=monotonic_ms() - started_ms,
-                histogram_text=hist_text,
-                histogram=histogram,
-                node_balancing=read_knob(numa_balancing_path),
+                    "remote_query_q_ns": format_optional(
+                        snapshot.remote_query_q_ns
+                    ),
+                    "remote_query_valid": int(snapshot.remote_query_valid),
+                    "remote_cdf_lt_local_p75_ppm": format_optional(
+                        snapshot.remote_cdf_lt_local_p75_ppm
+                    ),
+                    "remote_cdf_le_local_p75_ppm": format_optional(
+                        snapshot.remote_cdf_le_local_p75_ppm
+                    ),
+                    "local_resident_pages": format_optional(
+                        observation.local_resident_pages
+                    ),
+                    "remote_resident_pages": format_optional(
+                        observation.remote_resident_pages
+                    ),
+                    "stop_valid": int(observation.stop_valid),
+                    "stop_reason": observation.stop_reason,
+                    "local_tail_pages": format_optional(
+                        observation.local_tail_pages
+                    ),
+                    "remote_candidate_pages": format_optional(
+                        observation.remote_candidate_pages
+                    ),
+                    "stop_capacity_ratio": format_optional(
+                        observation.stop_capacity_ratio
+                    ),
+                    "stop_raw": int(observation.stop_raw),
+                    "start_valid": int(observation.start_valid),
+                    "start_reason": observation.start_reason,
+                    "local_head_pages": format_optional(
+                        observation.local_head_pages
+                    ),
+                    "start_required_pages": format_optional(
+                        observation.start_required_pages
+                    ),
+                    "start_remote_quantile_rank_ppm": format_optional(
+                        observation.start_remote_quantile_rank_ppm
+                    ),
+                    "start_raw": int(observation.start_raw),
+                    "start_consecutive": observation.start_consecutive,
+                    "start_confirmed": int(observation.start_confirmed),
+                    "p75_stagnation_previous_local_p75_ns": format_optional(
+                        observation.p75_stagnation_previous_local_p75_ns
+                    ),
+                    "p75_stagnation_decrease_pct": format_optional(
+                        observation.p75_stagnation_decrease_pct
+                    ),
+                    "p75_stagnation_count": observation.p75_stagnation_count,
+                    "p75_stagnation_state_before": (
+                        observation.p75_stagnation_state_before
+                    ),
+                    "p75_stagnation_state": observation.p75_stagnation_state,
+                    "p75_stagnation_transition": (
+                        observation.p75_stagnation_transition
+                    ),
+                    "p75_stagnation_reference_local_p75_ns": format_optional(
+                        observation.p75_stagnation_reference_local_p75_ns
+                    ),
+                    "p75_stagnation_reference_remote_rank_ppm": format_optional(
+                        observation.p75_stagnation_reference_remote_rank_ppm
+                    ),
+                    "p75_stagnation_reference_remote_q_ns": format_optional(
+                        observation.p75_stagnation_reference_remote_q_ns
+                    ),
+                    "p75_stagnation_degradation_pct": format_optional(
+                        observation.p75_stagnation_degradation_pct
+                    ),
+                    "p75_stagnation_degradation_met": int(
+                        observation.p75_stagnation_degradation_met
+                    ),
+                    "p75_stagnation_remote_query_match": int(
+                        observation.p75_stagnation_remote_query_match
+                    ),
+                    "p75_stagnation_remote_improvement_pct": format_optional(
+                        observation.p75_stagnation_remote_improvement_pct
+                    ),
+                    "p75_stagnation_remote_improvement_met": int(
+                        observation.p75_stagnation_remote_improvement_met
+                    ),
+                    "p75_stagnation_forced_off_consecutive": (
+                        observation.p75_stagnation_forced_off_consecutive
+                    ),
+                    "p75_stagnation_forced_stop": int(
+                        observation.p75_stagnation_forced_stop
+                    ),
+                    "p75_stagnation_restart": int(
+                        observation.p75_stagnation_restart
+                    ),
+                    "arbitration": observation.arbitration,
+                }
             )
+            writer.writerow(row)
+            out.flush()
 
-            event = "sample"
-            if controller_state == "on" and decision.stop_reason:
-                restart_observation = restart_state.begin_protection(decision.stop_reason)
-                if not args.dry_run:
-                    write_text(numa_balancing_path, args.node_balancing_off)
-                    write_text(local_rate_path, args.local_rate)
-                    write_text(remote_rate_path, args.remote_rate)
-                controller_state = "off"
-                event = "off"
-            elif controller_state == "off" and restart_observation and restart_observation.restart:
-                if not args.dry_run:
-                    write_text(numa_balancing_path, args.node_balancing_on)
-                    write_text(local_rate_path, args.local_rate)
-                    write_text(remote_rate_path, args.remote_rate)
-                state.reset()
-                restart_state.reset()
-                controller_state = "on"
-                restart_grace_remaining = args.restart_grace_windows
-                restart_decision = (
-                    restart_observation.decision
-                    if restart_observation is not None
-                    else "restart"
-                )
-                decision = Decision(
-                    valid=decision.valid,
-                    decision=restart_decision,
-                    stop_reason="",
-                    gap=decision.gap,
-                    effective_count=state.effective_count,
-                    no_improve_count=state.no_improve_count,
-                )
-                event = "restart"
-
-            emit(event, decision, histogram, hist_file, restart_observation)
-            if controller_state == "on" and decision.decision in (
-                "restart_grace",
-                "invalid_restart_grace",
+            write_text(window_path, 1)
+            if (
+                cycle_count is not None
+                and last_cycle_count is not None
+                and cycle_count > last_cycle_count
             ):
-                restart_grace_remaining = max(0, restart_grace_remaining - 1)
-
-        emit(
-            "exit",
-            Decision(False, "exit", "", None, state.effective_count, state.no_improve_count),
-            Histogram(0, [0] * len(BUCKET_LABELS), [0] * len(BUCKET_LABELS)),
-            "",
-        )
-        return 0
+                last_cycle_count = cycle_count
+            last_window_ms = monotonic_ms()
     finally:
+        writer.writerow(emit_base("exit", "none"))
+        out.flush()
         if should_close:
             out.close()
+    return 0
 
 
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Control global NUMA balancing using local P80 and remote P20 latency buckets."
+        description="Control migration with KLL fault quantiles and resident capacity."
     )
-    parser.add_argument("--window-sec", type=float, default=5.0)
+    parser.add_argument("--window-sec", type=float, default=1.0)
+    parser.add_argument("--cycle-window-min-sec", type=float, default=5.0)
+    parser.add_argument("--cycle-window-max-sec", type=float, default=20.0)
     parser.add_argument("--local-rate", type=int, default=5)
-    parser.add_argument("--remote-rate", type=int, default=5)
-    parser.add_argument("--consecutive-effective", type=int, default=2)
-    parser.add_argument("--consecutive-no-improve", type=int, default=2)
-    parser.add_argument("--baseline-skip-windows", type=int, default=1)
-    parser.add_argument("--restart-remote-share-threshold", type=float, default=1.2)
-    parser.add_argument("--consecutive-restart", type=int, default=2)
-    parser.add_argument("--restart-grace-windows", type=int, default=1)
     parser.add_argument("--min-local-pages", type=int, default=1024)
     parser.add_argument("--min-remote-pages", type=int, default=1024)
-    parser.add_argument("--node-balancing-on", type=int, default=2)
-    parser.add_argument("--node-balancing-off", type=int, default=0)
-    parser.add_argument("--sysfs-numa-dir", type=Path, default=Path("/sys/kernel/mm/numa_balancing"))
-    parser.add_argument("--numa-balancing-path", type=Path, default=Path("/proc/sys/kernel/numa_balancing"))
+    parser.add_argument("--start-consecutive", type=int, default=2)
+    parser.add_argument(
+        "--start-capacity-margin-pct",
+        type=int,
+        default=DEFAULT_START_CAPACITY_MARGIN_PCT,
+    )
+    parser.add_argument(
+        "--stop-capacity-ratio-threshold",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
+        "--p75-stagnation-required-decrease-pct",
+        type=float,
+        default=DEFAULT_P75_STAGNATION_DECREASE_PCT,
+    )
+    parser.add_argument(
+        "--p75-stagnation-required-windows",
+        type=int,
+        default=DEFAULT_P75_STAGNATION_CONSECUTIVE_WINDOWS,
+    )
+    parser.add_argument(
+        "--p75-stagnation-restart-degradation-pct",
+        type=float,
+        default=DEFAULT_P75_RESTART_DEGRADATION_PCT,
+    )
+    parser.add_argument(
+        "--p75-stagnation-restart-required-windows",
+        type=int,
+        default=DEFAULT_P75_RESTART_CONSECUTIVE_WINDOWS,
+    )
+    parser.add_argument(
+        "--remote-restart-improvement-pct",
+        type=float,
+        default=DEFAULT_REMOTE_RESTART_IMPROVEMENT_PCT,
+    )
+    parser.add_argument("--workload-pid-file", type=Path, required=True)
+    parser.add_argument("--local-node", type=int, default=0)
+    parser.add_argument("--remote-node", type=int, default=1)
+    parser.add_argument(
+        "--sysfs-numa-dir",
+        type=Path,
+        default=Path("/sys/kernel/mm/numa_balancing"),
+    )
+    parser.add_argument(
+        "--numa-balancing-path",
+        type=Path,
+        default=Path("/proc/sys/kernel/numa_balancing"),
+    )
+    parser.add_argument("--migration-enabled-path", type=Path)
+    parser.add_argument("--remote-scan-cycles-path", type=Path)
     parser.add_argument("--stop-file", type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--hist-dir", type=Path)
     parser.add_argument("--max-windows", type=int, default=0)
-    parser.add_argument("--no-set-initial-on", action="store_true")
-    parser.add_argument("--no-advance-window", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--no-require-knobs", dest="require_knobs", action="store_false")
-    parser.set_defaults(require_knobs=True)
     args = parser.parse_args(argv)
 
     if args.window_sec <= 0:
         parser.error("--window-sec must be positive")
-    if not 0 <= args.local_rate <= 100:
-        parser.error("--local-rate must be in [0, 100]")
-    if not 0 <= args.remote_rate <= 100:
-        parser.error("--remote-rate must be in [0, 100]")
-    if args.consecutive_effective < 1:
-        parser.error("--consecutive-effective must be >= 1")
-    if args.consecutive_no_improve < 1:
-        parser.error("--consecutive-no-improve must be >= 1")
-    if args.baseline_skip_windows < 0:
-        parser.error("--baseline-skip-windows must be >= 0")
-    if args.restart_remote_share_threshold <= 1.0:
-        parser.error("--restart-remote-share-threshold must be > 1.0")
-    if args.consecutive_restart < 1:
-        parser.error("--consecutive-restart must be >= 1")
-    if args.restart_grace_windows < 0:
-        parser.error("--restart-grace-windows must be >= 0")
+    if args.cycle_window_min_sec < 0:
+        parser.error("--cycle-window-min-sec must be >= 0")
+    if args.cycle_window_max_sec <= 0:
+        parser.error("--cycle-window-max-sec must be positive")
+    if args.cycle_window_max_sec < args.cycle_window_min_sec:
+        parser.error("--cycle-window-max-sec must be >= --cycle-window-min-sec")
+    if not 1 <= args.local_rate <= 100:
+        parser.error("--local-rate must be in [1, 100]")
     if args.min_local_pages < 0 or args.min_remote_pages < 0:
-        parser.error("minimum page counts must be non-negative")
+        parser.error("minimum sample counts must be non-negative")
+    if args.start_consecutive < 1:
+        parser.error("--start-consecutive must be >= 1")
+    if args.start_capacity_margin_pct < 0:
+        parser.error("--start-capacity-margin-pct must be >= 0")
+    if args.stop_capacity_ratio_threshold < 0:
+        parser.error("--stop-capacity-ratio-threshold must be >= 0")
+    if args.p75_stagnation_required_decrease_pct < 0:
+        parser.error("--p75-stagnation-required-decrease-pct must be >= 0")
+    if args.p75_stagnation_required_windows < 1:
+        parser.error("--p75-stagnation-required-windows must be >= 1")
+    if args.p75_stagnation_restart_degradation_pct < 0:
+        parser.error("--p75-stagnation-restart-degradation-pct must be >= 0")
+    if args.p75_stagnation_restart_required_windows < 1:
+        parser.error("--p75-stagnation-restart-required-windows must be >= 1")
+    if not 0 <= args.remote_restart_improvement_pct <= 100:
+        parser.error("--remote-restart-improvement-pct must be in [0, 100]")
+    if args.local_node < 0 or args.remote_node < 0:
+        parser.error("NUMA node IDs must be non-negative")
+    if args.local_node == args.remote_node:
+        parser.error("--local-node and --remote-node must differ")
+    if args.max_windows < 0:
+        parser.error("--max-windows must be >= 0")
     return args
 
 

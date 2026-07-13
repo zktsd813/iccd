@@ -1,0 +1,19 @@
+local_size_gib,workload,off_elapsed_s,on_elapsed_s,source_summary,source_run,notes
+16,pr,797,881,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256 generated-g29
+16,bc,1103,1193,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256 generated-g29
+16,gups,531,559,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256 gups64
+16,btree,844,663,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256
+16,graph500,380,409,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256 scale28 wall-only
+16,silo,886,714,baseline/20260709T-local16-onoff-tail-jemalloc-rerun/summaries/summary.csv,baseline/20260709T-local16-onoff-tail-jemalloc-rerun,frozen fixed-only baseline kernel23 scan256 tail-hotset jemalloc
+32,pr,803,809,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 generated-g29
+32,bc,1074,873,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 generated-g29
+32,gups,307,815,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 gups64
+32,btree,547,650,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256
+32,graph500,378,383,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 scale28 wall-only
+32,silo,856,662,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 tail-hotset jemalloc
+48,pr,796,732,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 generated-g29
+48,bc,1046,670,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 generated-g29
+48,gups,288,872,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 gups64
+48,btree,486,651,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256
+48,graph500,342,336,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 scale28 wall-only
+48,silo,806,678,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc/summaries/summary.csv,baseline/20260710T-local32-48-onoff-controller-tail-jemalloc,frozen baseline kernel23 scan256 tail-hotset jemalloc
