@@ -1,0 +1,7 @@
+workload,local_size_gib,off_elapsed_s,fault_overhead_elapsed_s,overhead_pct_vs_off,fault_overhead_returncode,off_returncode,numa_hint_faults,numa_pte_updates,promoted_GiB,demoted_GiB,max_rss_kb,command
+pr,16,796.62,810.19,1.703,0,0,285565344,302700083,0.000000,0.000000,148143148,numactl --cpunodebind=0 /root/benchmark/gapbs/pr -g 29 -i 20 -t 1e-4 -n 8 
+bc,16,1103.40,1102.13,-0.115,0,0,382289287,403495819,0.000000,0.000000,148143996,numactl --cpunodebind=0 /root/benchmark/gapbs/bc -g 29 -i 1 -n 8 
+gups,16,530.63,541.02,1.958,0,0,152521810,152596667,0.000000,0.000000,67110020,numactl --cpunodebind=0 /root/benchmark/vmitosis-workloads/bin/bench_gups_mt 64 
+btree,16,843.73,848.96,0.620,0,0,199471007,200265121,0.000000,0.000000,69086032,numactl --cpunodebind=0 /root/benchmark/vmitosis-workloads/bin/bench_btree_mt 
+graph500,16,380.21,379.97,-0.063,0,0,74425187,96162437,0.000000,0.000000,115930012,numactl --cpunodebind=0 /root/benchmark/vmitosis-workloads/bin/bench_graph500_mt -s 28 
+silo,16,886.05,909.74,2.674,0,0,222014264,226310016,0.000000,0.000000,121302060,numactl --cpunodebind=0 /root/benchmark/silo/out-perf.masstree/benchmarks/dbtest --verbose --bench ycsb --num-threads 32 --scale-factor 800000 --ops-per-worker=100000000 --bench-opts=--zipf-reverse 

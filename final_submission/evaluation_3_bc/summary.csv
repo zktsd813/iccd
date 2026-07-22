@@ -1,0 +1,4 @@
+local_size_gib,elapsed_s,avg_trial_s,generate_s,build_s,trial_total_s,returncode,promoted_GiB,demoted_GiB,controller_windows,controller_on_events,controller_off_events,controller_final_state,first_stop_elapsed_s,first_stop_window,graph_mode,graph_scale,graph_build_included
+16,678.1,26.28420,109.63845,305.91945,210.27357,0,20.470474,38.357845,41,2,3,off,76.320,4,generated,29,1
+32,656.97,27.43082,109.62823,273.41285,219.44659,0,30.996979,55.966183,42,3,4,off,81.230,5,generated,29,1
+48,585.52,23.21545,84.22216,267.40835,185.72358,0,8.200619,19.705498,40,1,2,off,76.643,6,generated,29,1
