@@ -328,6 +328,7 @@ static int mbench_build_mulshift4g_sparse64_phase(const struct mbench_config *ba
                                                   size_t phase_index,
                                                   struct mbench_phase *phase,
                                                   bool rotate_friendly,
+                                                  bool sparse_first,
                                                   size_t sparse_block_bytes)
 {
     const size_t gib = 1024ULL * 1024ULL * 1024ULL;
@@ -340,6 +341,9 @@ static int mbench_build_mulshift4g_sparse64_phase(const struct mbench_config *ba
     size_t friendly_offset = fixed_friendly_offset;
     int threads = mbench_phase_thread_count(base_config);
 
+    if (sparse_first) {
+        phase_kind = (phase_kind + 1U) % 2U;
+    }
     if (phase_kind == 0 && rotate_friendly) {
         size_t friendly_index = phase_index / 2U;
         friendly_offset = rotating_offsets[friendly_index %
@@ -406,6 +410,262 @@ static int mbench_build_mulshift4g_sparse64_phase(const struct mbench_config *ba
     phase->config.bw_pattern.stride_elements = 512U;
     phase->config.bw_pattern.block_bytes = sparse_block_bytes;
     return 0;
+}
+
+static int mbench_build_sparse64_weighted8g_phase(const struct mbench_config *base_config,
+                                                  size_t phase_index,
+                                                  struct mbench_phase *phase)
+{
+    const size_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const size_t page = 4096ULL;
+    const size_t sparse_window = 64ULL * gib;
+    const size_t weighted_window = 8ULL * gib;
+    const size_t weighted_offset = 20ULL * gib;
+    const size_t hotset_bytes = 4ULL * gib;
+    int threads = mbench_phase_thread_count(base_config);
+
+    if (!base_config || !phase ||
+        base_config->window.arena_bytes < sparse_window ||
+        base_config->window.arena_bytes < weighted_offset + weighted_window) {
+        return -EINVAL;
+    }
+
+    memset(phase, 0, sizeof(*phase));
+    phase->id = (uint32_t)(phase_index + 1U);
+    phase->duration_ms = base_config->phase.duration_ms;
+    phase->config = *base_config;
+    phase->config.threads.total_threads = threads;
+    phase->config.threads.pc_threads = 0;
+    phase->config.threads.pc_chains = 1;
+    phase->config.request.pause_ns = base_config->request.pause_ns;
+    phase->config.window.move_min_offset_bytes = 0;
+    phase->config.window.move_max_offset_bytes = 0;
+    phase->config.timing.move_interval_ms = base_config->timing.move_interval_ms;
+
+    if (phase_index % 2U == 0) {
+        mbench_phase_set_name(phase, "sparse-stride-read-64g");
+        phase->config.mode = MBENCH_MODE_BW;
+        phase->config.bw_kernel = MBENCH_BW_READ;
+        phase->config.threads.bw_threads = threads;
+        phase->config.window.window_bytes = sparse_window;
+        phase->config.window.offset_bytes = 0;
+        phase->config.window.move_policy = MBENCH_MOVE_FIXED;
+        phase->config.window.move_step_bytes = sparse_window;
+        phase->config.bw_pattern.stride_elements = 512U;
+        phase->config.bw_pattern.block_bytes = 4ULL * 1024ULL;
+        phase->config.bw_pattern.shared_window = false;
+        return 0;
+    }
+
+    mbench_phase_set_name(phase, "friendly-weighted-tail8g-off20g");
+    phase->config.mode = MBENCH_MODE_SKEWED_HOTSET;
+    phase->config.threads.bw_threads = 0;
+    phase->config.window.window_bytes = weighted_window;
+    phase->config.window.offset_bytes = weighted_offset;
+    phase->config.window.move_policy = MBENCH_MOVE_FIXED;
+    phase->config.window.move_step_bytes = weighted_window;
+    phase->config.hotset.hotset_pages = (uint32_t)(hotset_bytes / page);
+    phase->config.hotset.hot_prob_pct = 90U;
+    phase->config.hotset.read_pct = 100U;
+    phase->config.hotset.write_pct = 0U;
+    phase->config.hotset.rmw_pct = 0U;
+    phase->config.hotset.index_mode = MBENCH_HOTSET_INDEX_XORSHIFT;
+    phase->config.hotset.shared_window = true;
+    phase->config.hotset.tail = true;
+    return 0;
+}
+
+static int mbench_build_sparse60_disjoint8g_phase(const struct mbench_config *base_config,
+                                                  size_t phase_index,
+                                                  struct mbench_phase *phase)
+{
+    const size_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const size_t page = 4096ULL;
+    const size_t sparse_window = 60ULL * gib;
+    const size_t disjoint_span = 44ULL * gib;
+    const size_t disjoint_offset = 20ULL * gib;
+    const size_t background_bytes = 4ULL * gib;
+    int rc = mbench_build_sparse64_weighted8g_phase(base_config,
+                                                    phase_index,
+                                                    phase);
+
+    if (rc != 0) {
+        return rc;
+    }
+
+    if (phase_index % 2U == 0) {
+        mbench_phase_set_name(phase, "sparse-stride-read-60g");
+        phase->config.window.window_bytes = sparse_window;
+        phase->config.window.move_step_bytes = sparse_window;
+        return 0;
+    }
+
+    mbench_phase_set_name(phase, "friendly-disjoint8g-bg20-hot60");
+    phase->config.window.window_bytes = disjoint_span;
+    phase->config.window.offset_bytes = disjoint_offset;
+    phase->config.window.move_step_bytes = disjoint_span;
+    phase->config.hotset.background_pages =
+        (uint32_t)(background_bytes / page);
+    return 0;
+}
+
+static int mbench_build_sparse60_disjoint28g_phase(const struct mbench_config *base_config,
+                                                   size_t phase_index,
+                                                   struct mbench_phase *phase)
+{
+    const size_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const size_t page = 4096ULL;
+    const size_t full_span = 64ULL * gib;
+    const size_t background_bytes = 24ULL * gib;
+    int rc = mbench_build_sparse60_disjoint8g_phase(base_config,
+                                                    phase_index,
+                                                    phase);
+
+    if (rc != 0 || phase_index % 2U == 0) {
+        return rc;
+    }
+
+    mbench_phase_set_name(phase, "friendly-disjoint28g-bg0-hot60");
+    phase->config.window.window_bytes = full_span;
+    phase->config.window.offset_bytes = 0;
+    phase->config.window.move_step_bytes = full_span;
+    phase->config.hotset.background_pages =
+        (uint32_t)(background_bytes / page);
+    return 0;
+}
+
+static int mbench_build_gups60_disjoint28g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    const size_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const size_t page = 4096ULL;
+    const size_t random_window = 60ULL * gib;
+    int rc = mbench_build_sparse60_disjoint28g_phase(base_config,
+                                                     phase_index,
+                                                     phase);
+
+    if (rc != 0 || phase_index % 2U != 0) {
+        return rc;
+    }
+
+    mbench_phase_set_name(phase, "gups-random-rmw-60g");
+    phase->config.mode = MBENCH_MODE_SKEWED_HOTSET;
+    phase->config.threads.bw_threads = 0;
+    phase->config.threads.pc_threads = 0;
+    phase->config.window.window_bytes = random_window;
+    phase->config.window.offset_bytes = 0;
+    phase->config.window.move_policy = MBENCH_MOVE_FIXED;
+    phase->config.window.move_step_bytes = random_window;
+    phase->config.window.move_min_offset_bytes = 0;
+    phase->config.window.move_max_offset_bytes = 0;
+    phase->config.hotset.hotset_pages = (uint32_t)(random_window / page);
+    phase->config.hotset.background_pages = 0;
+    phase->config.hotset.hot_prob_pct = 100U;
+    phase->config.hotset.read_pct = 0U;
+    phase->config.hotset.write_pct = 0U;
+    phase->config.hotset.rmw_pct = 100U;
+    phase->config.hotset.index_mode = MBENCH_HOTSET_INDEX_XORSHIFT;
+    phase->config.hotset.shared_window = true;
+    phase->config.hotset.tail = false;
+    return 0;
+}
+
+static int mbench_build_gups60_disjoint_bg24_hot_phase(
+    const struct mbench_config *base_config,
+    size_t phase_index,
+    struct mbench_phase *phase,
+    size_t hotset_gib,
+    const char *phase_name)
+{
+    const size_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const size_t page = 4096ULL;
+    const size_t full_span = 64ULL * gib;
+    const size_t background_bytes = 24ULL * gib;
+    const size_t hotset_bytes = hotset_gib * gib;
+    int rc = mbench_build_gups60_disjoint28g_phase(base_config,
+                                                   phase_index,
+                                                   phase);
+
+    if (rc != 0 || phase_index % 2U == 0) {
+        return rc;
+    }
+
+    mbench_phase_set_name(phase, phase_name);
+    phase->config.window.window_bytes = full_span;
+    phase->config.window.offset_bytes = 0;
+    phase->config.window.move_step_bytes = full_span;
+    phase->config.hotset.hotset_pages = (uint32_t)(hotset_bytes / page);
+    phase->config.hotset.background_pages =
+        (uint32_t)(background_bytes / page);
+    phase->config.hotset.hot_prob_pct = 80U;
+    phase->config.hotset.read_pct = 100U;
+    phase->config.hotset.write_pct = 0U;
+    phase->config.hotset.rmw_pct = 0U;
+    phase->config.hotset.index_mode = MBENCH_HOTSET_INDEX_XORSHIFT;
+    phase->config.hotset.shared_window = true;
+    phase->config.hotset.tail = true;
+    return 0;
+}
+
+static int mbench_build_gups60_disjoint32g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    return mbench_build_gups60_disjoint_bg24_hot_phase(
+        base_config,
+        phase_index,
+        phase,
+        8ULL,
+        "friendly-disjoint32g-bg0-hot56");
+}
+
+static int mbench_build_gups60_disjoint36g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    return mbench_build_gups60_disjoint_bg24_hot_phase(
+        base_config,
+        phase_index,
+        phase,
+        12ULL,
+        "friendly-disjoint36g-bg0-hot52");
+}
+
+static int mbench_build_gups60_disjoint38g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    return mbench_build_gups60_disjoint_bg24_hot_phase(
+        base_config,
+        phase_index,
+        phase,
+        14ULL,
+        "friendly-disjoint38g-bg0-hot50");
+}
+
+static int mbench_build_gups60_disjoint40g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    return mbench_build_gups60_disjoint_bg24_hot_phase(
+        base_config,
+        phase_index,
+        phase,
+        16ULL,
+        "friendly-disjoint40g-bg0-hot48");
+}
+
+static int mbench_build_gups60_disjoint48g_phase(const struct mbench_config *base_config,
+                                                 size_t phase_index,
+                                                 struct mbench_phase *phase)
+{
+    return mbench_build_gups60_disjoint_bg24_hot_phase(
+        base_config,
+        phase_index,
+        phase,
+        24ULL,
+        "friendly-disjoint48g-bg0-hot40");
 }
 
 static int mbench_build_mulshift4g_move16g3s_phase(const struct mbench_config *base_config,
@@ -577,6 +837,16 @@ size_t mbench_phase_total_count(const struct mbench_config *config)
     case MBENCH_PHASE_PRESET_MOVE60S4G_REMOTE_SPLIT32:
     case MBENCH_PHASE_PRESET_FIXED4G_REMOTE_SPLIT32:
     case MBENCH_PHASE_PRESET_FIXED8G_REMOTE_SPLIT32:
+    case MBENCH_PHASE_PRESET_SPARSE64_MULSHIFT4G:
+    case MBENCH_PHASE_PRESET_SPARSE64_WEIGHTED8G:
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT8G:
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT28G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT28G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT32G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT36G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT38G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT40G:
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT48G:
         return (size_t)config->phase.repeat * 2U;
     case MBENCH_PHASE_PRESET_NONE:
     default:
@@ -584,9 +854,9 @@ size_t mbench_phase_total_count(const struct mbench_config *config)
     }
 }
 
-int mbench_phase_build(const struct mbench_config *base_config,
-                       size_t phase_index,
-                       struct mbench_phase *phase)
+static int mbench_phase_build_config(const struct mbench_config *base_config,
+                                     size_t phase_index,
+                                     struct mbench_phase *phase)
 {
     if (!base_config || !phase || !mbench_phase_enabled(base_config)) {
         return -EINVAL;
@@ -609,15 +879,40 @@ int mbench_phase_build(const struct mbench_config *base_config,
     case MBENCH_PHASE_PRESET_MULSHIFT4G_SPARSE24:
         return mbench_build_mulshift4g_sparse24_phase(base_config, phase_index, phase, false);
     case MBENCH_PHASE_PRESET_MULSHIFT4G_SPARSE64:
-        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase, false, 4ULL * 1024ULL);
+        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase,
+                                                       false, false, 4ULL * 1024ULL);
+    case MBENCH_PHASE_PRESET_SPARSE64_MULSHIFT4G:
+        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase,
+                                                       false, true, 4ULL * 1024ULL);
+    case MBENCH_PHASE_PRESET_SPARSE64_WEIGHTED8G:
+        return mbench_build_sparse64_weighted8g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT8G:
+        return mbench_build_sparse60_disjoint8g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT28G:
+        return mbench_build_sparse60_disjoint28g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT28G:
+        return mbench_build_gups60_disjoint28g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT32G:
+        return mbench_build_gups60_disjoint32g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT36G:
+        return mbench_build_gups60_disjoint36g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT38G:
+        return mbench_build_gups60_disjoint38g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT40G:
+        return mbench_build_gups60_disjoint40g_phase(base_config, phase_index, phase);
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT48G:
+        return mbench_build_gups60_disjoint48g_phase(base_config, phase_index, phase);
     case MBENCH_PHASE_PRESET_MULSHIFT4G_ROT_SPARSE24:
         return mbench_build_mulshift4g_sparse24_phase(base_config, phase_index, phase, true);
     case MBENCH_PHASE_PRESET_MULSHIFT4G_ROT_SPARSE64:
-        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase, true, 4ULL * 1024ULL);
+        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase,
+                                                       true, false, 4ULL * 1024ULL);
     case MBENCH_PHASE_PRESET_MULSHIFT4G_ROT_MOVE16G3S:
         return mbench_build_mulshift4g_move16g3s_phase(base_config, phase_index, phase);
     case MBENCH_PHASE_PRESET_MULSHIFT4G_BLOCK2M_SPARSE64:
-        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase, false, 2ULL * 1024ULL * 1024ULL);
+        return mbench_build_mulshift4g_sparse64_phase(base_config, phase_index, phase,
+                                                       false, false,
+                                                       2ULL * 1024ULL * 1024ULL);
     case MBENCH_PHASE_PRESET_MOVE15S4G_SPLIT32:
         return mbench_build_move4g_split32_phase(base_config, phase_index, phase,
                                                  4ULL, false, false, 15000U,
@@ -642,4 +937,20 @@ int mbench_phase_build(const struct mbench_config *base_config,
     default:
         return -EINVAL;
     }
+}
+
+int mbench_phase_build(const struct mbench_config *base_config,
+                       size_t phase_index,
+                       struct mbench_phase *phase)
+{
+    int rc = mbench_phase_build_config(base_config, phase_index, phase);
+
+    if (rc != 0) {
+        return rc;
+    }
+
+    phase->target_ops = (phase_index % 2U == 0)
+        ? base_config->phase.phase1_target_ops
+        : base_config->phase.phase2_target_ops;
+    return 0;
 }

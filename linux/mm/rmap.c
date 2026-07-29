@@ -54,6 +54,7 @@
 
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/sched/task.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
@@ -119,16 +120,31 @@ static bool local_tiering_probe_one(struct folio *folio,
 			continue;
 
 		oldpte = ptep_get(pvmw.pte);
-		if (!pte_present(oldpte) || pte_protnone(oldpte))
+		if (!pte_present(oldpte))
 			continue;
 		if (pfn_folio(pte_pfn(oldpte)) != folio)
 			continue;
+		if (pte_protnone(oldpte)) {
+			if (!folio_test_local_tiering_sampled(folio))
+				continue;
+			if (!numa_account_local_fault_pte(folio))
+				continue;
+
+			/*
+			 * Preserve the existing PTE_NUMA mapping and Linux access_time;
+			 * only the latency probe timestamp moves to this window.
+			 */
+			probe->installed = true;
+			page_vma_mapped_walk_done(&pvmw);
+			return false;
+		}
 		if (folio_test_local_tiering_sampled(folio))
+			continue;
+		if (!numa_account_local_fault_pte(folio))
 			continue;
 
 		folio_set_local_tiering_sampled(folio);
 		folio_xchg_access_time(folio, jiffies_to_msecs(jiffies));
-		numa_account_local_fault_pte(folio);
 
 		mmu_notifier_range_init(&range, MMU_NOTIFY_PROTECTION_PAGE, 0,
 					vma->vm_mm, address, address + PAGE_SIZE);
@@ -169,8 +185,6 @@ bool folio_try_install_local_tiering_probe(struct folio *folio,
 	if (folio_is_zone_device(folio) || folio_test_ksm(folio))
 		return false;
 	if (folio_is_file_lru(folio) && folio_test_dirty(folio))
-		return false;
-	if (folio_test_local_tiering_sampled(folio))
 		return false;
 
 	rmap_walk(folio, &rwc);
@@ -1880,10 +1894,11 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 #ifdef CONFIG_NUMA_BALANCING_MT
 static void folio_account_local_tiering_sample_unmap(struct folio *folio)
 {
-	if (folio_nr_pages(folio) != 1 || folio_mapped(folio))
+	if (folio_mapped(folio))
 		return;
-	if (!folio_test_clear_local_tiering_sampled(folio))
-		return;
+	numa_account_fault_probe_cancel(folio);
+	if (folio_nr_pages(folio) == 1)
+		folio_clear_local_tiering_sampled(folio);
 }
 #else
 static void folio_account_local_tiering_sample_unmap(struct folio *folio)

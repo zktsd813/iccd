@@ -3,6 +3,7 @@
 #include "mbench.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -121,6 +122,8 @@ int mbench_apply_placement(const struct mbench_config *config,
             return rc;
         }
     case MBENCH_PLACEMENT_WINDOW_SPLIT:
+    case MBENCH_PLACEMENT_ARENA_SPLIT:
+        /* These modes use temporary thread policy during first touch. */
         return 0;
     case MBENCH_PLACEMENT_NONE:
     default:
@@ -210,6 +213,66 @@ int mbench_query_range_nodes(void *addr,
 #else
     (void)addr;
     (void)length;
+    (void)status_out;
+    (void)status_count;
+    return -ENOSYS;
+#endif
+}
+
+int mbench_query_sampled_range_nodes(void *addr,
+                                     size_t length,
+                                     size_t stride,
+                                     int *status_out,
+                                     size_t status_count)
+{
+#if MBENCH_HAVE_NUMAIF
+    size_t ps;
+    size_t sample_count;
+    void **pages;
+    int rc;
+
+    if (!addr || !status_out || length == 0 || stride == 0) {
+        return -EINVAL;
+    }
+
+    ps = page_size();
+    if ((uintptr_t)addr % ps != 0 || stride % ps != 0) {
+        return -EINVAL;
+    }
+
+    sample_count = 1U + (length - 1U) / stride;
+    if (status_count < sample_count || sample_count > ULONG_MAX) {
+        return -EINVAL;
+    }
+
+    pages = calloc(sample_count, sizeof(*pages));
+    if (!pages) {
+        return -ENOMEM;
+    }
+
+    for (size_t i = 0; i < sample_count; ++i) {
+        pages[i] = (unsigned char *)addr + i * stride;
+        status_out[i] = -ENODATA;
+    }
+
+    /* nodes == NULL and flags == 0 make this a location-only self query. */
+    rc = move_pages(0, (unsigned long)sample_count, pages, NULL, status_out, 0);
+    if (rc != 0) {
+        int err = rc < 0 ? errno : EIO;
+
+        for (size_t i = 0; i < sample_count; ++i) {
+            status_out[i] = -err;
+        }
+        free(pages);
+        return -err;
+    }
+
+    free(pages);
+    return 0;
+#else
+    (void)addr;
+    (void)length;
+    (void)stride;
     (void)status_out;
     (void)status_count;
     return -ENOSYS;

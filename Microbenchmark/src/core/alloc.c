@@ -96,6 +96,30 @@ static int reset_thread_mempolicy(void)
 #endif
 }
 
+int mbench_arena_prefault_node(struct mbench_arena *arena, int node)
+{
+    if (!arena || !arena->base || arena->bytes == 0 || node < 0) {
+        return -EINVAL;
+    }
+
+    int rc = set_thread_mempolicy_node(node);
+    if (rc != 0) {
+        return rc;
+    }
+
+    rc = touch_pages(arena);
+    int reset_rc = reset_thread_mempolicy();
+    if (rc != 0) {
+        return rc;
+    }
+    if (reset_rc != 0) {
+        return reset_rc;
+    }
+
+    arena->prefaulted = true;
+    return 0;
+}
+
 static size_t hot_bytes_for_window(const struct mbench_arena *arena,
                                    const struct mbench_config *config,
                                    size_t offset)
@@ -287,26 +311,17 @@ int mbench_arena_prefault_window_split(struct mbench_arena *arena,
     return 0;
 }
 
-int mbench_arena_prefault_head_local_tail_remote(struct mbench_arena *arena,
-                                                 const struct mbench_config *config)
+static int prefault_arena_split(struct mbench_arena *arena,
+                                int local_node,
+                                int remote_node,
+                                size_t local_bytes)
 {
-    if (!arena || !config || !arena->base || arena->bytes == 0 ||
-        config->placement.kind != MBENCH_PLACEMENT_WINDOW_SPLIT ||
-        config->placement.nodes.count < 2 ||
-        config->window.window_bytes == 0) {
+    if (!arena || !arena->base || arena->bytes == 0 || local_node < 0 ||
+        remote_node < 0 || local_bytes == 0 || local_bytes >= arena->bytes) {
         return -EINVAL;
     }
 
-    size_t local_bytes = config->placement.window_split_local_bytes;
-    if (local_bytes == 0) {
-        local_bytes = ((config->window.window_bytes / 2U) /
-                       arena->page_size) * arena->page_size;
-    }
-    if (local_bytes == 0 || local_bytes >= arena->bytes) {
-        return -EINVAL;
-    }
-
-    int rc = set_thread_mempolicy_node(config->placement.nodes.nodes[0]);
+    int rc = set_thread_mempolicy_node(local_node);
     if (rc != 0) {
         return rc;
     }
@@ -317,7 +332,7 @@ int mbench_arena_prefault_head_local_tail_remote(struct mbench_arena *arena,
         return rc;
     }
 
-    rc = set_thread_mempolicy_node(config->placement.nodes.nodes[1]);
+    rc = set_thread_mempolicy_node(remote_node);
     if (rc != 0) {
         (void)reset_thread_mempolicy();
         return rc;
@@ -334,6 +349,43 @@ int mbench_arena_prefault_head_local_tail_remote(struct mbench_arena *arena,
 
     arena->prefaulted = true;
     return 0;
+}
+
+int mbench_arena_prefault_arena_split(struct mbench_arena *arena,
+                                      const struct mbench_config *config)
+{
+    if (!arena || !config ||
+        config->placement.kind != MBENCH_PLACEMENT_ARENA_SPLIT ||
+        config->placement.nodes.count != 2 ||
+        config->placement.nodes.nodes[0] == config->placement.nodes.nodes[1]) {
+        return -EINVAL;
+    }
+
+    return prefault_arena_split(arena,
+                                config->placement.nodes.nodes[0],
+                                config->placement.nodes.nodes[1],
+                                config->placement.arena_split_local_bytes);
+}
+
+int mbench_arena_prefault_head_local_tail_remote(struct mbench_arena *arena,
+                                                 const struct mbench_config *config)
+{
+    if (!arena || !config || !arena->base || arena->bytes == 0 ||
+        config->placement.kind != MBENCH_PLACEMENT_WINDOW_SPLIT ||
+        config->placement.nodes.count < 2 ||
+        config->window.window_bytes == 0) {
+        return -EINVAL;
+    }
+
+    size_t local_bytes = config->placement.window_split_local_bytes;
+    if (local_bytes == 0) {
+        local_bytes = ((config->window.window_bytes / 2U) /
+                       arena->page_size) * arena->page_size;
+    }
+    return prefault_arena_split(arena,
+                                config->placement.nodes.nodes[0],
+                                config->placement.nodes.nodes[1],
+                                local_bytes);
 }
 
 int mbench_arena_init(struct mbench_arena *arena,

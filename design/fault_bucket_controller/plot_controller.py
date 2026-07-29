@@ -72,7 +72,10 @@ def plot_policy(plt, rows: list[dict[str, str]], output_base: Path) -> None:
         for row in samples
     ]
     required = [
-        optional_float(row.get("start_remote_quantile_rank_ppm"))
+        optional_float(
+            row.get("start_remote_quantile_rank_ppm")
+            or row.get("remote_percentile_ppm")
+        )
         * 100
         / PPM
         for row in samples

@@ -57,12 +57,18 @@ struct mbench_bw_job {
     volatile double *sink;
 };
 
+enum mbench_pc_index_width {
+    MBENCH_PC_INDEX_U32 = 4,
+    MBENCH_PC_INDEX_U64 = 8,
+};
+
 struct mbench_pc_job {
-    uint32_t *ring;
-    uint32_t *heads;
+    void *ring;
+    void *heads;
     size_t nodes;
     size_t chains;
     size_t passes;
+    enum mbench_pc_index_width index_width;
     volatile uint64_t *sink;
 };
 
@@ -71,11 +77,13 @@ struct mbench_skew_job {
     size_t data_words;
     size_t page_words;
     size_t hot_pages;
+    size_t background_pages;
     uint32_t hot_prob_pct;
     uint32_t read_pct;
     uint32_t write_pct;
     uint32_t rmw_pct;
     enum mbench_skew_index_mode index_mode;
+    int hotset_tail;
     size_t ops;
     uint64_t seed;
     uint64_t state;
@@ -118,6 +126,9 @@ int mbench_run_bw(const struct mbench_bw_job *job);
 int mbench_init_pc_ring(uint32_t *ring, size_t nodes, uint64_t seed);
 int mbench_init_pc_ring_stride(uint32_t *ring, size_t nodes, uint64_t seed);
 int mbench_init_pc_heads(uint32_t *heads, size_t chains, size_t nodes, uint64_t seed);
+int mbench_init_pc_ring64(uint64_t *ring, size_t nodes, uint64_t seed);
+int mbench_init_pc_ring64_stride(uint64_t *ring, size_t nodes, uint64_t seed);
+int mbench_init_pc_heads64(uint64_t *heads, size_t chains, size_t nodes, uint64_t seed);
 int mbench_run_pc(const struct mbench_pc_job *job);
 int mbench_run_skewed_hotset(struct mbench_skew_job *job);
 int mbench_run_irregular(const struct mbench_irregular_job *job);
@@ -141,9 +152,19 @@ static inline int mbench_pc_build_ring(uint32_t *ring, size_t nodes, uint64_t se
     return mbench_init_pc_ring(ring, nodes, seed);
 }
 
+static inline int mbench_pc_build_ring64(uint64_t *ring, size_t nodes, uint64_t seed)
+{
+    return mbench_init_pc_ring64(ring, nodes, seed);
+}
+
 static inline int mbench_pc_seed_heads(uint32_t *heads, size_t chains, size_t nodes, uint64_t seed)
 {
     return mbench_init_pc_heads(heads, chains, nodes, seed);
+}
+
+static inline int mbench_pc_seed_heads64(uint64_t *heads, size_t chains, size_t nodes, uint64_t seed)
+{
+    return mbench_init_pc_heads64(heads, chains, nodes, seed);
 }
 
 static inline int mbench_pc_run(const struct mbench_pc_job *job)

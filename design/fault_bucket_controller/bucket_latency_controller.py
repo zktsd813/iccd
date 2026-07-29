@@ -10,12 +10,14 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Iterable, Optional, TextIO
 
 
 PPM = 1_000_000
+LOCAL_P75 = 75
 LOCAL_HEAD_PPM = 750_000
 LOCAL_TAIL_PPM = 250_000
 DEFAULT_START_CAPACITY_MARGIN_PCT = 10
@@ -24,6 +26,7 @@ DEFAULT_P75_STAGNATION_CONSECUTIVE_WINDOWS = 3
 DEFAULT_P75_RESTART_DEGRADATION_PCT = 10.0
 DEFAULT_P75_RESTART_CONSECUTIVE_WINDOWS = 3
 DEFAULT_REMOTE_RESTART_IMPROVEMENT_PCT = 10.0
+CONTROLLER_POLICY = "capacity_rank_latency_local_remote_restart_v3"
 KLL_SCHEMA = "quantile_snapshot_v4"
 KLL_ALGORITHM = "kll_weighted_ms_v1"
 KLL_VALUE_SOURCE = "sketch_latency_ms_to_ns"
@@ -64,6 +67,7 @@ class QuantileSnapshot:
     window_seq: int
     algorithm: str
     value_source: str
+    rank_error_ppm: Optional[int]
     local_total: int
     remote_total: int
     local_p75_ns: Optional[int]
@@ -90,6 +94,7 @@ class PolicyObservation:
     start_capacity_margin_pct: int
     start_required_pages: Optional[float]
     start_remote_quantile_rank_ppm: Optional[int]
+    cdf_implied_remote_pages_below_local_p75: Optional[float]
     start_raw: bool
     start_consecutive: int
     start_confirmed: bool
@@ -545,6 +550,7 @@ def parse_quantile_text(text: str) -> QuantileSnapshot:
         window_seq=parse_int(values.get("window_seq", "")) or 0,
         algorithm=values.get("algorithm", ""),
         value_source=values.get("value_source", ""),
+        rank_error_ppm=parse_int(values.get("rank_error_ppm", "")),
         local_total=parse_int(values.get("local_total", "")) or 0,
         remote_total=parse_int(values.get("remote_total", "")) or 0,
         local_p75_ns=parse_int(values.get("local_q75_ns", "")),
@@ -666,6 +672,7 @@ def evaluate_policy(
         remote_resident_pages,
         start_capacity_margin_pct,
     )
+    cdf_implied_remote_pages_below_local_p75: Optional[float] = None
     start_raw = False
     if local_pages > 0 and remote_pages > 0:
         margin_denominator = 100
@@ -678,6 +685,9 @@ def evaluate_policy(
     if start_valid:
         strict_cdf = snapshot.remote_cdf_lt_local_p75_ppm
         assert strict_cdf is not None
+        cdf_implied_remote_pages_below_local_p75 = (
+            remote_pages * strict_cdf / PPM
+        )
         if (
             start_remote_quantile_rank_ppm is None
             or start_remote_quantile_rank_ppm > PPM
@@ -737,6 +747,9 @@ def evaluate_policy(
         start_capacity_margin_pct=start_capacity_margin_pct,
         start_required_pages=start_required_pages,
         start_remote_quantile_rank_ppm=start_remote_quantile_rank_ppm,
+        cdf_implied_remote_pages_below_local_p75=(
+            cdf_implied_remote_pages_below_local_p75
+        ),
         start_raw=start_raw,
         start_consecutive=start_consecutive,
         start_confirmed=start_confirmed,
@@ -863,6 +876,10 @@ def read_resident_pages_from_pid_file(
     return local_pages, remote_pages
 
 
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
 def monotonic_ms() -> int:
     return time.monotonic_ns() // 1_000_000
 
@@ -880,6 +897,13 @@ def read_int_file(path: Path) -> Optional[int]:
 
 def write_text(path: Path, value: object) -> None:
     path.write_text(f"{value}\n", encoding="ascii")
+
+
+def read_knob(path: Path) -> str:
+    try:
+        return read_text(path).strip()
+    except OSError:
+        return "NA"
 
 
 def require_path(path: Path, mode: str) -> None:
@@ -914,16 +938,40 @@ def open_output(path: Optional[Path]) -> tuple[TextIO, bool]:
     return path.open("w", newline="", encoding="ascii"), True
 
 
+def write_sample(
+    sample_dir: Optional[Path],
+    *,
+    window: int,
+    elapsed_ms: int,
+    text: str,
+) -> str:
+    if sample_dir is None:
+        return ""
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    path = sample_dir / (
+        f"window_{window:06d}_{elapsed_ms:012d}ms.fault_latency_quantiles"
+    )
+    path.write_text(text, encoding="ascii")
+    return str(path)
+
+
 CSV_FIELDS = (
     "event",
+    "timestamp",
     "elapsed_ms",
     "window",
     "window_seq",
     "cycle_count",
     "cycle_window_reason",
     "cycle_window_elapsed_ms",
+    "controller_state_before",
     "controller_state",
     "transition_action",
+    "numa_balancing",
+    "migration_enabled",
+    "quantile_algorithm",
+    "quantile_value_source",
+    "rank_error_ppm",
     "local_sample_pages",
     "remote_sample_pages",
     "local_p75_ns",
@@ -947,6 +995,7 @@ CSV_FIELDS = (
     "start_capacity_margin_pct",
     "start_required_pages",
     "start_remote_quantile_rank_ppm",
+    "cdf_implied_remote_pages_below_local_p75",
     "start_raw",
     "start_consecutive",
     "start_confirmed",
@@ -973,6 +1022,7 @@ CSV_FIELDS = (
     "p75_stagnation_forced_stop",
     "p75_stagnation_restart",
     "arbitration",
+    "sample_file",
 )
 
 
@@ -999,6 +1049,55 @@ def run_controller(args: argparse.Namespace) -> int:
         (migration_path, "w"),
     ):
         require_path(path, mode)
+
+    if args.sample_dir is not None:
+        args.sample_dir.mkdir(parents=True, exist_ok=True)
+        (args.sample_dir / "monitor.meta").write_text(
+            "\n".join(
+                (
+                    f"policy={CONTROLLER_POLICY}",
+                    f"controller_csv_schema={CONTROLLER_POLICY}",
+                    f"local_percentile={LOCAL_P75}",
+                    f"local_head_ppm={LOCAL_HEAD_PPM}",
+                    f"local_tail_ppm={LOCAL_TAIL_PPM}",
+                    f"start_consecutive={args.start_consecutive}",
+                    f"start_capacity_margin_pct={args.start_capacity_margin_pct}",
+                    (
+                        "p75_stagnation_required_decrease_pct="
+                        f"{args.p75_stagnation_required_decrease_pct}"
+                    ),
+                    (
+                        "p75_stagnation_required_windows="
+                        f"{args.p75_stagnation_required_windows}"
+                    ),
+                    (
+                        "p75_stagnation_restart_degradation_pct="
+                        f"{args.p75_stagnation_restart_degradation_pct}"
+                    ),
+                    (
+                        "p75_stagnation_restart_required_windows="
+                        f"{args.p75_stagnation_restart_required_windows}"
+                    ),
+                    (
+                        "remote_restart_improvement_pct="
+                        f"{args.remote_restart_improvement_pct}"
+                    ),
+                    "p75_stagnation_reference=max_trigger_increment_p75",
+                    "remote_restart_reference=current_rank_quantile_at_stop",
+                    "remote_restart_rank=frozen_while_forced_off",
+                    "stop_comparison=strict_greater_than",
+                    f"stop_capacity_ratio_threshold={args.stop_capacity_ratio_threshold}",
+                    f"min_local_pages={args.min_local_pages}",
+                    f"min_remote_pages={args.min_remote_pages}",
+                    f"workload_pid_file={args.workload_pid_file}",
+                    f"local_node={args.local_node}",
+                    f"remote_node={args.remote_node}",
+                    f"remote_scan_cycles_path={cycle_path}",
+                )
+            )
+            + "\n",
+            encoding="ascii",
+        )
 
     write_text(args.numa_balancing_path, 2)
     write_text(migration_path, 1)
@@ -1034,13 +1133,17 @@ def run_controller(args: argparse.Namespace) -> int:
     )
     window = 0
 
-    def emit_base(event: str, action: str) -> dict[str, object]:
+    def emit_base(event: str, state_before: str, action: str) -> dict[str, object]:
         return {
             "event": event,
+            "timestamp": now_iso(),
             "elapsed_ms": monotonic_ms() - started_ms,
             "window": window,
+            "controller_state_before": state_before,
             "controller_state": controller_state,
             "transition_action": action,
+            "numa_balancing": read_knob(args.numa_balancing_path),
+            "migration_enabled": read_knob(migration_path),
             "stop_capacity_ratio_threshold": (
                 f"{args.stop_capacity_ratio_threshold:.6f}"
             ),
@@ -1062,7 +1165,7 @@ def run_controller(args: argparse.Namespace) -> int:
             ),
         }
 
-    writer.writerow(emit_base("start", "initial_migration_on"))
+    writer.writerow(emit_base("start", controller_state, "initial_migration_on"))
     out.flush()
     write_text(window_path, 1)
 
@@ -1104,7 +1207,8 @@ def run_controller(args: argparse.Namespace) -> int:
                 current_remote_rank_ppm
             )
             write_text(remote_quantile_rank_path, query_rank_ppm)
-            snapshot = parse_quantile_text(read_text(quantile_path))
+            sample_text = read_text(quantile_path)
+            snapshot = parse_quantile_text(sample_text)
             validate_quantile_source(snapshot)
             observation = evaluate_policy(
                 snapshot,
@@ -1117,13 +1221,20 @@ def run_controller(args: argparse.Namespace) -> int:
                 start_state=start_state,
                 p75_stagnation_state=p75_stagnation_state,
             )
+            sample_file = write_sample(
+                args.sample_dir,
+                window=window,
+                elapsed_ms=elapsed_ms,
+                text=sample_text,
+            )
+
             state_before = controller_state
             transition = state_transition(controller_state, observation.arbitration)
             if transition.migration_enabled is not None:
                 write_text(migration_path, transition.migration_enabled)
             controller_state = transition.state
 
-            row = emit_base(transition.event, transition.action)
+            row = emit_base(transition.event, state_before, transition.action)
             row.update(
                 {
                     "elapsed_ms": elapsed_ms,
@@ -1131,6 +1242,9 @@ def run_controller(args: argparse.Namespace) -> int:
                     "cycle_count": format_optional(cycle_count),
                     "cycle_window_reason": gate.reason,
                     "cycle_window_elapsed_ms": gate.elapsed_ms,
+                    "quantile_algorithm": snapshot.algorithm,
+                    "quantile_value_source": snapshot.value_source,
+                    "rank_error_ppm": format_optional(snapshot.rank_error_ppm),
                     "local_sample_pages": snapshot.local_total,
                     "remote_sample_pages": snapshot.remote_total,
                     "local_p75_ns": format_optional(snapshot.local_p75_ns),
@@ -1175,6 +1289,9 @@ def run_controller(args: argparse.Namespace) -> int:
                     ),
                     "start_remote_quantile_rank_ppm": format_optional(
                         observation.start_remote_quantile_rank_ppm
+                    ),
+                    "cdf_implied_remote_pages_below_local_p75": format_optional(
+                        observation.cdf_implied_remote_pages_below_local_p75
                     ),
                     "start_raw": int(observation.start_raw),
                     "start_consecutive": observation.start_consecutive,
@@ -1227,6 +1344,7 @@ def run_controller(args: argparse.Namespace) -> int:
                         observation.p75_stagnation_restart
                     ),
                     "arbitration": observation.arbitration,
+                    "sample_file": sample_file,
                 }
             )
             writer.writerow(row)
@@ -1241,7 +1359,7 @@ def run_controller(args: argparse.Namespace) -> int:
                 last_cycle_count = cycle_count
             last_window_ms = monotonic_ms()
     finally:
-        writer.writerow(emit_base("exit", "none"))
+        writer.writerow(emit_base("exit", controller_state, "none"))
         out.flush()
         if should_close:
             out.close()
@@ -1311,6 +1429,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--remote-scan-cycles-path", type=Path)
     parser.add_argument("--stop-file", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--sample-dir", type=Path)
     parser.add_argument("--max-windows", type=int, default=0)
     args = parser.parse_args(argv)
 
@@ -1322,8 +1441,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         parser.error("--cycle-window-max-sec must be positive")
     if args.cycle_window_max_sec < args.cycle_window_min_sec:
         parser.error("--cycle-window-max-sec must be >= --cycle-window-min-sec")
-    if not 1 <= args.local_rate <= 100:
-        parser.error("--local-rate must be in [1, 100]")
+    if not 0 <= args.local_rate <= 100:
+        parser.error("--local-rate must be in [0, 100]")
     if args.min_local_pages < 0 or args.min_remote_pages < 0:
         parser.error("minimum sample counts must be non-negative")
     if args.start_consecutive < 1:

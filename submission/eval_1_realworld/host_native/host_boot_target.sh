@@ -10,22 +10,23 @@ LOG_ROOT="${LOG_ROOT:-/var/log/iccd/eval1-host-native}"
 GRUB_DROPIN="${GRUB_DROPIN:-/etc/default/grub.d/99-iccd-eval1-host-native.cfg}"
 STATE_FILE="${STATE_FILE:-${STATE_ROOT}/state.env}"
 LOCK_FILE="${LOCK_FILE:-${STATE_ROOT}/host_boot_target.lock}"
+REBOOT_HOOK_SCRIPT="${REBOOT_HOOK_SCRIPT:-${STATE_ROOT}/run-reboot-hook.sh}"
 
 LOCAL_NODE="${LOCAL_NODE:-0}"
-KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES:-2}"
+KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES:-1}"
 OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE:-1}"
 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB:-1}"
 NODE0_BOOT_OVERHEAD_GIB="${NODE0_BOOT_OVERHEAD_GIB:-8}"
+MIN_NODE0_BOOT_SURPLUS_GIB="${MIN_NODE0_BOOT_SURPLUS_GIB:-4}"
 MAX_REBOOTS="${MAX_REBOOTS:-4}"
 DROP_CACHES_BEFORE_VERIFY="${DROP_CACHES_BEFORE_VERIFY:-1}"
-MIN_KEEP_NODE_TOTAL_GIB="${MIN_KEEP_NODE_TOTAL_GIB:-128}"
+MIN_KEEP_NODE_TOTAL_GIB="${MIN_KEEP_NODE_TOTAL_GIB:-120}"
 ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT="${ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT:-1}"
 CXL_ONLINE_RETRIES="${CXL_ONLINE_RETRIES:-60}"
 CXL_ONLINE_RETRY_INTERVAL_SEC="${CXL_ONLINE_RETRY_INTERVAL_SEC:-2}"
-VERIFY_DELAY_AFTER_REBOOT_SEC="${VERIFY_DELAY_AFTER_REBOOT_SEC:-30}"
+VERIFY_DELAY_AFTER_REBOOT_SEC="${VERIFY_DELAY_AFTER_REBOOT_SEC:-90}"
 VERIFY_WARMUP_PR_AFTER_REBOOT="${VERIFY_WARMUP_PR_AFTER_REBOOT:-1}"
 VERIFY_WARMUP_PR_BIN="${VERIFY_WARMUP_PR_BIN:-/Serverless/benchmark/gapbs/pr}"
-VERIFY_WARMUP_PR_GRAPH="${VERIFY_WARMUP_PR_GRAPH:-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g29.sg}"
 VERIFY_WARMUP_PR_SCALE="${VERIFY_WARMUP_PR_SCALE:-29}"
 VERIFY_WARMUP_PR_ITERATIONS="${VERIFY_WARMUP_PR_ITERATIONS:-20}"
 VERIFY_WARMUP_PR_TOLERANCE="${VERIFY_WARMUP_PR_TOLERANCE:-1e-4}"
@@ -55,10 +56,10 @@ Usage:
 
 Purpose:
   Prepare host-native eval_1 boots without the VM.  The generated GRUB
-  drop-in reserves all memory outside LOCAL_NODE plus KEEP_MEMORY_NODES, and
+  drop-in reserves memory outside LOCAL_NODE and KEEP_MEMORY_NODES, and
   reserves excess LOCAL_NODE memory so node0 free memory converges to
-  TARGET_GIB after reboot.  On the current host this keeps node0 + node2 and
-  removes node1 memory; node1 CPUs are excluded with maxcpus=32.
+  TARGET_GIB after reboot.  On the current host this keeps node0 + node1
+  memory while node1 CPUs are excluded with maxcpus=32 plus nosmt.
 
 Safety:
   - plan/status/verify do not modify GRUB.
@@ -67,15 +68,17 @@ Safety:
 
 Important environment defaults:
   LOCAL_NODE=0
-  KEEP_MEMORY_NODES="2"
+  KEEP_MEMORY_NODES="1"
   OFFLINE_CPU_NODE=1
   TARGET_TOLERANCE_GIB=1
   NODE0_BOOT_OVERHEAD_GIB=8
+  MIN_NODE0_BOOT_SURPLUS_GIB=4
   MAX_REBOOTS=4
   ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT=1
-  VERIFY_DELAY_AFTER_REBOOT_SEC=30
+  VERIFY_DELAY_AFTER_REBOOT_SEC=90
   VERIFY_WARMUP_PR_AFTER_REBOOT=1
-  VERIFY_WARMUP_PR_GRAPH=/Serverless/benchmark/gapbs/benchmark/graphs/kron_g29.sg
+  VERIFY_WARMUP_PR_SCALE=29
+  MIN_KEEP_NODE_TOTAL_GIB=120
 
 Advanced:
   BOOT_CMDLINE_OVERRIDE may be set by the sweep runner to apply a known-good
@@ -133,6 +136,25 @@ memory_block_mib() {
   raw="$(cat /sys/devices/system/memory/block_size_bytes)"
   raw="${raw#0x}"
   printf '%d\n' $((16#${raw} / 1024 / 1024))
+}
+
+target_tolerance_mib() {
+  local configured_mib block_mib
+  configured_mib=$((TARGET_TOLERANCE_GIB * 1024))
+  block_mib="$(memory_block_mib)"
+  (( configured_mib < block_mib )) && configured_mib="${block_mib}"
+  printf '%s\n' "${configured_mib}"
+}
+
+minimum_node0_online_mib() {
+  require_target
+  local min_mib block_mib
+  min_mib=$(((TARGET_GIB + MIN_NODE0_BOOT_SURPLUS_GIB) * 1024))
+  block_mib="$(memory_block_mib)"
+  if (( min_mib % block_mib != 0 )); then
+    min_mib=$(( ((min_mib + block_mib - 1) / block_mib) * block_mib ))
+  fi
+  printf '%s\n' "${min_mib}"
 }
 
 node_memfree_mib() {
@@ -259,10 +281,6 @@ run_pr_warmup_for_verify() {
     log "PR warmup skipped; binary not executable: ${VERIFY_WARMUP_PR_BIN}"
     return 0
   fi
-  if [[ ! -r "${VERIFY_WARMUP_PR_GRAPH}" ]]; then
-    log "PR warmup skipped; graph not readable: ${VERIFY_WARMUP_PR_GRAPH}"
-    return 0
-  fi
   if ! command -v numactl >/dev/null 2>&1; then
     log "PR warmup skipped; numactl not found"
     return 0
@@ -278,8 +296,8 @@ run_pr_warmup_for_verify() {
   local rc=0
   {
     printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'graph_mode=prebuilt\n'
-    printf 'graph_path=%s\n' "${VERIFY_WARMUP_PR_GRAPH}"
+    printf 'graph_mode=generated\n'
+    printf 'graph_scale=%s\n' "${VERIFY_WARMUP_PR_SCALE}"
     printf 'numa_balancing_before=%s\n' "$(cat /proc/sys/kernel/numa_balancing 2>/dev/null || true)"
     printf 'node0_memfree_mib_before=%s\n' "$(node_memfree_mib "${LOCAL_NODE}" 2>/dev/null || true)"
     set +e
@@ -287,7 +305,7 @@ run_pr_warmup_for_verify() {
       numactl --cpunodebind="${VERIFY_WARMUP_CPU_NODE}" \
       env OMP_NUM_THREADS="${VERIFY_WARMUP_PR_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores \
       "${VERIFY_WARMUP_PR_BIN}" \
-      -f "${VERIFY_WARMUP_PR_GRAPH}" \
+      -g "${VERIFY_WARMUP_PR_SCALE}" \
       -i "${VERIFY_WARMUP_PR_ITERATIONS}" \
       -t "${VERIFY_WARMUP_PR_TOLERANCE}" \
       -n "${VERIFY_WARMUP_PR_TRIALS}"
@@ -303,6 +321,14 @@ run_pr_warmup_for_verify() {
 
   drop_caches_for_verify
   log "dropped caches after PR warmup"
+}
+
+wait_after_reboot_hook() {
+  [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" ]] || return 0
+  [[ "${VERIFY_DELAY_AFTER_REBOOT_SEC}" =~ ^[0-9]+$ ]] || return 0
+  (( VERIFY_DELAY_AFTER_REBOOT_SEC > 0 )) || return 0
+  log "safe window after reboot: waiting ${VERIFY_DELAY_AFTER_REBOOT_SEC}s before any boot-target action"
+  sleep "${VERIFY_DELAY_AFTER_REBOOT_SEC}"
 }
 
 generate_plan() {
@@ -326,13 +352,6 @@ generate_plan() {
     return 0
   fi
 
-  local preserve_cmdline=""
-  if [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" && -r "${STATE_FILE}" ]]; then
-    # shellcheck disable=SC1090
-    source "${STATE_FILE}" || true
-    preserve_cmdline="${cmdline:-}"
-  fi
-
   TARGET_GIB="${TARGET_GIB}" \
   NODE0_ONLINE_GIB="${online_gib}" \
   LOCAL_NODE="${LOCAL_NODE}" \
@@ -341,11 +360,9 @@ generate_plan() {
   CPU_BOOT_MODE="${CPU_BOOT_MODE}" \
   ENABLE_NOSMT="${ENABLE_NOSMT}" \
   MEMHP_DEFAULT_STATE="${MEMHP_DEFAULT_STATE}" \
-  PRESERVE_CMDLINE_MEMMAPS="${preserve_cmdline}" \
-  python3 - <<'PY'
+python3 - <<'PY'
 import math
 import os
-import re
 from pathlib import Path
 
 GiB = 1024 ** 3
@@ -357,7 +374,6 @@ offline_cpu_node = int(os.environ["OFFLINE_CPU_NODE"])
 cpu_boot_mode = os.environ.get("CPU_BOOT_MODE", "maxcpus")
 enable_nosmt = os.environ.get("ENABLE_NOSMT", "1") == "1"
 memhp_default_state = os.environ.get("MEMHP_DEFAULT_STATE", "online")
-preserve_cmdline = os.environ.get("PRESERVE_CMDLINE_MEMMAPS", "")
 
 block_size = int(Path("/sys/devices/system/memory/block_size_bytes").read_text().strip(), 16)
 MiB = 1024 ** 2
@@ -422,19 +438,6 @@ for node in nodes:
     else:
         excluded.extend((node, *b) for b in blocks)
 
-def parse_memmap_size(value, unit):
-    return int(value) * {
-        "": 1,
-        "K": 1024,
-        "M": MiB,
-        "G": GiB,
-    }[unit]
-
-for m in re.finditer(r"(?:^|\s)memmap=([0-9]+)([KMG]?)\$0x([0-9a-fA-F]+)", preserve_cmdline):
-    size = parse_memmap_size(m.group(1), m.group(2))
-    start = int(m.group(3), 16)
-    excluded.append((-1, start, start + size, "preserved"))
-
 def merge_ranges(items):
     ranges = []
     for _node, start, end, _name in sorted(items, key=lambda x: x[1]):
@@ -447,14 +450,37 @@ def merge_ranges(items):
 exclude_ranges = merge_ranges(excluded)
 keep_ranges = merge_ranges(kept)
 
+offline_cpus = []
+off_cpu_path = Path(f"/sys/devices/system/node/node{offline_cpu_node}/cpulist")
+if off_cpu_path.exists():
+    offline_cpus = parse_cpulist(off_cpu_path.read_text())
+
 cmd = []
 if cpu_boot_mode == "maxcpus":
     cpus = parse_cpulist((Path(f"/sys/devices/system/node/node{local_node}") / "cpulist").read_text())
-    if cpus != list(range(len(cpus))):
+    if not cpus:
+        raise SystemExit(f"node{local_node} has no CPUs; refusing maxcpus plan")
+    prefix = []
+    for expected in range(max(cpus) + 2):
+        if expected in cpus:
+            prefix.append(expected)
+            continue
+        break
+    if not prefix or prefix[0] != 0:
         raise SystemExit(
-            f"node{local_node} CPUs are not contiguous from CPU0; refusing maxcpus plan: {cpus}"
+            f"node{local_node} has no CPU0-based prefix; refusing maxcpus plan: {cpus}"
         )
-    cmd.append(f"maxcpus={len(cpus)}")
+    if len(prefix) != len(cpus) and not enable_nosmt:
+        raise SystemExit(
+            f"node{local_node} CPUs are not fully contiguous from CPU0 and ENABLE_NOSMT=0; "
+            f"refusing maxcpus plan: {cpus}"
+        )
+    bad = sorted(set(range(len(prefix))) & set(offline_cpus))
+    if bad:
+        raise SystemExit(
+            f"maxcpus={len(prefix)} would online CPUs from offline node{offline_cpu_node}: {bad}"
+        )
+    cmd.append(f"maxcpus={len(prefix)}")
 elif cpu_boot_mode != "none":
     raise SystemExit(f"unknown CPU_BOOT_MODE={cpu_boot_mode}")
 if enable_nosmt:
@@ -470,11 +496,6 @@ for start, end in exclude_ranges:
     else:
         size_s = f"{size}"
     cmd.append(f"memmap={size_s}$0x{start:x}")
-
-offline_cpus = []
-off_cpu_path = Path(f"/sys/devices/system/node/node{offline_cpu_node}/cpulist")
-if off_cpu_path.exists():
-    offline_cpus = parse_cpulist(off_cpu_path.read_text())
 
 print(f"target_gib={target_gib}")
 print(f"node0_online_gib={online_gib}")
@@ -510,6 +531,7 @@ write_state() {
     printf 'target_gib=%q\n' "${TARGET_GIB:-}"
     printf 'node0_online_gib=%q\n' "${online_gib}"
     printf 'target_tolerance_gib=%q\n' "${TARGET_TOLERANCE_GIB}"
+    printf 'min_node0_boot_surplus_gib=%q\n' "${MIN_NODE0_BOOT_SURPLUS_GIB}"
     printf 'local_node=%q\n' "${LOCAL_NODE}"
     printf 'keep_memory_nodes=%q\n' "${KEEP_MEMORY_NODES}"
     printf 'offline_cpu_node=%q\n' "${OFFLINE_CPU_NODE}"
@@ -517,11 +539,10 @@ write_state() {
     printf 'online_keep_memory_nodes_after_boot=%q\n' "${ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT}"
     printf 'cxl_online_retries=%q\n' "${CXL_ONLINE_RETRIES}"
     printf 'cxl_online_retry_interval_sec=%q\n' "${CXL_ONLINE_RETRY_INTERVAL_SEC}"
-    printf 'verify_delay_after_reboot_sec=%q\n' "${VERIFY_DELAY_AFTER_REBOOT_SEC}"
-    printf 'verify_warmup_pr_after_reboot=%q\n' "${VERIFY_WARMUP_PR_AFTER_REBOOT}"
-    printf 'verify_warmup_pr_bin=%q\n' "${VERIFY_WARMUP_PR_BIN}"
-    printf 'verify_warmup_pr_graph=%q\n' "${VERIFY_WARMUP_PR_GRAPH}"
-    printf 'verify_warmup_pr_scale=%q\n' "${VERIFY_WARMUP_PR_SCALE}"
+	    printf 'verify_delay_after_reboot_sec=%q\n' "${VERIFY_DELAY_AFTER_REBOOT_SEC}"
+	    printf 'verify_warmup_pr_after_reboot=%q\n' "${VERIFY_WARMUP_PR_AFTER_REBOOT}"
+	    printf 'verify_warmup_pr_bin=%q\n' "${VERIFY_WARMUP_PR_BIN}"
+	    printf 'verify_warmup_pr_scale=%q\n' "${VERIFY_WARMUP_PR_SCALE}"
     printf 'verify_warmup_pr_iterations=%q\n' "${VERIFY_WARMUP_PR_ITERATIONS}"
     printf 'verify_warmup_pr_trials=%q\n' "${VERIFY_WARMUP_PR_TRIALS}"
     printf 'verify_warmup_pr_threads=%q\n' "${VERIFY_WARMUP_PR_THREADS}"
@@ -582,8 +603,34 @@ install_reboot_hook() {
   mkdir -p "${STATE_ROOT}" "${LOG_ROOT}"
   local marker_begin="# ICCD_EVAL1_HOST_NATIVE_REBOOT_BEGIN"
   local marker_end="# ICCD_EVAL1_HOST_NATIVE_REBOOT_END"
-  local cmd
-  cmd="cd ${REPO_ROOT@Q} && TARGET_GIB=${TARGET_GIB@Q} LOCAL_NODE=${LOCAL_NODE@Q} KEEP_MEMORY_NODES=${KEEP_MEMORY_NODES@Q} OFFLINE_CPU_NODE=${OFFLINE_CPU_NODE@Q} TARGET_TOLERANCE_GIB=${TARGET_TOLERANCE_GIB@Q} NODE0_BOOT_OVERHEAD_GIB=${NODE0_BOOT_OVERHEAD_GIB@Q} MAX_REBOOTS=${MAX_REBOOTS@Q} ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT=${ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT@Q} CXL_ONLINE_RETRIES=${CXL_ONLINE_RETRIES@Q} CXL_ONLINE_RETRY_INTERVAL_SEC=${CXL_ONLINE_RETRY_INTERVAL_SEC@Q} VERIFY_DELAY_AFTER_REBOOT_SEC=${VERIFY_DELAY_AFTER_REBOOT_SEC@Q} VERIFY_WARMUP_PR_AFTER_REBOOT=${VERIFY_WARMUP_PR_AFTER_REBOOT@Q} VERIFY_WARMUP_PR_BIN=${VERIFY_WARMUP_PR_BIN@Q} VERIFY_WARMUP_PR_GRAPH=${VERIFY_WARMUP_PR_GRAPH@Q} VERIFY_WARMUP_PR_SCALE=${VERIFY_WARMUP_PR_SCALE@Q} VERIFY_WARMUP_PR_ITERATIONS=${VERIFY_WARMUP_PR_ITERATIONS@Q} VERIFY_WARMUP_PR_TOLERANCE=${VERIFY_WARMUP_PR_TOLERANCE@Q} VERIFY_WARMUP_PR_TRIALS=${VERIFY_WARMUP_PR_TRIALS@Q} VERIFY_WARMUP_PR_THREADS=${VERIFY_WARMUP_PR_THREADS@Q} VERIFY_WARMUP_CPU_NODE=${VERIFY_WARMUP_CPU_NODE@Q} ICCD_FROM_REBOOT_HOOK=1 exec ${SCRIPT_PATH@Q} converge --target-gib ${TARGET_GIB@Q} --apply --reboot >> ${LOG_ROOT@Q}/reboot-hook.log 2>&1"
+  cat > "${REBOOT_HOOK_SCRIPT}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd ${REPO_ROOT@Q}
+export TARGET_GIB=${TARGET_GIB@Q}
+export LOCAL_NODE=${LOCAL_NODE@Q}
+export KEEP_MEMORY_NODES=${KEEP_MEMORY_NODES@Q}
+export OFFLINE_CPU_NODE=${OFFLINE_CPU_NODE@Q}
+export TARGET_TOLERANCE_GIB=${TARGET_TOLERANCE_GIB@Q}
+export NODE0_BOOT_OVERHEAD_GIB=${NODE0_BOOT_OVERHEAD_GIB@Q}
+export MIN_NODE0_BOOT_SURPLUS_GIB=${MIN_NODE0_BOOT_SURPLUS_GIB@Q}
+export MAX_REBOOTS=${MAX_REBOOTS@Q}
+export ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT=${ONLINE_KEEP_MEMORY_NODES_AFTER_BOOT@Q}
+export CXL_ONLINE_RETRIES=${CXL_ONLINE_RETRIES@Q}
+export CXL_ONLINE_RETRY_INTERVAL_SEC=${CXL_ONLINE_RETRY_INTERVAL_SEC@Q}
+export VERIFY_DELAY_AFTER_REBOOT_SEC=${VERIFY_DELAY_AFTER_REBOOT_SEC@Q}
+export VERIFY_WARMUP_PR_AFTER_REBOOT=${VERIFY_WARMUP_PR_AFTER_REBOOT@Q}
+export VERIFY_WARMUP_PR_BIN=${VERIFY_WARMUP_PR_BIN@Q}
+export VERIFY_WARMUP_PR_SCALE=${VERIFY_WARMUP_PR_SCALE@Q}
+export VERIFY_WARMUP_PR_ITERATIONS=${VERIFY_WARMUP_PR_ITERATIONS@Q}
+export VERIFY_WARMUP_PR_TOLERANCE=${VERIFY_WARMUP_PR_TOLERANCE@Q}
+export VERIFY_WARMUP_PR_TRIALS=${VERIFY_WARMUP_PR_TRIALS@Q}
+export VERIFY_WARMUP_PR_THREADS=${VERIFY_WARMUP_PR_THREADS@Q}
+export VERIFY_WARMUP_CPU_NODE=${VERIFY_WARMUP_CPU_NODE@Q}
+export ICCD_FROM_REBOOT_HOOK=1
+exec ${SCRIPT_PATH@Q} converge --target-gib ${TARGET_GIB@Q} --apply --reboot >> ${LOG_ROOT@Q}/reboot-hook.log 2>&1
+EOF
+  chmod 700 "${REBOOT_HOOK_SCRIPT}"
   local tmp
   tmp="$(mktemp)"
   {
@@ -593,7 +640,7 @@ install_reboot_hook() {
       !skip {print}
     '
     printf '%s\n' "${marker_begin}"
-    printf '@reboot /bin/bash -lc %q\n' "${cmd}"
+    printf '@reboot /bin/bash %q\n' "${REBOOT_HOOK_SCRIPT}"
     printf '%s\n' "${marker_end}"
   } > "${tmp}"
   crontab "${tmp}"
@@ -634,7 +681,7 @@ restore_full_boot_for_converge() {
     rm -f "${GRUB_DROPIN}"
     update_grub
   fi
-  write_state "" "" "restore-for-converge"
+  write_state "" "${NODE0_ONLINE_GIB:-}" "restore-for-converge"
   log "restoring unrestricted boot first; convergence will continue after reboot"
   do_reboot
 }
@@ -684,25 +731,40 @@ cmd_verify() {
   require_target
   online_keep_memory_nodes_after_boot
   drop_caches_for_verify
-  local free_mib lower upper node1_total keep_node keep_total failed=0
-  lower=$(((TARGET_GIB - TARGET_TOLERANCE_GIB) * 1024))
-  upper=$(((TARGET_GIB + TARGET_TOLERANCE_GIB) * 1024))
+  local free_mib tolerance_mib lower upper offline_node_total keep_node keep_total failed=0
+  local offline_memory_node_kept=0
+  tolerance_mib="$(target_tolerance_mib)"
+  lower=$((TARGET_GIB * 1024 - tolerance_mib))
+  upper=$((TARGET_GIB * 1024 + tolerance_mib))
   free_mib="$(node_memfree_mib "${LOCAL_NODE}")"
-  node1_total="$(node_memtotal_mib "${OFFLINE_CPU_NODE}")"
+  offline_node_total="$(node_memtotal_mib "${OFFLINE_CPU_NODE}")"
   printf 'target_gib=%s\n' "${TARGET_GIB}"
+  printf 'configured_target_tolerance_gib=%s\n' "${TARGET_TOLERANCE_GIB}"
+  printf 'effective_target_tolerance_mib=%s\n' "${tolerance_mib}"
   printf 'target_window_mib=%s-%s\n' "${lower}" "${upper}"
   printf 'node%s_free_mib=%s\n' "${LOCAL_NODE}" "${free_mib}"
-  printf 'node%s_memtotal_mib=%s\n' "${OFFLINE_CPU_NODE}" "${node1_total}"
+  printf 'node%s_memtotal_mib=%s\n' "${OFFLINE_CPU_NODE}" "${offline_node_total}"
   if (( free_mib < lower || free_mib > upper )); then
     printf 'target_ok=0\n'
     failed=1
   else
     printf 'target_ok=1\n'
   fi
-  if (( node1_total > 0 )); then
+  for keep_node in ${KEEP_MEMORY_NODES}; do
+    if [[ "${keep_node}" == "${OFFLINE_CPU_NODE}" ]]; then
+      offline_memory_node_kept=1
+      break
+    fi
+  done
+  if (( offline_memory_node_kept == 1 )); then
+    printf 'offline_memory_node_expected=kept\n'
+    printf 'offline_memory_node_ok=1\n'
+  elif (( offline_node_total > 0 )); then
+    printf 'offline_memory_node_expected=absent\n'
     printf 'offline_memory_node_ok=0\n'
     failed=1
   else
+    printf 'offline_memory_node_expected=absent\n'
     printf 'offline_memory_node_ok=1\n'
   fi
   local online_list
@@ -760,13 +822,15 @@ adjust_online_gib() {
   [[ -n "${current_online}" ]] || current_online="$(default_online_gib)"
 
   drop_caches_for_verify
-  local free_mib lower upper block_mib step_mib delta_mib delta_steps next_online_mib
+  local free_mib tolerance_mib lower upper block_mib step_mib delta_mib delta_steps next_online_mib min_online_mib
   free_mib="$(node_memfree_mib "${LOCAL_NODE}")"
-  lower=$(((TARGET_GIB - TARGET_TOLERANCE_GIB) * 1024))
-  upper=$(((TARGET_GIB + TARGET_TOLERANCE_GIB) * 1024))
+  tolerance_mib="$(target_tolerance_mib)"
+  lower=$((TARGET_GIB * 1024 - tolerance_mib))
+  upper=$((TARGET_GIB * 1024 + tolerance_mib))
   block_mib="$(memory_block_mib)"
   step_mib="${block_mib}"
   (( step_mib < 1024 )) && step_mib=1024
+  min_online_mib="$(minimum_node0_online_mib)"
   next_online_mib=$((current_online * 1024))
   if (( free_mib < lower )); then
     delta_mib=$((lower - free_mib))
@@ -779,7 +843,7 @@ adjust_online_gib() {
     (( delta_steps < 1 )) && delta_steps=1
     next_online_mib=$((next_online_mib - delta_steps * step_mib))
   fi
-  (( next_online_mib < step_mib )) && next_online_mib="${step_mib}"
+  (( next_online_mib < min_online_mib )) && next_online_mib="${min_online_mib}"
   printf '%s\n' $(((next_online_mib + 1023) / 1024))
 }
 
@@ -794,9 +858,13 @@ cmd_converge() {
     source "${STATE_FILE}" || true
     previous_mode="${mode:-}"
   fi
+
+  wait_after_reboot_hook
+
   if [[ "${REBOOT}" == "1" &&
         "${ICCD_FROM_REBOOT_HOOK}" == "1" &&
         "${previous_mode}" == "restore-for-converge" ]]; then
+    [[ -n "${NODE0_ONLINE_GIB}" ]] || NODE0_ONLINE_GIB="${node0_online_gib:-}"
     [[ -n "${NODE0_ONLINE_GIB}" ]] || NODE0_ONLINE_GIB="$(default_online_gib)"
     log "unrestricted boot restored; applying initial node0_online_gib=${NODE0_ONLINE_GIB} and rebooting"
     cmd_apply
@@ -806,6 +874,11 @@ cmd_converge() {
   if [[ "${REBOOT}" == "1" && "${ICCD_FROM_REBOOT_HOOK}" != "1" ]]; then
     set_reboots 0
     [[ -n "${NODE0_ONLINE_GIB}" ]] || NODE0_ONLINE_GIB="$(default_online_gib)"
+    if grep -q 'memmap=' /proc/cmdline 2>/dev/null; then
+      log "current boot is memmap-limited; restore unrestricted boot before initial convergence"
+      restore_full_boot_for_converge
+      return 0
+    fi
     local plan_err
     plan_err="$(mktemp)"
     if ! generate_plan > /dev/null 2> "${plan_err}"; then
@@ -820,13 +893,6 @@ cmd_converge() {
     log "starting convergence for ${TARGET_GIB}G; applying initial node0_online_gib=${NODE0_ONLINE_GIB} and rebooting"
     cmd_apply
     return 0
-  fi
-
-  if [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" &&
-        "${VERIFY_DELAY_AFTER_REBOOT_SEC}" =~ ^[0-9]+$ &&
-        "${VERIFY_DELAY_AFTER_REBOOT_SEC}" -gt 0 ]]; then
-    log "waiting ${VERIFY_DELAY_AFTER_REBOOT_SEC}s after reboot before verify"
-    sleep "${VERIFY_DELAY_AFTER_REBOOT_SEC}"
   fi
 
   run_pr_warmup_for_verify
@@ -849,6 +915,11 @@ cmd_converge() {
   next_online="$(adjust_online_gib)"
   NODE0_ONLINE_GIB="${next_online}"
   log "target not reached; adjusting node0_online_gib=${next_online} and rebooting (${count}/${MAX_REBOOTS})"
+  if [[ "${ICCD_FROM_REBOOT_HOOK}" == "1" ]] && grep -q 'memmap=' /proc/cmdline 2>/dev/null; then
+    log "current boot is memmap-limited; restore unrestricted boot before applying adjusted plan"
+    restore_full_boot_for_converge
+    return 0
+  fi
   cmd_apply
 }
 

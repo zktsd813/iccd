@@ -211,12 +211,17 @@ static int mbench_build_pc_job_slice(const struct mbench_runtime *runtime,
     size_t chains = (runtime->config.threads.pc_chains > 0)
         ? (size_t)runtime->config.threads.pc_chains
         : 1U;
+    enum mbench_pc_index_width index_width = MBENCH_PC_INDEX_U32;
     size_t total_slots = slice_bytes / sizeof(uint32_t);
+    size_t nodes = 0;
+    if (total_slots <= chains + 1U || total_slots - chains > UINT32_MAX) {
+        index_width = MBENCH_PC_INDEX_U64;
+        total_slots = slice_bytes / sizeof(uint64_t);
+    }
     if (total_slots <= chains + 1U) {
         return -EINVAL;
     }
-
-    size_t nodes = total_slots - chains;
+    nodes = total_slots - chains;
     uint64_t requested_ops = mbench_requested_ops(runtime, (uint64_t)nodes * (uint64_t)chains);
     uint64_t passes_u64 = mbench_div_round_up_u64(requested_ops, (uint64_t)chains);
     size_t passes = 0;
@@ -225,27 +230,47 @@ static int mbench_build_pc_job_slice(const struct mbench_runtime *runtime,
         return rc;
     }
 
-    uint32_t *ring = (uint32_t *)base;
-    uint32_t *heads = ring + nodes;
-    if (runtime->config.threads.pc_pattern == MBENCH_PC_PATTERN_STRIDE) {
-        rc = mbench_init_pc_ring_stride(ring, nodes, seed);
+    memset(job, 0, sizeof(*job));
+    if (index_width == MBENCH_PC_INDEX_U32) {
+        uint32_t *ring = (uint32_t *)base;
+        uint32_t *heads = ring + nodes;
+        if (runtime->config.threads.pc_pattern == MBENCH_PC_PATTERN_STRIDE) {
+            rc = mbench_init_pc_ring_stride(ring, nodes, seed);
+        } else {
+            rc = mbench_init_pc_ring(ring, nodes, seed);
+        }
+        if (rc != 0) {
+            return rc;
+        }
+        rc = mbench_init_pc_heads(heads, chains, nodes, seed + 1U);
+        if (rc != 0) {
+            return rc;
+        }
+        job->ring = ring;
+        job->heads = heads;
     } else {
-        rc = mbench_init_pc_ring(ring, nodes, seed);
-    }
-    if (rc != 0) {
-        return rc;
-    }
-    rc = mbench_init_pc_heads(heads, chains, nodes, seed + 1U);
-    if (rc != 0) {
-        return rc;
+        uint64_t *ring = (uint64_t *)base;
+        uint64_t *heads = ring + nodes;
+        if (runtime->config.threads.pc_pattern == MBENCH_PC_PATTERN_STRIDE) {
+            rc = mbench_init_pc_ring64_stride(ring, nodes, seed);
+        } else {
+            rc = mbench_init_pc_ring64(ring, nodes, seed);
+        }
+        if (rc != 0) {
+            return rc;
+        }
+        rc = mbench_init_pc_heads64(heads, chains, nodes, seed + 1U);
+        if (rc != 0) {
+            return rc;
+        }
+        job->ring = ring;
+        job->heads = heads;
     }
 
-    memset(job, 0, sizeof(*job));
-    job->ring = ring;
-    job->heads = heads;
     job->nodes = nodes;
     job->chains = chains;
     job->passes = passes;
+    job->index_width = index_width;
     job->sink = NULL;
     return 0;
 }
@@ -308,6 +333,7 @@ static int mbench_build_skew_job_slice(const struct mbench_runtime *runtime,
     job->data_words = data_words;
     job->page_words = page_words;
     job->hot_pages = hot_pages;
+    job->background_pages = runtime->config.hotset.background_pages;
     job->hot_prob_pct = runtime->config.hotset.hot_prob_pct;
     job->read_pct = runtime->config.hotset.read_pct;
     job->write_pct = runtime->config.hotset.write_pct;
@@ -315,6 +341,7 @@ static int mbench_build_skew_job_slice(const struct mbench_runtime *runtime,
     job->index_mode = runtime->config.hotset.index_mode == MBENCH_HOTSET_INDEX_MULSHIFT
         ? MBENCH_SKEW_INDEX_MULSHIFT
         : MBENCH_SKEW_INDEX_XORSHIFT;
+    job->hotset_tail = runtime->config.hotset.tail ? 1 : 0;
     job->ops = ops;
     job->seed = seed;
     job->sink = NULL;
@@ -546,6 +573,8 @@ static int mbench_build_persistent_worker_job(struct mbench_persistent_worker_ct
                                               struct mbench_mix_worker *worker)
 {
     struct mbench_runtime *runtime = ctx->runtime;
+    size_t slice_index;
+    size_t slice_count;
     size_t slice_bytes;
     unsigned char *base;
     uint64_t seed_base;
@@ -557,13 +586,21 @@ static int mbench_build_persistent_worker_job(struct mbench_persistent_worker_ct
         return -EINVAL;
     }
 
-    slice_bytes = mbench_slice_span(ctx->region_bytes, ctx->role_count);
+    slice_index = ctx->role_index;
+    slice_count = ctx->role_count;
+    if (ctx->role == MBENCH_MIX_ROLE_SKEWED &&
+        runtime->config.hotset.shared_window) {
+        slice_index = 0;
+        slice_count = 1;
+    }
+
+    slice_bytes = mbench_slice_span(ctx->region_bytes, slice_count);
     if (slice_bytes == 0) {
         return -EINVAL;
     }
 
     base = (unsigned char *)runtime->arena.base + window_offset +
-        ctx->region_offset_bytes + ctx->role_index * slice_bytes;
+        ctx->region_offset_bytes + slice_index * slice_bytes;
     seed_base = runtime->config.seed ^ (uint64_t)window_offset;
     memset(worker, 0, sizeof(*worker));
     worker->role = ctx->role;

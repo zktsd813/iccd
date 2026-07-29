@@ -38,6 +38,7 @@
 #include <linux/page_idle.h>
 #include <linux/page_owner.h>
 #include <linux/sched/mm.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/ptrace.h>
 #include <linux/memory.h>
 #include <linux/sched/sysctl.h>
@@ -802,6 +803,7 @@ void folio_migrate_flags(struct folio *newfolio, struct folio *folio)
 		folio_set_idle(newfolio);
 
 #ifdef CONFIG_NUMA_BALANCING_MT
+	numa_account_fault_probe_cancel(folio);
 	folio_clear_local_tiering_sampled(folio);
 #endif
 

@@ -19,6 +19,8 @@ struct mbench_worker_ctx {
     struct mbench_runtime *runtime;
     int rc;
     _Atomic int done;
+    _Atomic uint64_t dispatch_start_monotonic_ns;
+    _Atomic uint64_t dispatch_complete_monotonic_ns;
 };
 
 static int write_marker_file(const char *path)
@@ -106,7 +108,14 @@ static int dispatch_mode(struct mbench_runtime *runtime)
 static void *worker_main(void *arg)
 {
     struct mbench_worker_ctx *ctx = (struct mbench_worker_ctx *)arg;
+
+    atomic_store_explicit(&ctx->dispatch_start_monotonic_ns,
+                          mbench_clock_monotonic_ns(),
+                          memory_order_release);
     ctx->rc = dispatch_mode(ctx->runtime);
+    atomic_store_explicit(&ctx->dispatch_complete_monotonic_ns,
+                          mbench_clock_monotonic_ns(),
+                          memory_order_release);
     atomic_store_explicit(&ctx->done, 1, memory_order_release);
     return NULL;
 }
@@ -329,6 +338,8 @@ static int launch_worker_thread(struct mbench_runtime *runtime,
     memset(worker, 0, sizeof(*worker));
     worker->runtime = runtime;
     atomic_init(&worker->done, 0);
+    atomic_init(&worker->dispatch_start_monotonic_ns, 0);
+    atomic_init(&worker->dispatch_complete_monotonic_ns, 0);
 
     rc = pthread_create(thread, NULL, worker_main, worker);
     if (rc != 0) {
@@ -355,6 +366,8 @@ static int drive_phase_samples(struct mbench_runtime *runtime,
                                uint64_t run_start_ns,
                                uint64_t *last_ops,
                                uint64_t *last_bytes,
+                               uint64_t phase_start_ops,
+                               uint64_t target_ops,
                                uint64_t *phase_elapsed_ns_out)
 {
     uint32_t sample_ms;
@@ -374,7 +387,9 @@ static int drive_phase_samples(struct mbench_runtime *runtime,
         ? runtime->config.timing.move_interval_ms
         : 1000U;
     phase_start_ns = mbench_now_ns();
-    deadline_ns = phase_start_ns + (uint64_t)runtime->config.phase.duration_ms * 1000000ULL;
+    deadline_ns = target_ops == 0
+        ? phase_start_ns + (uint64_t)runtime->config.phase.duration_ms * 1000000ULL
+        : 0;
     next_sample_ns = phase_start_ns;
     next_move_ns = phase_start_ns + (uint64_t)move_ms * 1000000ULL;
 
@@ -409,25 +424,31 @@ static int drive_phase_samples(struct mbench_runtime *runtime,
             break;
         }
 
-        if (now_ns >= deadline_ns) {
+        uint64_t current_ops = atomic_load_explicit(&runtime->completed_ops,
+                                                    memory_order_relaxed);
+        if (target_ops > 0 && current_ops - phase_start_ops >= target_ops) {
             break;
         }
 
-        uint64_t wait_ns = 1000000ULL;
-        if (next_sample_ns > now_ns) {
+        if (target_ops == 0 && now_ns >= deadline_ns) {
+            break;
+        }
+
+        uint64_t wait_ns = target_ops > 0 ? 100000ULL : 1000000ULL;
+        if (next_sample_ns > now_ns && next_sample_ns - now_ns < wait_ns) {
             wait_ns = next_sample_ns - now_ns;
         }
         if (runtime->window.move_policy != MBENCH_MOVE_FIXED && next_move_ns > now_ns &&
             next_move_ns - now_ns < wait_ns) {
             wait_ns = next_move_ns - now_ns;
         }
-        if (deadline_ns > now_ns && deadline_ns - now_ns < wait_ns) {
+        if (target_ops == 0 && deadline_ns > now_ns && deadline_ns - now_ns < wait_ns) {
             wait_ns = deadline_ns - now_ns;
         }
         if (wait_ns > 1000000ULL) {
             mbench_sleep_ms((uint32_t)(wait_ns / 1000000ULL));
         } else {
-            mbench_sleep_ms(1U);
+            mbench_sleep_ns(wait_ns);
         }
     }
 
@@ -446,6 +467,82 @@ static int drive_phase_samples(struct mbench_runtime *runtime,
 
     if (phase_elapsed_ns_out) {
         *phase_elapsed_ns_out = end_ns - phase_start_ns;
+    }
+    return 0;
+}
+
+static int emit_phase_boundary_residency(
+    const struct mbench_runtime *runtime,
+    const struct mbench_config *base_config,
+    size_t boundary_index)
+{
+    const size_t stride = (size_t)MBENCH_PHASE_BOUNDARY_PROBE_STRIDE;
+
+    if (!runtime || !base_config || !runtime->arena.base) {
+        return -EINVAL;
+    }
+
+    for (size_t i = 0; i < base_config->phase.boundary_probe_count; ++i) {
+        const struct mbench_residency_probe_config *probe =
+            &base_config->phase.boundary_probes[i];
+        size_t sample_count = 1U + (probe->size_bytes - 1U) / stride;
+        size_t node0 = 0;
+        size_t node1 = 0;
+        size_t other_nodes = 0;
+        size_t errors = 0;
+        int *status;
+        int rc;
+
+        if (sample_count > SIZE_MAX / sizeof(*status)) {
+            return -EOVERFLOW;
+        }
+        status = calloc(sample_count, sizeof(*status));
+        if (!status) {
+            return -ENOMEM;
+        }
+
+        rc = mbench_query_sampled_range_nodes(
+            (unsigned char *)runtime->arena.base + probe->offset_bytes,
+            probe->size_bytes,
+            stride,
+            status,
+            sample_count);
+        if (rc == 0) {
+            for (size_t sample = 0; sample < sample_count; ++sample) {
+                if (status[sample] == 0) {
+                    node0++;
+                } else if (status[sample] == 1) {
+                    node1++;
+                } else if (status[sample] >= 0) {
+                    other_nodes++;
+                } else {
+                    errors++;
+                }
+            }
+        } else {
+            errors = sample_count;
+        }
+
+        fprintf(stderr,
+                "phase_boundary_residency boundary_index=%zu after_phase_id=%u before_phase_id=%u label=%s offset_bytes=%zu size_bytes=%zu stride_bytes=%zu samples=%zu node0=%zu node1=%zu other_nodes=%zu errors=%zu query_errno=%d\n",
+                boundary_index,
+                runtime->phase_id,
+                runtime->phase_id + 1U,
+                probe->label,
+                probe->offset_bytes,
+                probe->size_bytes,
+                stride,
+                sample_count,
+                node0,
+                node1,
+                other_nodes,
+                errors,
+                rc < 0 ? -rc : 0);
+        free(status);
+
+        if (rc != 0) {
+            return rc;
+        }
     }
     return 0;
 }
@@ -484,6 +581,8 @@ static int run_phase_sequence(struct mbench_runtime *runtime,
         struct mbench_worker_ctx worker;
         pthread_t worker_thread;
         uint64_t phase_elapsed_ns = 0;
+        uint64_t phase_start_ops;
+        uint64_t phase_achieved_ops;
 
         rc = mbench_phase_build(&base_config, i, &phase);
         if (rc != 0) {
@@ -493,19 +592,33 @@ static int run_phase_sequence(struct mbench_runtime *runtime,
         if (rc != 0) {
             break;
         }
+        phase_start_ops = atomic_load_explicit(&runtime->completed_ops,
+                                               memory_order_relaxed);
 
         if (!runtime->config.report.quiet) {
             fprintf(stderr,
-                    "phase_start index=%zu/%zu phase_id=%u phase_name=%s duration_ms=%u mode=%s bw_kernel=%s window_bytes=%zu move_policy=%s\n",
+                    "phase_start index=%zu/%zu phase_id=%u phase_name=%s duration_ms=%u target_ops=%" PRIu64 " mode=%s bw_kernel=%s threads=%d ops_per_pass=%" PRIu64 " window_bytes=%zu window_offset=%zu move_policy=%s bw_stride=%u bw_block_bytes=%zu hotset_pages=%u hotset_background_pages=%u hot_prob_pct=%u hotset_shared_window=%d hotset_tail=%d\n",
                     i + 1U,
                     phase_count,
                     runtime->phase_id,
                     runtime->phase_name,
                     runtime->config.phase.duration_ms,
+                    phase.target_ops,
                     mbench_mode_name(runtime->config.mode),
                     mbench_bw_kernel_name(runtime->config.bw_kernel),
+                    runtime->config.threads.total_threads,
+                    runtime->config.request.ops_per_pass,
                     runtime->window.window_bytes,
-                    mbench_move_policy_name(runtime->window.move_policy));
+                    atomic_load_explicit(&runtime->window.current_offset,
+                                         memory_order_relaxed),
+                    mbench_move_policy_name(runtime->window.move_policy),
+                    runtime->config.bw_pattern.stride_elements,
+                    runtime->config.bw_pattern.block_bytes,
+                    runtime->config.hotset.hotset_pages,
+                    runtime->config.hotset.background_pages,
+                    runtime->config.hotset.hot_prob_pct,
+                    runtime->config.hotset.shared_window ? 1 : 0,
+                    runtime->config.hotset.tail ? 1 : 0);
         }
 
         rc = launch_worker_thread(runtime, &worker, &worker_thread);
@@ -513,28 +626,79 @@ static int run_phase_sequence(struct mbench_runtime *runtime,
             break;
         }
 
+        {
+            uint64_t dispatch_start_monotonic_ns = 0;
+
+            while (dispatch_start_monotonic_ns == 0) {
+                dispatch_start_monotonic_ns = atomic_load_explicit(
+                    &worker.dispatch_start_monotonic_ns,
+                    memory_order_acquire);
+                if (dispatch_start_monotonic_ns == 0) {
+                    mbench_sleep_ns(1000U);
+                }
+            }
+            fprintf(stderr,
+                    "phase_start_monotonic phase_index=%zu phase_count=%zu phase_id=%u phase_name=%s clock_id=CLOCK_MONOTONIC clock_monotonic_ns=%" PRIu64 "\n",
+                    i + 1U,
+                    phase_count,
+                    runtime->phase_id,
+                    runtime->phase_name,
+                    dispatch_start_monotonic_ns);
+        }
+
         rc = drive_phase_samples(runtime,
                                  &worker,
                                  run_start_ns,
                                  &last_ops,
                                  &last_bytes,
+                                 phase_start_ops,
+                                 phase.target_ops,
                                  &phase_elapsed_ns);
         atomic_store_explicit(&runtime->stop_requested, 1, memory_order_relaxed);
 
         int join_rc = join_worker_thread(worker_thread, &worker);
+        {
+            uint64_t dispatch_complete_monotonic_ns = atomic_load_explicit(
+                &worker.dispatch_complete_monotonic_ns,
+                memory_order_acquire);
+
+            if (dispatch_complete_monotonic_ns != 0) {
+                fprintf(stderr,
+                        "phase_complete_monotonic phase_index=%zu phase_count=%zu phase_id=%u phase_name=%s clock_id=CLOCK_MONOTONIC clock_monotonic_ns=%" PRIu64 "\n",
+                        i + 1U,
+                        phase_count,
+                        runtime->phase_id,
+                        runtime->phase_name,
+                        dispatch_complete_monotonic_ns);
+            }
+        }
         if (rc == 0 && join_rc != 0) {
             rc = join_rc;
         }
         if (rc != 0) {
             break;
         }
+        phase_achieved_ops = atomic_load_explicit(&runtime->completed_ops,
+                                                  memory_order_relaxed) - phase_start_ops;
 
         if (!runtime->config.report.quiet) {
             fprintf(stderr,
-                    "phase_complete phase_id=%u phase_name=%s elapsed_s=%.3Lf\n",
+                    "phase_complete phase_id=%u phase_name=%s elapsed_s=%.3Lf target_ops=%" PRIu64 " achieved_ops=%" PRIu64 "\n",
                     runtime->phase_id,
                     runtime->phase_name,
-                    (long double)phase_elapsed_ns / 1000000000.0L);
+                    (long double)phase_elapsed_ns / 1000000000.0L,
+                    phase.target_ops,
+                    phase_achieved_ops);
+        }
+
+        if ((i % 2U) == 0 && i + 1U < phase_count &&
+            base_config.phase.boundary_probe_count > 0) {
+            rc = emit_phase_boundary_residency(runtime,
+                                               &base_config,
+                                               i / 2U + 1U);
+            if (rc != 0) {
+                break;
+            }
         }
     }
 
@@ -636,6 +800,15 @@ int main(int argc, char **argv)
             fprintf(stderr,
                     "ops_200s=%" PRIu64 " total_ops=%" PRIu64 " elapsed_s=%.3Lf\n",
                     ops_200s,
+                    ops,
+                    (long double)measured_elapsed_ns / 1000000000.0L);
+        }
+
+        {
+            uint64_t ops = atomic_load_explicit(&runtime.completed_ops, memory_order_relaxed);
+
+            fprintf(stderr,
+                    "phase_run total_ops=%" PRIu64 " elapsed_s=%.6Lf\n",
                     ops,
                     (long double)measured_elapsed_ns / 1000000000.0L);
         }

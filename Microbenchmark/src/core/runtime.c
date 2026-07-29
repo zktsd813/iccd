@@ -212,7 +212,10 @@ int mbench_runtime_prepare(struct mbench_runtime *runtime,
     }
 
     if (runtime->config.prefault) {
-        if (runtime->config.phase.preset == MBENCH_PHASE_PRESET_MOVE15S4G_SPLIT32 ||
+        if (runtime->config.placement.kind == MBENCH_PLACEMENT_ARENA_SPLIT) {
+            rc = mbench_arena_prefault_arena_split(&runtime->arena,
+                                                   &runtime->config);
+        } else if (runtime->config.phase.preset == MBENCH_PHASE_PRESET_MOVE15S4G_SPLIT32 ||
             runtime->config.phase.preset == MBENCH_PHASE_PRESET_MOVE15S4G_REMOTE_SPLIT32 ||
             runtime->config.phase.preset == MBENCH_PHASE_PRESET_MOVE60S4G_REMOTE_SPLIT32 ||
             runtime->config.phase.preset == MBENCH_PHASE_PRESET_FIXED4G_REMOTE_SPLIT32 ||
@@ -222,6 +225,9 @@ int mbench_runtime_prepare(struct mbench_runtime *runtime,
         } else if (runtime->config.placement.kind == MBENCH_PLACEMENT_WINDOW_SPLIT) {
             rc = mbench_arena_prefault_window_split(&runtime->arena,
                                                     &runtime->config);
+        } else if (runtime->config.prefault_node >= 0) {
+            rc = mbench_arena_prefault_node(&runtime->arena,
+                                            runtime->config.prefault_node);
         } else if (runtime->config.hotset.prefault_node >= 0) {
             rc = mbench_arena_prefault_hotset_node(&runtime->arena,
                                                    &runtime->config);

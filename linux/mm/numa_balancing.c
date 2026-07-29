@@ -31,9 +31,34 @@
 #define NUMA_FAULT_LATENCY_KLL_LEVEL_CAPACITY	64
 #define NUMA_FAULT_LATENCY_KLL_MAX_ITEMS	\
 	(NUMA_FAULT_LATENCY_KLL_LEVELS * NUMA_FAULT_LATENCY_KLL_LEVEL_CAPACITY)
+#define NUMA_FAULT_PROBE_KIND_BITS		2
+#define NUMA_FAULT_PROBE_KIND_MASK		GENMASK(1, 0)
+#define NUMA_FAULT_PROBE_TIME_SHIFT		NUMA_FAULT_PROBE_KIND_BITS
+#define NUMA_FAULT_PROBE_TIME_MASK		GENMASK(29, 0)
+#define NUMA_FAULT_PROBE_KIND_ARMING		3U
 
 struct numa_local_fault_page_ext {
-	atomic64_t local_state;
+	/* seq[63:32] | install_ms modulo 2^30[31:2] | kind[1:0]. */
+	atomic64_t state;
+};
+
+enum numa_fault_probe_tier {
+	NUMA_FAULT_PROBE_LOCAL,
+	NUMA_FAULT_PROBE_REMOTE,
+	NUMA_FAULT_PROBE_TIERS,
+};
+
+static_assert(sizeof(struct numa_local_fault_page_ext) == sizeof(atomic64_t));
+static_assert(NUMA_FAULT_PROBE_REMOTE + 1 <
+	      NUMA_FAULT_PROBE_KIND_ARMING);
+static_assert(((NUMA_FAULT_PROBE_TIME_MASK << NUMA_FAULT_PROBE_TIME_SHIFT) |
+	       NUMA_FAULT_PROBE_KIND_MASK) == U32_MAX);
+
+struct numa_fault_window_counts {
+	u32 seq;
+	u64 protected_pages;
+	u64 cancelled_pages;
+	u64 dropped_fault_pages;
 };
 
 struct numa_fault_latency_kll_item {
@@ -55,6 +80,7 @@ struct numa_fault_latency_sketch_cpu {
 	spinlock_t lock;
 	struct numa_fault_latency_kll local;
 	struct numa_fault_latency_kll remote;
+	struct numa_fault_window_counts counts[NUMA_FAULT_PROBE_TIERS];
 };
 
 struct numa_fault_latency_sketch_snapshot {
@@ -65,6 +91,12 @@ struct numa_fault_latency_sketch_snapshot {
 	unsigned int item_capacity;
 	u64 local_total;
 	u64 remote_total;
+	u64 local_protected_pages;
+	u64 local_cancelled_pages;
+	u64 local_dropped_fault_pages;
+	u64 remote_protected_pages;
+	u64 remote_cancelled_pages;
+	u64 remote_dropped_fault_pages;
 };
 
 static u32 numa_local_fault_rate;
@@ -75,7 +107,6 @@ static u32 numa_local_fault_scan_size_mb =
 static atomic_long_t numa_local_fault_policy_seq = ATOMIC_LONG_INIT(1);
 static atomic_t numa_local_fault_window_seq = ATOMIC_INIT(1);
 static u32 numa_balancing_migration_enabled_state = 1;
-static u32 numa_remote_quantile_rank_ppm;
 static DEFINE_PER_CPU(struct numa_fault_latency_sketch_cpu,
 			      numa_fault_latency_sketch_pcpu);
 static atomic64_t numa_remote_scan_cycles;
@@ -154,6 +185,205 @@ static u32 numa_local_fault_window_seq_read(void)
 
 	atomic_set(&numa_local_fault_window_seq, 1);
 	return 1;
+}
+
+static u64 numa_fault_probe_state(u32 seq, u32 kind, u32 install_ms)
+{
+	u32 low = (install_ms & NUMA_FAULT_PROBE_TIME_MASK) <<
+		  NUMA_FAULT_PROBE_TIME_SHIFT;
+
+	low |= kind;
+	return (u64)seq << 32 | low;
+}
+
+static u32 numa_fault_probe_state_seq(u64 state)
+{
+	return state >> 32;
+}
+
+static enum numa_fault_probe_tier numa_fault_probe_state_tier(u64 state)
+{
+	u32 kind = (u32)state & NUMA_FAULT_PROBE_KIND_MASK;
+
+	if (kind == NUMA_FAULT_PROBE_REMOTE + 1)
+		return NUMA_FAULT_PROBE_REMOTE;
+	return NUMA_FAULT_PROBE_LOCAL;
+}
+
+static bool numa_fault_probe_state_active(u64 state)
+{
+	u32 kind = (u32)state & NUMA_FAULT_PROBE_KIND_MASK;
+
+	return kind == NUMA_FAULT_PROBE_LOCAL + 1 ||
+	       kind == NUMA_FAULT_PROBE_REMOTE + 1;
+}
+
+static u32 numa_fault_probe_state_install_ms(u64 state)
+{
+	return ((u32)state >> NUMA_FAULT_PROBE_TIME_SHIFT) &
+	       NUMA_FAULT_PROBE_TIME_MASK;
+}
+
+static u32 numa_fault_probe_latency_ms(u64 state)
+{
+	u32 now = (u32)jiffies_to_msecs(jiffies) &
+		  NUMA_FAULT_PROBE_TIME_MASK;
+
+	return (now - numa_fault_probe_state_install_ms(state)) &
+	       NUMA_FAULT_PROBE_TIME_MASK;
+}
+
+enum numa_fault_window_event {
+	NUMA_FAULT_WINDOW_PROTECTED,
+	NUMA_FAULT_WINDOW_CANCELLED,
+	NUMA_FAULT_WINDOW_DROPPED,
+};
+
+static struct numa_fault_window_counts *
+numa_fault_window_counts_get(struct numa_fault_latency_sketch_cpu *pcpu,
+			     u32 seq, enum numa_fault_probe_tier tier)
+{
+	struct numa_fault_window_counts *counts = &pcpu->counts[tier];
+
+	if (counts->seq != seq) {
+		if (counts->seq && (s32)(seq - counts->seq) < 0)
+			return NULL;
+		memset(counts, 0, sizeof(*counts));
+		counts->seq = seq;
+	}
+
+	return counts;
+}
+
+static void numa_fault_window_account(u32 seq, enum numa_fault_probe_tier tier,
+				      enum numa_fault_window_event event,
+				      unsigned long nr_pages)
+{
+	struct numa_fault_window_counts *counts;
+	struct numa_fault_latency_sketch_cpu *pcpu;
+	unsigned long flags;
+
+	if (!seq || !nr_pages)
+		return;
+
+	pcpu = get_cpu_ptr(&numa_fault_latency_sketch_pcpu);
+	spin_lock_irqsave(&pcpu->lock, flags);
+	counts = numa_fault_window_counts_get(pcpu, seq, tier);
+	if (counts) {
+		switch (event) {
+		case NUMA_FAULT_WINDOW_PROTECTED:
+			counts->protected_pages += nr_pages;
+			break;
+		case NUMA_FAULT_WINDOW_CANCELLED:
+			counts->cancelled_pages += nr_pages;
+			break;
+		case NUMA_FAULT_WINDOW_DROPPED:
+			counts->dropped_fault_pages += nr_pages;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&pcpu->lock, flags);
+	put_cpu_ptr(pcpu);
+}
+
+static bool numa_fault_arm_probe(struct folio *folio,
+				 enum numa_fault_probe_tier tier)
+{
+	struct numa_local_fault_page_ext *lf_ext;
+	struct page_ext *page_ext;
+	unsigned long nr_pages;
+	u64 active_state, old_state, pending_state;
+	u32 install_ms;
+	u32 seq;
+
+	if (!folio || folio_nr_pages(folio) != 1)
+		return false;
+	page_ext = page_ext_get(&folio->page);
+	if (!page_ext)
+		return false;
+
+	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
+	seq = numa_local_fault_window_seq_read();
+	install_ms = (u32)jiffies_to_msecs(jiffies);
+	active_state = numa_fault_probe_state(seq, tier + 1, install_ms);
+	pending_state = numa_fault_probe_state(seq,
+					       NUMA_FAULT_PROBE_KIND_ARMING,
+					       install_ms);
+	nr_pages = folio_nr_pages(folio);
+	old_state = atomic64_read(&lf_ext->state);
+	for (;;) {
+		u64 observed;
+
+		/* One folio contributes at most one opportunity per window. */
+		if (numa_fault_probe_state_seq(old_state) == seq) {
+			page_ext_put(page_ext);
+			return false;
+		}
+		observed = atomic64_cmpxchg(&lf_ext->state, old_state,
+					    pending_state);
+		if (observed == old_state)
+			break;
+		old_state = observed;
+	}
+
+	/*
+	 * PTE scan callers hold the mapping lock, so a protection fault
+	 * cannot consume this folio while it is ARMING. Publish the denominator
+	 * before making the active probe visible. If invalidation clears ARMING,
+	 * balance the protected opportunity with a cancellation below.
+	 */
+	numa_fault_window_account(seq, tier, NUMA_FAULT_WINDOW_PROTECTED,
+				  nr_pages);
+	if (numa_local_fault_window_seq_read() != seq) {
+		atomic64_cmpxchg(&lf_ext->state, pending_state, 0);
+		page_ext_put(page_ext);
+		numa_fault_window_account(seq, tier,
+					  NUMA_FAULT_WINDOW_CANCELLED, nr_pages);
+		return false;
+	}
+	if (atomic64_cmpxchg(&lf_ext->state, pending_state, active_state) !=
+	    pending_state) {
+		page_ext_put(page_ext);
+		numa_fault_window_account(seq, tier,
+					  NUMA_FAULT_WINDOW_CANCELLED, nr_pages);
+		return false;
+	}
+	page_ext_put(page_ext);
+	return true;
+}
+
+static u64 numa_fault_take_probe(struct folio *folio,
+				 enum numa_fault_probe_tier tier)
+{
+	struct numa_local_fault_page_ext *lf_ext;
+	struct page_ext *page_ext;
+	u64 old_state, seen_state;
+
+	if (!folio)
+		return 0;
+	page_ext = page_ext_get(&folio->page);
+	if (!page_ext)
+		return 0;
+
+	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
+	old_state = atomic64_read(&lf_ext->state);
+	for (;;) {
+		u64 observed;
+
+		if (!numa_fault_probe_state_active(old_state) ||
+		    numa_fault_probe_state_tier(old_state) != tier) {
+			old_state = 0;
+			break;
+		}
+		seen_state = (u64)numa_fault_probe_state_seq(old_state) << 32;
+		observed = atomic64_cmpxchg(&lf_ext->state, old_state,
+					    seen_state);
+		if (observed == old_state)
+			break;
+		old_state = observed;
+	}
+	page_ext_put(page_ext);
+	return old_state;
 }
 
 static u64 numa_fault_latency_ms_to_ns(u32 latency_ms)
@@ -294,8 +524,11 @@ static void numa_fault_latency_kll_add(struct numa_fault_latency_kll *sketch,
 
 	if (!seq || !nr_pages)
 		return;
-	if (sketch->seq != seq)
+	if (sketch->seq != seq) {
+		if (sketch->seq && (s32)(seq - sketch->seq) < 0)
+			return;
 		numa_fault_latency_kll_reset(sketch, seq);
+	}
 
 	sketch->total_weight += nr_pages;
 	numa_fault_latency_kll_insert_weighted(sketch, 0, item);
@@ -377,12 +610,31 @@ static void numa_fault_latency_snapshot_collect(
 	struct numa_fault_latency_sketch_snapshot *snapshot, u32 seq)
 {
 	struct numa_fault_latency_sketch_cpu *pcpu;
+	struct numa_fault_window_counts *local_counts, *remote_counts;
 	unsigned long flags;
 	unsigned int cpu, copied;
 
 	for_each_possible_cpu(cpu) {
 		pcpu = per_cpu_ptr(&numa_fault_latency_sketch_pcpu, cpu);
 		spin_lock_irqsave(&pcpu->lock, flags);
+		local_counts = &pcpu->counts[NUMA_FAULT_PROBE_LOCAL];
+		remote_counts = &pcpu->counts[NUMA_FAULT_PROBE_REMOTE];
+		if (local_counts->seq == seq) {
+			snapshot->local_protected_pages +=
+				local_counts->protected_pages;
+			snapshot->local_cancelled_pages +=
+				local_counts->cancelled_pages;
+			snapshot->local_dropped_fault_pages +=
+				local_counts->dropped_fault_pages;
+		}
+		if (remote_counts->seq == seq) {
+			snapshot->remote_protected_pages +=
+				remote_counts->protected_pages;
+			snapshot->remote_cancelled_pages +=
+				remote_counts->cancelled_pages;
+			snapshot->remote_dropped_fault_pages +=
+				remote_counts->dropped_fault_pages;
+		}
 		if (pcpu->local.seq == seq) {
 			snapshot->local_total += pcpu->local.total_weight;
 			copied = numa_fault_latency_kll_copy_items(
@@ -416,20 +668,20 @@ static void numa_fault_latency_snapshot_collect(
 
 static u64 numa_fault_latency_sketch_quantile_ppm_ns(
 	const struct numa_fault_latency_kll_item *items, unsigned int count,
-	u64 total, u32 rank_ppm)
+	u64 total, u32 quantile_ppm)
 {
 	u64 quotient, remainder, threshold, cumulative = 0;
 	unsigned int i;
 
-	if (!total || !count || !rank_ppm ||
-	    rank_ppm > NUMA_FAULT_LATENCY_PPM)
+	if (!total || !count || !quantile_ppm ||
+	    quantile_ppm > NUMA_FAULT_LATENCY_PPM)
 		return 0;
 
-	/* Calculate ceil(total * rank_ppm / PPM) without overflowing u64. */
+	/* Calculate ceil(total * quantile_ppm / PPM) without overflowing u64. */
 	quotient = div64_u64(total, NUMA_FAULT_LATENCY_PPM);
 	remainder = total % NUMA_FAULT_LATENCY_PPM;
-	threshold = quotient * rank_ppm;
-	threshold += div64_u64(remainder * rank_ppm +
+	threshold = quotient * quantile_ppm;
+	threshold += div64_u64(remainder * quantile_ppm +
 			       NUMA_FAULT_LATENCY_PPM - 1,
 			       NUMA_FAULT_LATENCY_PPM);
 
@@ -473,6 +725,7 @@ static void numa_fault_latency_sketch_init(void)
 		spin_lock_init(&pcpu->lock);
 		numa_fault_latency_kll_reset(&pcpu->local, 0);
 		numa_fault_latency_kll_reset(&pcpu->remote, 0);
+		memset(pcpu->counts, 0, sizeof(pcpu->counts));
 	}
 }
 
@@ -508,33 +761,16 @@ static u64 numa_local_fault_read_state(struct folio *folio)
 		return 0;
 
 	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
-	state = atomic64_read(&lf_ext->local_state);
+	state = atomic64_read(&lf_ext->state);
 	page_ext_put(page_ext);
 
-	return state;
+	return numa_fault_probe_state_seq(state);
 }
 
 static bool numa_local_fault_seen(struct folio *folio)
 {
 	return numa_local_fault_read_state(folio) ==
 	       numa_local_fault_window_seq_read();
-}
-
-static void numa_local_fault_mark_seen(struct folio *folio)
-{
-	struct numa_local_fault_page_ext *lf_ext;
-	struct page_ext *page_ext;
-
-	if (!folio || folio_nr_pages(folio) != 1)
-		return;
-
-	page_ext = page_ext_get(&folio->page);
-	if (!page_ext)
-		return;
-
-	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
-	atomic64_set(&lf_ext->local_state, numa_local_fault_window_seq_read());
-	page_ext_put(page_ext);
 }
 
 static bool numa_should_sample_local_fault_bias(struct folio *folio,
@@ -562,42 +798,92 @@ static bool numa_should_sample_local_fault_bias(struct folio *folio,
 	return true;
 }
 
-void numa_account_local_fault_pte(struct folio *folio)
+bool numa_account_local_fault_pte(struct folio *folio)
 {
-	numa_local_fault_mark_seen(folio);
+	return numa_fault_arm_probe(folio, NUMA_FAULT_PROBE_LOCAL);
 }
 
 void numa_account_local_fault_refault(struct folio *folio,
-				      unsigned long nr_pages,
-				      unsigned int latency_ms)
+				      unsigned long nr_pages)
 {
+	u64 probe_state;
 	u32 fault_seq;
 
+	if (!folio || !nr_pages || folio_nr_pages(folio) != 1)
+		return;
+
+	probe_state = numa_fault_take_probe(folio, NUMA_FAULT_PROBE_LOCAL);
 	fault_seq = numa_local_fault_window_seq_read();
-	numa_local_fault_mark_seen(folio);
-	numa_fault_latency_sketch_add(true, fault_seq, latency_ms, nr_pages);
+	if (!probe_state || numa_fault_probe_state_seq(probe_state) != fault_seq) {
+		numa_fault_window_account(fault_seq, NUMA_FAULT_PROBE_LOCAL,
+					  NUMA_FAULT_WINDOW_DROPPED, nr_pages);
+		return;
+	}
+	numa_fault_latency_sketch_add(true, fault_seq,
+				      numa_fault_probe_latency_ms(probe_state),
+				      nr_pages);
 }
 
 void numa_account_remote_fault_latency(struct folio *folio,
-				       unsigned long nr_pages,
-				       unsigned int latency_ms)
+				       unsigned long nr_pages)
 {
+	u64 probe_state;
 	u32 fault_seq;
 
 	if (!numa_local_fault_sampling_enabled() || !folio || !nr_pages ||
+	    folio_nr_pages(folio) != 1 ||
 	    !folio_use_access_time(folio))
 		return;
 
+	probe_state = numa_fault_take_probe(folio, NUMA_FAULT_PROBE_REMOTE);
 	fault_seq = numa_local_fault_window_seq_read();
-	numa_fault_latency_sketch_add(false, fault_seq, latency_ms, nr_pages);
+	if (!probe_state || numa_fault_probe_state_seq(probe_state) != fault_seq) {
+		numa_fault_window_account(fault_seq, NUMA_FAULT_PROBE_REMOTE,
+					  NUMA_FAULT_WINDOW_DROPPED, nr_pages);
+		return;
+	}
+	numa_fault_latency_sketch_add(false, fault_seq,
+				      numa_fault_probe_latency_ms(probe_state),
+				      nr_pages);
 }
 
-void numa_account_remote_scan_pte(struct mm_struct *mm)
+bool numa_account_remote_scan_pte(struct mm_struct *mm, struct folio *folio)
 {
-	if (!numa_local_fault_sampling_enabled() || !mm)
-		return;
+	if (!numa_local_fault_sampling_enabled() || !mm || !folio)
+		return false;
 
 	WRITE_ONCE(mm->numa_remote_scan_seen, true);
+	/* Large folios report scan progress but do not carry latency probes. */
+	if (folio_nr_pages(folio) != 1)
+		return false;
+	return numa_fault_arm_probe(folio, NUMA_FAULT_PROBE_REMOTE);
+}
+
+void numa_account_fault_probe_cancel(struct folio *folio)
+{
+	struct numa_local_fault_page_ext *lf_ext;
+	struct page_ext *page_ext;
+	unsigned long nr_pages;
+	u64 state;
+
+	if (!folio)
+		return;
+	page_ext = page_ext_get(&folio->page);
+	if (!page_ext)
+		return;
+	lf_ext = page_ext_data(page_ext, &numa_local_fault_page_ext_ops);
+	state = atomic64_xchg(&lf_ext->state, 0);
+	page_ext_put(page_ext);
+
+	if (!numa_fault_probe_state_active(state))
+		return;
+	if (numa_fault_probe_state_seq(state) !=
+	    numa_local_fault_window_seq_read())
+		return;
+	nr_pages = folio_nr_pages(folio);
+	numa_fault_window_account(numa_fault_probe_state_seq(state),
+				  numa_fault_probe_state_tier(state),
+				  NUMA_FAULT_WINDOW_CANCELLED, nr_pages);
 }
 
 void numa_account_remote_scan_cycle(struct mm_struct *mm)
@@ -691,8 +977,7 @@ unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
 		if (unlikely(page_folio(page) != folio ||
 				     !folio_test_lru(folio)) ||
 		    folio_nr_pages(folio) != 1 || folio_nid(folio) != nid ||
-		    !folio_mapped(folio) ||
-		    folio_test_local_tiering_sampled(folio))
+		    !folio_mapped(folio))
 			goto put_folio;
 
 		if (numa_should_sample_local_fault_bias(folio, bias) &&
@@ -906,47 +1191,13 @@ static ssize_t remote_scan_cycles_show(struct kobject *kobj,
 static struct kobj_attribute remote_scan_cycles_attr =
 	__ATTR_RO(remote_scan_cycles);
 
-static ssize_t remote_quantile_rank_ppm_show(struct kobject *kobj,
-					     struct kobj_attribute *attr,
-					     char *buf)
-{
-	return sysfs_emit(buf, "%u\n",
-			  READ_ONCE(numa_remote_quantile_rank_ppm));
-}
-
-static ssize_t remote_quantile_rank_ppm_store(struct kobject *kobj,
-					      struct kobj_attribute *attr,
-					      const char *buf, size_t count)
-{
-	unsigned int rank_ppm;
-	int ret;
-
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	ret = kstrtouint(buf, 0, &rank_ppm);
-	if (ret)
-		return ret;
-	if (rank_ppm > NUMA_FAULT_LATENCY_PPM)
-		return -EINVAL;
-
-	WRITE_ONCE(numa_remote_quantile_rank_ppm, rank_ppm);
-	return count;
-}
-
-static struct kobj_attribute remote_quantile_rank_ppm_attr =
-	__ATTR_RW(remote_quantile_rank_ppm);
-
 static ssize_t fault_latency_quantiles_show(struct kobject *kobj,
 					    struct kobj_attribute *attr,
 					    char *buf)
 {
-	u32 remote_query_rank_ppm =
-		READ_ONCE(numa_remote_quantile_rank_ppm);
 	u32 seq = numa_local_fault_window_seq_read();
 	struct numa_fault_latency_sketch_snapshot snapshot;
-	u64 local_p75_ns, remote_query_q_ns = 0;
-	bool remote_query_valid;
+	u64 local_p75_ns;
 	ssize_t len = 0;
 	int ret;
 
@@ -957,15 +1208,8 @@ static ssize_t fault_latency_quantiles_show(struct kobject *kobj,
 	local_p75_ns = numa_fault_latency_sketch_quantile_ppm_ns(
 		snapshot.local_items, snapshot.local_items_count,
 		snapshot.local_total, 750000);
-	remote_query_valid = remote_query_rank_ppm &&
-		remote_query_rank_ppm <= NUMA_FAULT_LATENCY_PPM &&
-		snapshot.remote_total && snapshot.remote_items_count;
-	if (remote_query_valid)
-		remote_query_q_ns = numa_fault_latency_sketch_quantile_ppm_ns(
-			snapshot.remote_items, snapshot.remote_items_count,
-			snapshot.remote_total, remote_query_rank_ppm);
 
-	len += sysfs_emit_at(buf, len, "schema quantile_snapshot_v4\n");
+	len += sysfs_emit_at(buf, len, "schema quantile_snapshot_v5\n");
 	len += sysfs_emit_at(buf, len, "window_seq %u\n", seq);
 	len += sysfs_emit_at(buf, len, "algorithm kll_weighted_ms_v1\n");
 	len += sysfs_emit_at(buf, len, "value_source sketch_latency_ms_to_ns\n");
@@ -973,13 +1217,31 @@ static ssize_t fault_latency_quantiles_show(struct kobject *kobj,
 			     snapshot.local_total);
 	len += sysfs_emit_at(buf, len, "remote_total %llu\n",
 			     snapshot.remote_total);
+	len += sysfs_emit_at(buf, len, "local_protected_pages %llu\n",
+			     snapshot.local_protected_pages);
+	len += sysfs_emit_at(buf, len, "local_cancelled_pages %llu\n",
+			     snapshot.local_cancelled_pages);
+	len += sysfs_emit_at(buf, len, "local_dropped_fault_pages %llu\n",
+			     snapshot.local_dropped_fault_pages);
+	len += sysfs_emit_at(buf, len, "remote_protected_pages %llu\n",
+			     snapshot.remote_protected_pages);
+	len += sysfs_emit_at(buf, len, "remote_cancelled_pages %llu\n",
+			     snapshot.remote_cancelled_pages);
+	len += sysfs_emit_at(buf, len, "remote_dropped_fault_pages %llu\n",
+			     snapshot.remote_dropped_fault_pages);
 	len += sysfs_emit_at(buf, len, "local_q75_ns %llu\n", local_p75_ns);
-	len += sysfs_emit_at(buf, len, "remote_query_rank_ppm %u\n",
-			     remote_query_rank_ppm);
-	len += sysfs_emit_at(buf, len, "remote_query_q_ns %llu\n",
-			     remote_query_q_ns);
-	len += sysfs_emit_at(buf, len, "remote_query_valid %u\n",
-			     remote_query_valid);
+	len += sysfs_emit_at(buf, len,
+			     "local_cdf_lt_local_q75_ppm %llu\n",
+			     numa_fault_latency_sketch_cdf_ppm(snapshot.local_items,
+							       snapshot.local_items_count,
+							       snapshot.local_total,
+							       local_p75_ns, false));
+	len += sysfs_emit_at(buf, len,
+			     "local_cdf_le_local_q75_ppm %llu\n",
+			     numa_fault_latency_sketch_cdf_ppm(snapshot.local_items,
+							       snapshot.local_items_count,
+							       snapshot.local_total,
+							       local_p75_ns, true));
 	len += sysfs_emit_at(buf, len,
 			     "remote_cdf_lt_local_q75_ppm %llu\n",
 			     numa_fault_latency_sketch_cdf_ppm(
@@ -1040,7 +1302,6 @@ static struct attribute *numa_balancing_attrs[] = {
 	&local_fault_scan_size_mb_attr.attr,
 	&local_fault_window_attr.attr,
 	&remote_scan_cycles_attr.attr,
-	&remote_quantile_rank_ppm_attr.attr,
 	&fault_latency_quantiles_attr.attr,
 	&migration_enabled_attr.attr,
 	NULL,

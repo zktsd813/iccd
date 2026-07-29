@@ -38,6 +38,7 @@
 #include <linux/sched/cputime.h>
 #include <linux/sched/isolation.h>
 #include <linux/sched/nohz.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/sched/prio.h>
 
 #include <linux/cpuidle.h>
@@ -1994,7 +1995,7 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 		pgdat = NODE_DATA(dst_nid);
 
 		latency = numa_hint_fault_latency(folio);
-		numa_account_remote_fault_latency(folio, nr, latency);
+		numa_account_remote_fault_latency(folio, nr);
 
 		if (!numa_balancing_migration_enabled())
 			return false;
@@ -3265,7 +3266,6 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	 * NUMA faults statistics are unnecessary for the slow memory
 	 * node for memory tiering mode.
 	 */
-	//TODO
 	if (!node_is_toptier(mem_node) &&
 	    (numa_balancing_mode_tiering(task_numa_balancing_mode(p)) ||
 	     !cpupid_valid(last_cpupid)))
@@ -3470,11 +3470,6 @@ static bool task_numa_local_fault_scan_due(struct task_struct *p)
 		return true;
 
 	return !time_before(jiffies, READ_ONCE(state->next_scan));
-}
-
-static unsigned int task_numa_sampler_scan_period_ms(struct task_struct *p)
-{
-	return task_numa_local_fault_scan_period_ms(p);
 }
 
 static bool task_numa_try_scan_local_faults(struct task_struct *p,
@@ -4028,7 +4023,7 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 #ifdef CONFIG_NUMA_BALANCING_MT
 	task_numa_sync_scan_policy(curr);
 
-	sampler_scan_period = task_numa_sampler_scan_period_ms(curr);
+	sampler_scan_period = task_numa_local_fault_scan_period_ms(curr);
 	if (sampler_scan_period && sampler_work->next == sampler_work) {
 		sampler_period = (u64)sampler_scan_period * NSEC_PER_MSEC;
 		if (!curr->numa_sampler_stamp)

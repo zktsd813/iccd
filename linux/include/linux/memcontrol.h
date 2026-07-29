@@ -23,7 +23,6 @@
 #include <linux/writeback.h>
 #include <linux/page-flags.h>
 #include <linux/shrinker.h>
-#include <linux/sched/sysctl.h>
 #include <linux/wait.h>
 #include <linux/types.h>
 
@@ -31,7 +30,6 @@ struct mem_cgroup;
 struct obj_cgroup;
 struct page;
 struct mm_struct;
-struct numa_local_fault_node_state;
 struct kmem_cache;
 struct task_struct;
 
@@ -757,109 +755,6 @@ struct mem_cgroup *get_mem_cgroup_from_current(void);
 
 struct mem_cgroup *get_mem_cgroup_from_folio(struct folio *folio);
 
-#ifdef CONFIG_NUMA_BALANCING_MT
-bool numa_local_fault_sampling_enabled(void);
-bool numa_balancing_migration_enabled(void);
-unsigned long numa_local_fault_policy_seq_read(void);
-void numa_account_local_fault_pte(struct folio *folio);
-void numa_account_local_fault_refault(struct folio *folio,
-				      unsigned long nr_pages,
-				      unsigned int latency_ms);
-void numa_account_remote_fault_latency(struct folio *folio,
-				       unsigned long nr_pages,
-				       unsigned int latency_ms);
-void numa_account_remote_scan_pte(struct mm_struct *mm);
-void numa_account_remote_scan_cycle(struct mm_struct *mm);
-unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
-unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
-unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
-					  unsigned long max_pte_updates,
-					  struct numa_local_fault_node_state *scan_state);
-#else
-static inline bool numa_local_fault_sampling_enabled(void)
-{
-	return false;
-}
-
-static inline bool numa_balancing_migration_enabled(void)
-{
-	return true;
-}
-
-static inline unsigned long numa_local_fault_policy_seq_read(void)
-{
-	return 0;
-}
-
-static inline void numa_account_local_fault_pte(struct folio *folio)
-{
-}
-
-static inline void numa_account_local_fault_refault(struct folio *folio,
-						   unsigned long nr_pages,
-						   unsigned int latency_ms)
-{
-}
-
-static inline void numa_account_remote_fault_latency(struct folio *folio,
-						    unsigned long nr_pages,
-						    unsigned int latency_ms)
-{
-}
-
-static inline void numa_account_remote_scan_pte(struct mm_struct *mm)
-{
-}
-
-static inline void numa_account_remote_scan_cycle(struct mm_struct *mm)
-{
-}
-
-static inline unsigned int task_numa_local_fault_scan_period_ms(
-	struct task_struct *p)
-{
-	return 0;
-}
-
-static inline unsigned int task_numa_local_fault_scan_size_mb(
-	struct task_struct *p)
-{
-	return 0;
-}
-
-static inline unsigned long task_numa_scan_local_faults(struct task_struct *p,
-							int nid,
-							unsigned long max_pte_updates,
-							struct numa_local_fault_node_state *scan_state)
-{
-	return 0;
-}
-
-#endif
-
-static inline int task_numa_balancing_mode(struct task_struct *p)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
-}
-
-static inline bool task_numa_local_fault_sampling_enabled(struct task_struct *p)
-{
-	if (!p || !p->mm)
-		return false;
-
-	return numa_local_fault_sampling_enabled();
-}
-
-static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
-{
-	return numa_local_fault_policy_seq_read();
-}
-
-static inline int folio_numa_balancing_mode(struct folio *folio)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
-}
-
 struct lruvec *folio_lruvec_lock(struct folio *folio);
 struct lruvec *folio_lruvec_lock_irq(struct folio *folio);
 struct lruvec *folio_lruvec_lock_irqsave(struct folio *folio,
@@ -1350,108 +1245,6 @@ static inline struct mem_cgroup *get_mem_cgroup_from_current(void)
 static inline struct mem_cgroup *get_mem_cgroup_from_folio(struct folio *folio)
 {
 	return NULL;
-}
-
-#ifdef CONFIG_NUMA_BALANCING_MT
-bool numa_local_fault_sampling_enabled(void);
-bool numa_balancing_migration_enabled(void);
-unsigned long numa_local_fault_policy_seq_read(void);
-void numa_account_local_fault_pte(struct folio *folio);
-void numa_account_local_fault_refault(struct folio *folio,
-				      unsigned long nr_pages,
-				      unsigned int latency_ms);
-void numa_account_remote_fault_latency(struct folio *folio,
-				       unsigned long nr_pages,
-				       unsigned int latency_ms);
-void numa_account_remote_scan_pte(struct mm_struct *mm);
-void numa_account_remote_scan_cycle(struct mm_struct *mm);
-unsigned int task_numa_local_fault_scan_period_ms(struct task_struct *p);
-unsigned int task_numa_local_fault_scan_size_mb(struct task_struct *p);
-unsigned long task_numa_scan_local_faults(struct task_struct *p, int nid,
-					  unsigned long max_pte_updates,
-					  struct numa_local_fault_node_state *scan_state);
-#else
-static inline bool numa_local_fault_sampling_enabled(void)
-{
-	return false;
-}
-
-static inline bool numa_balancing_migration_enabled(void)
-{
-	return true;
-}
-
-static inline unsigned long numa_local_fault_policy_seq_read(void)
-{
-	return 0;
-}
-
-static inline void numa_account_local_fault_pte(struct folio *folio)
-{
-}
-
-static inline void numa_account_local_fault_refault(struct folio *folio,
-						   unsigned long nr_pages,
-						   unsigned int latency_ms)
-{
-}
-
-static inline void numa_account_remote_fault_latency(struct folio *folio,
-						    unsigned long nr_pages,
-						    unsigned int latency_ms)
-{
-}
-
-static inline void numa_account_remote_scan_pte(struct mm_struct *mm)
-{
-}
-
-static inline void numa_account_remote_scan_cycle(struct mm_struct *mm)
-{
-}
-static inline unsigned int task_numa_local_fault_scan_period_ms(
-	struct task_struct *p)
-{
-	return 0;
-}
-
-static inline unsigned int task_numa_local_fault_scan_size_mb(
-	struct task_struct *p)
-{
-	return 0;
-}
-
-static inline unsigned long task_numa_scan_local_faults(struct task_struct *p,
-							int nid,
-							unsigned long max_pte_updates,
-							struct numa_local_fault_node_state *scan_state)
-{
-	return 0;
-}
-
-#endif
-
-static inline int task_numa_balancing_mode(struct task_struct *p)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
-}
-
-static inline bool task_numa_local_fault_sampling_enabled(struct task_struct *p)
-{
-	if (!p || !p->mm)
-		return false;
-
-	return numa_local_fault_sampling_enabled();
-}
-
-static inline unsigned long task_numa_balancing_policy_seq(struct task_struct *p)
-{
-	return numa_local_fault_policy_seq_read();
-}
-
-static inline int folio_numa_balancing_mode(struct folio *folio)
-{
-	return READ_ONCE(sysctl_numa_balancing_mode);
 }
 
 static inline

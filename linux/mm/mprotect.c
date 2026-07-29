@@ -30,6 +30,7 @@
 #include <linux/mm_inline.h>
 #include <linux/pgtable.h>
 #include <linux/memcontrol.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/sched/sysctl.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/memory-tiers.h>
@@ -121,15 +122,13 @@ static int mprotect_folio_pte_batch(struct folio *folio, pte_t *ptep,
 
 static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 			   pte_t oldpte, pte_t *pte, int target_node,
-			   struct folio *folio)
+			   struct folio *folio, bool *rearm_remote)
 {
 	bool ret = true;
 	bool toptier;
 	int nid;
 
-	/* Avoid TLB flush if possible */
-	if (pte_protnone(oldpte))
-		goto skip;
+	*rearm_remote = false;
 
 	if (!folio)
 		goto skip;
@@ -172,6 +171,11 @@ static bool prot_numa_skip(struct vm_area_struct *vma, unsigned long addr,
 	if (!(task_numa_balancing_mode(current) & NUMA_BALANCING_NORMAL) &&
 	    toptier)
 		goto skip;
+
+	if (pte_protnone(oldpte)) {
+		*rearm_remote = folio_use_access_time(folio);
+		goto skip;
+	}
 
 	ret = false;
 
@@ -317,9 +321,20 @@ static long change_pte_range(struct mmu_gather *tlb,
 			 * pages. See similar comment in change_huge_pmd.
 			 */
 			if (prot_numa) {
+				bool rearm_remote;
 				int ret = prot_numa_skip(vma, addr, oldpte, pte,
-							 target_node, folio);
+							 target_node, folio,
+							 &rearm_remote);
 				if (ret) {
+					/*
+					 * A cold PTE_NUMA page is still a protected
+					 * opportunity in this window. Rearm only the
+					 * probe timestamp; Linux access_time keeps
+					 * the original NUMA-scan timestamp.
+					 */
+					if (rearm_remote)
+						numa_account_remote_scan_pte(vma->vm_mm,
+									     folio);
 					/* determine batch to skip */
 					nr_ptes = mprotect_folio_pte_batch(folio,
 						  pte, oldpte, max_nr_ptes, /* flags = */ 0);
@@ -329,7 +344,7 @@ static long change_pte_range(struct mmu_gather *tlb,
 
 			nr_ptes = mprotect_folio_pte_batch(folio, pte, oldpte, max_nr_ptes, flags);
 			if (prot_numa && folio && folio_use_access_time(folio)) {
-				numa_account_remote_scan_pte(vma->vm_mm);
+				numa_account_remote_scan_pte(vma->vm_mm, folio);
 				folio_xchg_access_time(folio,
 						       jiffies_to_msecs(jiffies));
 			}

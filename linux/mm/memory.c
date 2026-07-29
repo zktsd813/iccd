@@ -5868,9 +5868,6 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 {
 	struct vm_area_struct *vma = vmf->vma;
 	bool local_fault_refault = false;
-#ifdef CONFIG_NUMA_BALANCING_MT
-	unsigned int sample_refault_latency = 0;
-#endif
 	int target_nid;
 
 	if (sample_refault)
@@ -5897,13 +5894,11 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 #ifdef CONFIG_NUMA_BALANCING_MT
 	if (folio_test_clear_local_tiering_sampled(folio)) {
 		int time = jiffies_to_msecs(jiffies);
-		int last_time = folio_xchg_access_time(folio, time);
 
+		folio_xchg_access_time(folio, time);
 		local_fault_refault = true;
 		if (sample_refault)
 			*sample_refault = true;
-		sample_refault_latency = (time - last_time) &
-					 PAGE_ACCESS_TIME_MASK;
 		folio_xchg_last_cpupid(folio,
 				       cpu_pid_to_cpupid(task_cpu(current),
 							 current->pid));
@@ -5932,8 +5927,7 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 	if (local_fault_refault) {
 		unsigned long nr_pages = folio_nr_pages(folio);
 
-		numa_account_local_fault_refault(folio, nr_pages,
-						 sample_refault_latency);
+		numa_account_local_fault_refault(folio, nr_pages);
 	}
 #endif
 	if (folio_nid(folio) == numa_node_id()) {

@@ -20,7 +20,9 @@ and multiple memory-pressure modes.
   `copy`, and `triad`, with optional `--bw-stride` and `--bw-block`
   traversal shaping
 - `pc`: true pointer-chasing over a permutation ring with configurable chain
-  count to control exposed MLP
+  count to control exposed MLP. `--pc-chains 1` is a low-MLP dependent-load
+  stream; larger chain counts keep each chain dependent but expose independent
+  chains to the core.
 - `mix`: concurrent `bw` and `pc` thread groups in one process
 - `skewed-hotset`: page-granular hot/cold random access with configurable hot
   set size, hot-access probability, and read/write/rmw ratio
@@ -64,8 +66,10 @@ The project uses `gcc`, `pthread`, and `libnuma`.
 - `--pc-chains 1`
 - `--ops-per-pass 65536`
 - `--target-ops 1000000000`
+- `--phase-boundary-probe LABEL:OFFSET:SIZE`
 - `--pause-ns 100000`
-- `--placement none|bind:0|interleave:0,1|split:0,1`
+- `--placement none|bind:0|interleave:0,1|split:0,1|window-split:0,1|arena-split:0,1`
+- `--arena-split-local 32G`
 - `--bw-kernel read|write|copy|triad`
 - `--bw-stride 1`
 - `--bw-block 2M`
@@ -74,6 +78,9 @@ The project uses `gcc`, `pthread`, and `libnuma`.
 - `--hotset-read-pct 100`
 - `--hotset-write-pct 0`
 - `--hotset-rmw-pct 0`
+- `--hotset-shared-window`
+- `--hotset-tail`
+- `--hotset-background-pages 1024`
 - `--index-kernel gather|scatter|rmw`
 - `--index-distribution uniform|zipf|clustered|segmented`
 - `--index-zipf-alpha 1.2`
@@ -94,9 +101,85 @@ Example:
   --hotset-pages 1024 --hot-prob-pct 95 --move-policy sweep
 ```
 
+By default, each hotset worker receives a private slice and the hot pages are
+at the start of that slice. `--hotset-shared-window` makes every worker access
+the complete logical window while retaining an independent random sequence.
+`--hotset-tail` places the hot pages at the end of the window and treats its
+leading pages as the background set. These flags make a single global hot/cold
+boundary explicit instead of relying on bandwidth-worker slicing behavior.
+In tail mode, `--hotset-background-pages N` restricts background accesses to
+the first `N` pages while leaving any gap between that prefix and the tail
+hotset untouched. Its default value, zero, preserves the original behavior of
+using every non-hot page as background.
+
 ```bash
 ./mbench --mode irregular-index --index-kernel rmw \
   --arena-size 1G --window-size 256M --move-policy random
+```
+
+`arena-split` first-touches the leading `--arena-split-local` bytes on the
+first node and the rest of the entire arena on the second node. It uses only a
+temporary thread memory policy and restores the default policy after prefault;
+it does not leave an `mbind` policy on the mapping. The split is independent of
+the active window, so a tail window remains remote initially. This placement
+requires prefaulting and therefore rejects `--no-prefault`:
+
+```bash
+./mbench --mode skewed-hotset --arena-size 64G --window-size 4G \
+  --window-offset 60G --placement arena-split:0,1 \
+  --arena-split-local 32G --target-ops 1000000000
+```
+
+For a phase preset, `--phase-boundary-probe` adds an opt-in NUMA residency
+snapshot after each phase 1 worker has stopped and before its paired phase 2
+is applied. The option is repeatable and accepts arena-relative byte ranges:
+
+```bash
+./mbench --phase-preset sparse64-weighted8g --arena-size 64G \
+  --window-size 64G --placement arena-split:0,1 \
+  --arena-split-local 24G \
+  --phase-boundary-probe local_background:0:24G \
+  --phase-boundary-probe remote_hotset:60G:4G
+```
+
+Each range samples one page at deterministic 1 MiB intervals. The probe calls
+`move_pages` for the current process with `nodes=NULL` and `flags=0`; it only
+queries page locations and does not read, fault, or request migration of arena
+pages. Each requested range emits one machine-readable stderr record:
+
+```text
+phase_boundary_residency boundary_index=1 after_phase_id=1 before_phase_id=2 label=remote_hotset offset_bytes=64424509440 size_bytes=4294967296 stride_bytes=1048576 samples=4096 node0=0 node1=4096 other_nodes=0 errors=0 query_errno=0
+```
+
+### MLP ladder / intermediate MLP
+
+Use the `pc` mode to build a controlled MLP ladder without changing the access
+model. Each chain still executes a true dependent pointer chase, but multiple
+chains create independent misses that the core can overlap.
+
+```bash
+# Low MLP: one dependent chain.
+./mbench --mode pc --threads 1 --pc-chains 1 \
+  --arena-size 4G --window-size 4G --pc-pattern random \
+  --ops-per-pass 1000000 --sample-ms 1000 --csv
+
+# Middle MLP: four independent dependent chains on one worker.
+./mbench --mode pc --threads 1 --pc-chains 4 \
+  --arena-size 4G --window-size 4G --pc-pattern random \
+  --ops-per-pass 1000000 --sample-ms 1000 --csv
+
+# Aggregate middle MLP: modest per-core MLP with a few workers.
+./mbench --mode pc --threads 4 --pc-chains 2 \
+  --arena-size 4G --window-size 4G --pc-pattern random \
+  --ops-per-pass 1000000 --sample-ms 1000 --csv
+```
+
+The helper script below runs the same idea as a repeatable benchmark and writes
+one CSV per chain count:
+
+```bash
+Microbenchmark/scripts/mbench-mlp-ladder.sh --profile ladder --build
+Microbenchmark/scripts/mbench-mlp-ladder.sh --profile mid
 ```
 
 ## Request Shaping
@@ -205,4 +288,5 @@ main throughput or pointer-chase rate counters.
 - `src/core/`: config, allocation, placement, timing, and reporting
 - `src/kernels/`: bandwidth, pointer-chase, mixed-mode, skewed-hotset, and
   irregular-index kernels
-- `scripts/`: smoke runs and example sweeps
+- `scripts/`: smoke runs and example sweeps, including
+  `mbench-arena-split-smoke.sh` for validating arena-wide first-touch residency

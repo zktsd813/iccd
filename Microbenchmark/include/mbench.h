@@ -14,6 +14,9 @@ extern "C" {
 
 #define MBENCH_MAX_NUMA_NODES 16
 #define MBENCH_PHASE_NAME_MAX 32
+#define MBENCH_MAX_PHASE_BOUNDARY_PROBES 16
+#define MBENCH_PROBE_LABEL_MAX 32
+#define MBENCH_PHASE_BOUNDARY_PROBE_STRIDE (1024ULL * 1024ULL)
 
 enum mbench_mode {
     MBENCH_MODE_PC = 0,
@@ -37,6 +40,7 @@ enum mbench_placement_kind {
     MBENCH_PLACEMENT_PREFERRED = 3,
     MBENCH_PLACEMENT_SPLIT = 4,
     MBENCH_PLACEMENT_WINDOW_SPLIT = 5,
+    MBENCH_PLACEMENT_ARENA_SPLIT = 6,
 };
 
 enum mbench_bw_kernel {
@@ -94,6 +98,16 @@ enum mbench_phase_preset {
     MBENCH_PHASE_PRESET_MOVE60S4G_REMOTE_SPLIT32 = 14,
     MBENCH_PHASE_PRESET_FIXED4G_REMOTE_SPLIT32 = 15,
     MBENCH_PHASE_PRESET_FIXED8G_REMOTE_SPLIT32 = 16,
+    MBENCH_PHASE_PRESET_SPARSE64_MULSHIFT4G = 17,
+    MBENCH_PHASE_PRESET_SPARSE64_WEIGHTED8G = 18,
+    MBENCH_PHASE_PRESET_SPARSE60_DISJOINT8G = 19,
+    MBENCH_PHASE_PRESET_SPARSE60_DISJOINT28G = 20,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT28G = 21,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT32G = 22,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT48G = 23,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT36G = 24,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT38G = 25,
+    MBENCH_PHASE_PRESET_GUPS60_DISJOINT40G = 26,
 };
 
 struct mbench_node_list {
@@ -129,6 +143,7 @@ struct mbench_numa_config {
     int local_node;
     int remote_node;
     size_t window_split_local_bytes;
+    size_t arena_split_local_bytes;
     bool strict;
 };
 
@@ -154,12 +169,15 @@ struct mbench_bw_pattern_config {
 
 struct mbench_hotset_config {
     uint32_t hotset_pages;
+    uint32_t background_pages;
     uint32_t hot_prob_pct;
     uint32_t read_pct;
     uint32_t write_pct;
     uint32_t rmw_pct;
     enum mbench_hotset_index_mode index_mode;
     int prefault_node;
+    bool shared_window;
+    bool tail;
 };
 
 struct mbench_irregular_config {
@@ -172,10 +190,21 @@ struct mbench_irregular_config {
     uint32_t segment_span_ops;
 };
 
+struct mbench_residency_probe_config {
+    char label[MBENCH_PROBE_LABEL_MAX];
+    size_t offset_bytes;
+    size_t size_bytes;
+};
+
 struct mbench_phase_config {
     enum mbench_phase_preset preset;
     uint32_t repeat;
     uint32_t duration_ms;
+    uint64_t phase1_target_ops;
+    uint64_t phase2_target_ops;
+    struct mbench_residency_probe_config
+        boundary_probes[MBENCH_MAX_PHASE_BOUNDARY_PROBES];
+    size_t boundary_probe_count;
 };
 
 struct mbench_config {
@@ -183,6 +212,7 @@ struct mbench_config {
     enum mbench_bw_kernel bw_kernel;
     enum mbench_hugepage_kind hugepage;
     bool prefault;
+    int prefault_node;
     uint64_t seed;
     struct mbench_timing_config timing;
     struct mbench_report_config report;
@@ -200,6 +230,7 @@ struct mbench_phase {
     uint32_t id;
     char name[MBENCH_PHASE_NAME_MAX];
     uint32_t duration_ms;
+    uint64_t target_ops;
     struct mbench_config config;
 };
 
@@ -304,6 +335,8 @@ int mbench_parse_size_bytes(const char *value, size_t *out_bytes);
 int mbench_parse_u32(const char *value, uint32_t *out);
 int mbench_parse_u64(const char *value, uint64_t *out);
 int mbench_parse_double(const char *value, double *out);
+int mbench_parse_residency_probe(const char *value,
+                                 struct mbench_residency_probe_config *probe);
 
 void mbench_config_init(struct mbench_config *config);
 int mbench_config_validate(struct mbench_config *config);
@@ -319,6 +352,7 @@ int mbench_phase_build(const struct mbench_config *base_config,
 
 uint64_t mbench_now_ns(void);
 uint64_t mbench_now_us(void);
+uint64_t mbench_clock_monotonic_ns(void);
 void mbench_sleep_ms(uint32_t ms);
 void mbench_sleep_ns(uint64_t ns);
 
@@ -327,10 +361,13 @@ int mbench_arena_init(struct mbench_arena *arena,
                       enum mbench_hugepage_kind hugepage,
                       bool prefault);
 int mbench_arena_prefault(struct mbench_arena *arena);
+int mbench_arena_prefault_node(struct mbench_arena *arena, int node);
 int mbench_arena_prefault_hotset_node(struct mbench_arena *arena,
                                       const struct mbench_config *config);
 int mbench_arena_prefault_window_split(struct mbench_arena *arena,
                                        const struct mbench_config *config);
+int mbench_arena_prefault_arena_split(struct mbench_arena *arena,
+                                      const struct mbench_config *config);
 int mbench_arena_prefault_head_local_tail_remote(struct mbench_arena *arena,
                                                  const struct mbench_config *config);
 void mbench_arena_destroy(struct mbench_arena *arena);
@@ -368,6 +405,11 @@ int mbench_query_range_nodes(void *addr,
                              size_t length,
                              int *status_out,
                              size_t status_count);
+int mbench_query_sampled_range_nodes(void *addr,
+                                     size_t length,
+                                     size_t stride,
+                                     int *status_out,
+                                     size_t status_count);
 
 #ifdef __cplusplus
 }

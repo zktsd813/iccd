@@ -37,6 +37,7 @@
 #include <linux/sched/loadavg.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/nohz.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/sched/rseq_api.h>
 #include <linux/sched/rt.h>
 

@@ -2410,6 +2410,7 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 	if (prot_numa) {
 		struct folio *folio;
+		bool already_protnone;
 		bool toptier;
 		/*
 		 * Avoid trapping faults against the zero page. The read-only
@@ -2419,9 +2420,7 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		if (is_huge_zero_pmd(*pmd))
 			goto unlock;
 
-		if (pmd_protnone(*pmd))
-			goto unlock;
-
+		already_protnone = pmd_protnone(*pmd);
 		folio = pmd_folio(*pmd);
 		toptier = !node_is_promotion_source(folio_nid(folio));
 #ifdef CONFIG_NUMA_BALANCING_MT
@@ -2437,10 +2436,13 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 			goto unlock;
 
 		if (folio_use_access_time(folio)) {
-			numa_account_remote_scan_pte(vma->vm_mm);
-			folio_xchg_access_time(folio,
-					       jiffies_to_msecs(jiffies));
+			numa_account_remote_scan_pte(vma->vm_mm, folio);
+			if (!already_protnone)
+				folio_xchg_access_time(folio,
+						       jiffies_to_msecs(jiffies));
 		}
+		if (already_protnone)
+			goto unlock;
 	}
 	/*
 	 * In case prot_numa, we are under mmap_read_lock(mm). It's critical

@@ -80,17 +80,20 @@ FORBID_HOST_NODE1="${FORBID_HOST_NODE1:-0}"
 WINDOW_SEC="${WINDOW_SEC:-1}"
 CYCLE_WINDOW_MIN_SEC="${CYCLE_WINDOW_MIN_SEC:-5}"
 CYCLE_WINDOW_MAX_SEC="${CYCLE_WINDOW_MAX_SEC:-20}"
-LOCAL_RATE="${LOCAL_RATE:-5}"
-MIN_LOCAL_PAGES="${MIN_LOCAL_PAGES:-1024}"
-MIN_REMOTE_PAGES="${MIN_REMOTE_PAGES:-1024}"
-START_CONSECUTIVE="${START_CONSECUTIVE:-2}"
-START_CAPACITY_MARGIN_PCT="${START_CAPACITY_MARGIN_PCT:-10}"
+LOCAL_RATE="${LOCAL_RATE:-1}"
+CONTROLLER_POLICY=window-cdf-gap
+START_POLICY="${START_POLICY:-cdf-gap}"
+START_CDF_GAP_PPM="${START_CDF_GAP_PPM:-100000}"
+START_CDF_GAP_REDUCTION_PPM="${START_CDF_GAP_REDUCTION_PPM:-50000}"
+START_HOT_COVERAGE_PPM="${START_HOT_COVERAGE_PPM:-750000}"
+STOP_HOT_COVERAGE_PPM="${STOP_HOT_COVERAGE_PPM:-750000}"
+LOCAL_CAPACITY_PAGES="${LOCAL_CAPACITY_PAGES:-}"
+LOCAL_TARGET_PCT="${LOCAL_TARGET_PCT:-75}"
 STOP_CAPACITY_RATIO_THRESHOLD="${STOP_CAPACITY_RATIO_THRESHOLD:-0.9}"
-P75_STAGNATION_REQUIRED_DECREASE_PCT="${P75_STAGNATION_REQUIRED_DECREASE_PCT:-10}"
-P75_STAGNATION_REQUIRED_WINDOWS="${P75_STAGNATION_REQUIRED_WINDOWS:-3}"
-P75_STAGNATION_RESTART_DEGRADATION_PCT="${P75_STAGNATION_RESTART_DEGRADATION_PCT:-10}"
-P75_STAGNATION_RESTART_REQUIRED_WINDOWS="${P75_STAGNATION_RESTART_REQUIRED_WINDOWS:-3}"
-REMOTE_RESTART_IMPROVEMENT_PCT="${REMOTE_RESTART_IMPROVEMENT_PCT:-10}"
+WINDOW_MIN_PROTECTED_PAGES="${WINDOW_MIN_PROTECTED_PAGES:-256}"
+WINDOW_MIN_LOCAL_FAULT_PAGES="${WINDOW_MIN_LOCAL_FAULT_PAGES:-16}"
+WINDOW_CONSECUTIVE="${WINDOW_CONSECUTIVE:-1}"
+START_STAGNATION_WINDOWS="${START_STAGNATION_WINDOWS:-3}"
 LOCAL_NODE="${LOCAL_NODE:-0}"
 REMOTE_NODE="${REMOTE_NODE:-1}"
 MIGRATION_ENABLED_PATH="${MIGRATION_ENABLED_PATH:-/sys/kernel/mm/numa_balancing/migration_enabled}"
@@ -98,6 +101,14 @@ RESUME="${RESUME:-1}"
 CLEAN_STAGE="${CLEAN_STAGE:-0}"
 CLEAN_SCRIPTS="${CLEAN_SCRIPTS:-1}"
 STAGE_WORKLOADS="${STAGE_WORKLOADS:-1}"
+CUSTOM_WORKLOAD_COMMAND="${CUSTOM_WORKLOAD_COMMAND:-}"
+CUSTOM_WORKLOAD_STAGE_FILES="${CUSTOM_WORKLOAD_STAGE_FILES:-}"
+CUSTOM_WORKLOAD_GUEST_DIR="${CUSTOM_WORKLOAD_GUEST_DIR:-/root}"
+POLICY_ACTIVATION_FENCE="${POLICY_ACTIVATION_FENCE:-0}"
+WORKLOAD_READY_FILE="${WORKLOAD_READY_FILE:-}"
+WORKLOAD_START_FILE="${WORKLOAD_START_FILE:-}"
+WORKLOAD_READY_TIMEOUT_SEC="${WORKLOAD_READY_TIMEOUT_SEC:-900}"
+WORKLOAD_TRACK_BASENAME="${WORKLOAD_TRACK_BASENAME:-}"
 SSH_RETRY_ATTEMPTS="${SSH_RETRY_ATTEMPTS:-30}"
 SSH_RETRY_DELAY_SEC="${SSH_RETRY_DELAY_SEC:-10}"
 SSH_READY_ATTEMPTS="${SSH_READY_ATTEMPTS:-30}"
@@ -380,6 +391,36 @@ validate_no_host_node1_use() {
   done < <(expand_configs ${CONFIGS})
 }
 
+validate_controller_parameters() {
+  [[ "${START_CDF_GAP_PPM}" =~ ^[0-9]+$ ]] &&
+    awk -v value="${START_CDF_GAP_PPM}" \
+      'BEGIN { exit !(value >= 0 && value <= 1000000) }' ||
+    die "START_CDF_GAP_PPM must be an integer in [0, 1000000]"
+  [[ "${START_CDF_GAP_REDUCTION_PPM}" =~ ^[0-9]+$ ]] &&
+    awk -v value="${START_CDF_GAP_REDUCTION_PPM}" \
+      'BEGIN { exit !(value >= 0 && value <= 2000000) }' ||
+    die "START_CDF_GAP_REDUCTION_PPM must be an integer in [0, 2000000]"
+  case "${START_POLICY}" in
+    cdf-gap|touch-rate|hot-coverage) ;;
+    *) die "START_POLICY must be cdf-gap, touch-rate, or hot-coverage" ;;
+  esac
+  [[ "${START_HOT_COVERAGE_PPM}" =~ ^[0-9]+$ ]] &&
+    awk -v value="${START_HOT_COVERAGE_PPM}" \
+      'BEGIN { exit !(value >= 0 && value <= 1000000) }' ||
+    die "START_HOT_COVERAGE_PPM must be an integer in [0, 1000000]"
+  [[ "${STOP_HOT_COVERAGE_PPM}" =~ ^[0-9]+$ ]] &&
+    awk -v value="${STOP_HOT_COVERAGE_PPM}" \
+      'BEGIN { exit !(value >= 0 && value <= 1000000) }' ||
+    die "STOP_HOT_COVERAGE_PPM must be an integer in [0, 1000000]"
+  [[ "${WINDOW_CONSECUTIVE}" =~ ^[1-9][0-9]*$ ]] ||
+    die "WINDOW_CONSECUTIVE must be positive"
+  [[ "${START_STAGNATION_WINDOWS}" =~ ^[1-9][0-9]*$ ]] ||
+    die "START_STAGNATION_WINDOWS must be positive"
+  [[ "${STOP_CAPACITY_RATIO_THRESHOLD}" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] &&
+    awk -v value="${STOP_CAPACITY_RATIO_THRESHOLD}" 'BEGIN { exit !(value > 0) }' ||
+    die "STOP_CAPACITY_RATIO_THRESHOLD must be positive"
+}
+
 expand_workloads() {
   local item
   for item in "$@"; do
@@ -393,6 +434,10 @@ expand_workloads() {
         ;;
     esac
   done | awk '!seen[$0]++'
+}
+
+expand_custom_workload_stage_files() {
+  awk '{ for (i = 1; i <= NF; i++) print $i }' <<< "${CUSTOM_WORKLOAD_STAGE_FILES}"
 }
 
 configs_need_ours() {
@@ -520,10 +565,11 @@ GAPBS graph:     generated g${GAPBS_GRAPH_SCALE}
 GAPBS data disk: disabled
 NUMA scan:       ${NUMA_SCAN_SIZE_MB}MB, min period ${NUMA_SCAN_PERIOD_MIN_MS}ms
 Local sample:    ${LOCAL_FAULT_SCAN_SIZE_MB}MB/${LOCAL_FAULT_SCAN_PERIOD_MS}ms
+Policy fence:    enabled=${POLICY_ACTIVATION_FENCE} ready=${WORKLOAD_READY_FILE:-none} start=${WORKLOAD_START_FILE:-none} timeout=${WORKLOAD_READY_TIMEOUT_SEC}s track=${WORKLOAD_TRACK_BASENAME:-none}
 THP:             mode=${THP_MODE:-default} defrag=${THP_DEFRAG:-default}
 Delete images:   ${DELETE_VM_IMAGES}
 Forbid host n1:  ${FORBID_HOST_NODE1}
-Ours controller: window=${WINDOW_SEC}s cycle=${CYCLE_WINDOW_MIN_SEC}-${CYCLE_WINDOW_MAX_SEC}s local_rate=${LOCAL_RATE} min_pages=${MIN_LOCAL_PAGES}/${MIN_REMOTE_PAGES} start_consecutive=${START_CONSECUTIVE} start_margin_pct=${START_CAPACITY_MARGIN_PCT} stop_capacity_ratio=${STOP_CAPACITY_RATIO_THRESHOLD} p75_stagnation=${P75_STAGNATION_REQUIRED_DECREASE_PCT}%/${P75_STAGNATION_REQUIRED_WINDOWS}windows restart=local+${P75_STAGNATION_RESTART_DEGRADATION_PCT}%+remote-${REMOTE_RESTART_IMPROVEMENT_PCT}%/${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}windows nodes=${LOCAL_NODE}/${REMOTE_NODE}
+Ours controller: policy=${CONTROLLER_POLICY} start_policy=${START_POLICY} window=${WINDOW_SEC}s cycle=${CYCLE_WINDOW_MIN_SEC}-${CYCLE_WINDOW_MAX_SEC}s local_rate=${LOCAL_RATE} start_cdf_gap_ppm=${START_CDF_GAP_PPM} start_cdf_gap_reduction_ppm=${START_CDF_GAP_REDUCTION_PPM} start_hot_coverage_ppm=${START_HOT_COVERAGE_PPM} stop_hot_coverage_ppm=${STOP_HOT_COVERAGE_PPM} local_capacity_pages=${LOCAL_CAPACITY_PAGES:-auto} local_target=${LOCAL_TARGET_PCT}% stop_capacity_ratio=${STOP_CAPACITY_RATIO_THRESHOLD} min_window=${WINDOW_MIN_PROTECTED_PAGES}/${WINDOW_MIN_LOCAL_FAULT_PAGES} consecutive=${WINDOW_CONSECUTIVE} stagnation_windows=${START_STAGNATION_WINDOWS} nodes=${LOCAL_NODE}/${REMOTE_NODE}
 
 VM plan:
 EOF
@@ -558,6 +604,7 @@ EOF
 
 preflight() {
   local -a local_size_list=()
+  local custom_stage_file
   mapfile -t local_size_list < <(expand_local_sizes ${LOCAL_SIZES_GIB})
   ((${#local_size_list[@]} > 0)) || die "LOCAL_SIZES_GIB is empty"
   validate_no_host_node1_use
@@ -586,6 +633,10 @@ preflight() {
     [[ -d "${LIBLINEAR_ROOT_HOST}" ]] || die "missing Liblinear source tree: ${LIBLINEAR_ROOT_HOST}"
     [[ -f "${LIBLINEAR_DATASET_HOST}" ]] || die "missing Liblinear dataset: ${LIBLINEAR_DATASET_HOST}"
   fi
+  while IFS= read -r custom_stage_file; do
+    [[ -n "${custom_stage_file}" ]] || continue
+    [[ -f "${custom_stage_file}" ]] || die "missing custom workload stage file: ${custom_stage_file}"
+  done < <(expand_custom_workload_stage_files)
 }
 
 write_host_config() {
@@ -620,6 +671,14 @@ write_host_config() {
     printf 'hmat_slow_bandwidth=%s\n' "${HMAT_SLOW_BANDWIDTH}"
     printf 'workloads=%s\n' "${WORKLOADS}"
     printf 'configs=%s\n' "${CONFIGS}"
+    printf 'custom_workload_command=%s\n' "${CUSTOM_WORKLOAD_COMMAND}"
+    printf 'custom_workload_stage_files=%s\n' "${CUSTOM_WORKLOAD_STAGE_FILES}"
+    printf 'custom_workload_guest_dir=%s\n' "${CUSTOM_WORKLOAD_GUEST_DIR}"
+    printf 'policy_activation_fence=%s\n' "${POLICY_ACTIVATION_FENCE}"
+    printf 'workload_ready_file=%s\n' "${WORKLOAD_READY_FILE}"
+    printf 'workload_start_file=%s\n' "${WORKLOAD_START_FILE}"
+    printf 'workload_ready_timeout_sec=%s\n' "${WORKLOAD_READY_TIMEOUT_SEC}"
+    printf 'workload_track_basename=%s\n' "${WORKLOAD_TRACK_BASENAME}"
     printf 'migration_fast_mem_default=%s\n' "${MIGRATION_FAST_MEM}"
     printf 'migration_slow_mem=%s\n' "${MIGRATION_SLOW_MEM}"
     printf 'timeout_sec=%s\n' "${TIMEOUT_SEC}"
@@ -643,16 +702,20 @@ write_host_config() {
     printf 'cycle_window_min_sec=%s\n' "${CYCLE_WINDOW_MIN_SEC}"
     printf 'cycle_window_max_sec=%s\n' "${CYCLE_WINDOW_MAX_SEC}"
     printf 'local_rate=%s\n' "${LOCAL_RATE}"
-    printf 'min_local_pages=%s\n' "${MIN_LOCAL_PAGES}"
-    printf 'min_remote_pages=%s\n' "${MIN_REMOTE_PAGES}"
-    printf 'start_consecutive=%s\n' "${START_CONSECUTIVE}"
-    printf 'start_capacity_margin_pct=%s\n' "${START_CAPACITY_MARGIN_PCT}"
+    printf 'controller_policy=%s\n' "${CONTROLLER_POLICY}"
+    printf 'start_policy=%s\n' "${START_POLICY}"
+    printf 'start_cdf_gap_ppm=%s\n' "${START_CDF_GAP_PPM}"
+    printf 'start_cdf_gap_reduction_ppm=%s\n' "${START_CDF_GAP_REDUCTION_PPM}"
+    printf 'start_hot_coverage_ppm=%s\n' "${START_HOT_COVERAGE_PPM}"
+    printf 'stop_hot_coverage_ppm=%s\n' "${STOP_HOT_COVERAGE_PPM}"
+    printf 'local_capacity_pages=%s\n' "${LOCAL_CAPACITY_PAGES}"
+    printf 'local_capacity_source=%s\n' "$([[ -n "${LOCAL_CAPACITY_PAGES}" ]] && printf override || printf node_memtotal)"
+    printf 'local_target_pct=%s\n' "${LOCAL_TARGET_PCT}"
     printf 'stop_capacity_ratio_threshold=%s\n' "${STOP_CAPACITY_RATIO_THRESHOLD}"
-    printf 'p75_stagnation_required_decrease_pct=%s\n' "${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
-    printf 'p75_stagnation_required_windows=%s\n' "${P75_STAGNATION_REQUIRED_WINDOWS}"
-    printf 'p75_stagnation_restart_degradation_pct=%s\n' "${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
-    printf 'p75_stagnation_restart_required_windows=%s\n' "${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
-    printf 'remote_restart_improvement_pct=%s\n' "${REMOTE_RESTART_IMPROVEMENT_PCT}"
+    printf 'window_min_protected_pages=%s\n' "${WINDOW_MIN_PROTECTED_PAGES}"
+    printf 'window_min_local_fault_pages=%s\n' "${WINDOW_MIN_LOCAL_FAULT_PAGES}"
+    printf 'window_consecutive=%s\n' "${WINDOW_CONSECUTIVE}"
+    printf 'start_stagnation_windows=%s\n' "${START_STAGNATION_WINDOWS}"
     printf 'local_node=%s\n' "${LOCAL_NODE}"
     printf 'remote_node=%s\n' "${REMOTE_NODE}"
     printf 'migration_enabled_path=%s\n' "${MIGRATION_ENABLED_PATH}"
@@ -975,6 +1038,8 @@ stage_workloads() {
 
 stage_experiment_scripts() {
   local config="$1"
+  local custom_stage_file guest_stage_file guest_sha_cmd guest_dir_quoted
+  local -a custom_stage_files=() guest_stage_files=()
   log "stage experiment scripts for ${config}"
   {
     ssh_vm_retry "${config}" "mkdir -p /root/vm32_realworld/scripts /root/design/fault_bucket_controller" || return $?
@@ -987,6 +1052,20 @@ stage_experiment_scripts() {
         "${FAULT_BUCKET_CONTROLLER_DIR}/bucket_latency_controller.py" \
         "${FAULT_BUCKET_CONTROLLER_DIR}/run_guest.sh" \
         /root/design/fault_bucket_controller/ || return $?
+    fi
+    if [[ -n "${CUSTOM_WORKLOAD_STAGE_FILES}" ]]; then
+      mapfile -t custom_stage_files < <(expand_custom_workload_stage_files)
+      printf -v guest_dir_quoted '%q' "${CUSTOM_WORKLOAD_GUEST_DIR}"
+      ssh_vm_retry "${config}" "mkdir -p ${guest_dir_quoted}" || return $?
+      copy_to_vm_retry "${config}" \
+        "${custom_stage_files[@]}" \
+        "${CUSTOM_WORKLOAD_GUEST_DIR}/" || return $?
+      for custom_stage_file in "${custom_stage_files[@]}"; do
+        guest_stage_file="${CUSTOM_WORKLOAD_GUEST_DIR%/}/$(basename -- "${custom_stage_file}")"
+        guest_stage_files+=("${guest_stage_file}")
+      done
+      printf -v guest_sha_cmd '%q ' sha256sum "${guest_stage_files[@]}"
+      ssh_vm_retry "${config}" "${guest_sha_cmd% }" || return $?
     fi
     ssh_vm_retry "${config}" "chmod +x /root/vm32_realworld/scripts/run_vm_sweep_guest.sh /root/vm32_realworld/scripts/run_workload_case_guest.sh; find /root/design/fault_bucket_controller -maxdepth 1 -type f \\( -name '*.py' -o -name 'run_guest.sh' \\) -exec chmod +x {} +" || return $?
   } > "${HOST_LOG_DIR}/${CURRENT_LOCAL_LABEL}-${config}.stage-experiment-scripts.log" 2>&1
@@ -1010,6 +1089,12 @@ run_guest_config() {
     "LOCAL_SIZE_GIB=${CURRENT_LOCAL_SIZE_GIB}"
     "CONFIGS=${config}"
     "WORKLOADS=${WORKLOADS}"
+    "CUSTOM_WORKLOAD_COMMAND=${CUSTOM_WORKLOAD_COMMAND}"
+    "POLICY_ACTIVATION_FENCE=${POLICY_ACTIVATION_FENCE}"
+    "WORKLOAD_READY_FILE=${WORKLOAD_READY_FILE}"
+    "WORKLOAD_START_FILE=${WORKLOAD_START_FILE}"
+    "WORKLOAD_READY_TIMEOUT_SEC=${WORKLOAD_READY_TIMEOUT_SEC}"
+    "WORKLOAD_TRACK_BASENAME=${WORKLOAD_TRACK_BASENAME}"
     "PROGRESS_BASE=${CURRENT_PROGRESS_BASE}"
     "PROGRESS_TOTAL=${TOTAL_WORKLOAD_CASES}"
     "TIMEOUT_SEC=${TIMEOUT_SEC}"
@@ -1055,16 +1140,18 @@ run_guest_config() {
     "CYCLE_WINDOW_MIN_SEC=${CYCLE_WINDOW_MIN_SEC}"
     "CYCLE_WINDOW_MAX_SEC=${CYCLE_WINDOW_MAX_SEC}"
     "LOCAL_RATE=${LOCAL_RATE}"
-    "MIN_LOCAL_PAGES=${MIN_LOCAL_PAGES}"
-    "MIN_REMOTE_PAGES=${MIN_REMOTE_PAGES}"
-    "START_CONSECUTIVE=${START_CONSECUTIVE}"
-    "START_CAPACITY_MARGIN_PCT=${START_CAPACITY_MARGIN_PCT}"
+    "START_POLICY=${START_POLICY}"
+    "START_CDF_GAP_PPM=${START_CDF_GAP_PPM}"
+    "START_CDF_GAP_REDUCTION_PPM=${START_CDF_GAP_REDUCTION_PPM}"
+    "START_HOT_COVERAGE_PPM=${START_HOT_COVERAGE_PPM}"
+    "STOP_HOT_COVERAGE_PPM=${STOP_HOT_COVERAGE_PPM}"
+    "LOCAL_CAPACITY_PAGES=${LOCAL_CAPACITY_PAGES}"
+    "LOCAL_TARGET_PCT=${LOCAL_TARGET_PCT}"
     "STOP_CAPACITY_RATIO_THRESHOLD=${STOP_CAPACITY_RATIO_THRESHOLD}"
-    "P75_STAGNATION_REQUIRED_DECREASE_PCT=${P75_STAGNATION_REQUIRED_DECREASE_PCT}"
-    "P75_STAGNATION_REQUIRED_WINDOWS=${P75_STAGNATION_REQUIRED_WINDOWS}"
-    "P75_STAGNATION_RESTART_DEGRADATION_PCT=${P75_STAGNATION_RESTART_DEGRADATION_PCT}"
-    "P75_STAGNATION_RESTART_REQUIRED_WINDOWS=${P75_STAGNATION_RESTART_REQUIRED_WINDOWS}"
-    "REMOTE_RESTART_IMPROVEMENT_PCT=${REMOTE_RESTART_IMPROVEMENT_PCT}"
+    "WINDOW_MIN_PROTECTED_PAGES=${WINDOW_MIN_PROTECTED_PAGES}"
+    "WINDOW_MIN_LOCAL_FAULT_PAGES=${WINDOW_MIN_LOCAL_FAULT_PAGES}"
+    "WINDOW_CONSECUTIVE=${WINDOW_CONSECUTIVE}"
+    "START_STAGNATION_WINDOWS=${START_STAGNATION_WINDOWS}"
     "LOCAL_NODE=${LOCAL_NODE}"
     "REMOTE_NODE=${REMOTE_NODE}"
     "MIGRATION_ENABLED_PATH=${MIGRATION_ENABLED_PATH}"
@@ -1245,6 +1332,7 @@ main() {
   mapfile -t local_size_list <<< "${expanded_local_sizes}"
   mapfile -t workload_list <<< "${expanded_workloads}"
   TOTAL_WORKLOAD_CASES=$((${#local_size_list[@]} * ${#config_list[@]} * ${#workload_list[@]}))
+  validate_controller_parameters
 
   if [[ "${DRY_RUN}" == "1" ]]; then
     validate_no_host_node1_use

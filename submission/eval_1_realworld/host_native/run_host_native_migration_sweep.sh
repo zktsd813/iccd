@@ -13,15 +13,16 @@ STATE_FILE="${STATE_FILE:-${STATE_ROOT}/state.env}"
 LOCK_FILE="${LOCK_FILE:-${STATE_ROOT}/runner.lock}"
 
 LOCAL_NODE="${LOCAL_NODE:-0}"
-REMOTE_NODE="${REMOTE_NODE:-2}"
+REMOTE_NODE="${REMOTE_NODE:-1}"
+KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES:-1}"
+OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE:-1}"
 CPU_NODE="${CPU_NODE:-0}"
 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB:-1}"
-TARGETS="${TARGETS:-16 32}"
-MIGRATION_MODES="${MIGRATION_MODES:-off on}"
-WORKLOADS="${WORKLOADS:-pr bc gups btree graph500}"
+TARGETS="${TARGETS:-16 32 48}"
+MIGRATION_MODES="${MIGRATION_MODES:-off on tpp ours}"
+WORKLOADS="${WORKLOADS:-pr bc gups btree graph500 silo liblinear}"
 
 GAPBS_GRAPH_SCALE="${GAPBS_GRAPH_SCALE:-29}"
-GAPBS_GRAPH="${GAPBS_GRAPH:-/Serverless/benchmark/gapbs/benchmark/graphs/kron_g${GAPBS_GRAPH_SCALE}.sg}"
 PR_BIN="${PR_BIN:-/Serverless/benchmark/gapbs/pr}"
 BC_BIN="${BC_BIN:-/Serverless/benchmark/gapbs/bc}"
 GUPS_BIN="${GUPS_BIN:-/Serverless/benchmark/vmitosis-workloads/bin/bench_gups_mt}"
@@ -50,17 +51,40 @@ SILO_OPS_PER_WORKER="${SILO_OPS_PER_WORKER:-100000000}"
 LIBLINEAR_SOLVER="${LIBLINEAR_SOLVER:-6}"
 LIBLINEAR_THREADS="${LIBLINEAR_THREADS:-32}"
 POST_WORKLOAD_SLEEP_SEC="${POST_WORKLOAD_SLEEP_SEC:-5}"
-RESUME_WAIT_SEC="${RESUME_WAIT_SEC:-20}"
+RESUME_WAIT_SEC="${RESUME_WAIT_SEC:-90}"
 VERIFY_RETRIES="${VERIFY_RETRIES:-6}"
 VERIFY_RETRY_SLEEP_SEC="${VERIFY_RETRY_SLEEP_SEC:-30}"
 RAPL_PACKAGE_DOMAIN="${RAPL_PACKAGE_DOMAIN:-package-0}"
 RAPL_DRAM_DOMAIN="${RAPL_DRAM_DOMAIN:-dram}"
 IPMI_POWER_SAMPLING="${IPMI_POWER_SAMPLING:-1}"
 IPMI_POWER_INTERVAL_SEC="${IPMI_POWER_INTERVAL_SEC:-1}"
-HOST_BOOT_CMDLINE_16G="${HOST_BOOT_CMDLINE_16G:-maxcpus=32 nosmt memhp_default_state=online memmap=239488M\$0x608000000}"
-HOST_BOOT_NODE0_ONLINE_16G="${HOST_BOOT_NODE0_ONLINE_16G:-22}"
-HOST_BOOT_CMDLINE_32G="${HOST_BOOT_CMDLINE_32G:-maxcpus=32 nosmt memhp_default_state=online memmap=217G\$0xa40000000}"
-HOST_BOOT_NODE0_ONLINE_32G="${HOST_BOOT_NODE0_ONLINE_32G:-39}"
+NUMA_SCAN_SIZE_MB="${NUMA_SCAN_SIZE_MB:-256}"
+NUMA_SCAN_PERIOD_MIN_MS="${NUMA_SCAN_PERIOD_MIN_MS:-1000}"
+LOCAL_FAULT_RATE="${LOCAL_FAULT_RATE:-5}"
+LOCAL_FAULT_SCAN_PERIOD_MS="${LOCAL_FAULT_SCAN_PERIOD_MS:-1000}"
+LOCAL_FAULT_SCAN_SIZE_MB="${LOCAL_FAULT_SCAN_SIZE_MB:-64}"
+MGLRU_ENABLED="${MGLRU_ENABLED:-0x0007}"
+THP_MODE="${THP_MODE:-never}"
+THP_DEFRAG="${THP_DEFRAG:-never}"
+DEMOTION_TARGETS="${DEMOTION_TARGETS:-0:1}"
+FAULT_BUCKET_CONTROLLER_DIR="${FAULT_BUCKET_CONTROLLER_DIR:-${REPO_ROOT}/design/fault_bucket_controller}"
+FAULT_BUCKET_CONTROLLER_RUNNER="${FAULT_BUCKET_CONTROLLER_RUNNER:-${FAULT_BUCKET_CONTROLLER_DIR}/run_guest.sh}"
+OURS_WINDOW_SEC="${OURS_WINDOW_SEC:-1}"
+OURS_CYCLE_WINDOW_MIN_SEC="${OURS_CYCLE_WINDOW_MIN_SEC:-5}"
+OURS_CYCLE_WINDOW_MAX_SEC="${OURS_CYCLE_WINDOW_MAX_SEC:-20}"
+OURS_MIGRATION_ENABLED_PATH="${OURS_MIGRATION_ENABLED_PATH:-/sys/kernel/mm/numa_balancing/migration_enabled}"
+DISABLE_SWAP="${DISABLE_SWAP:-1}"
+OURS_MIN_LOCAL_PAGES="${OURS_MIN_LOCAL_PAGES:-1024}"
+OURS_MIN_REMOTE_PAGES="${OURS_MIN_REMOTE_PAGES:-1024}"
+OURS_START_CONSECUTIVE="${OURS_START_CONSECUTIVE:-2}"
+OURS_START_CAPACITY_MARGIN_PCT="${OURS_START_CAPACITY_MARGIN_PCT:-10}"
+OURS_STOP_CAPACITY_RATIO_THRESHOLD="${OURS_STOP_CAPACITY_RATIO_THRESHOLD:-0.9}"
+HOST_BOOT_CMDLINE_16G="${HOST_BOOT_CMDLINE_16G:-}"
+HOST_BOOT_NODE0_ONLINE_16G="${HOST_BOOT_NODE0_ONLINE_16G:-}"
+HOST_BOOT_CMDLINE_32G="${HOST_BOOT_CMDLINE_32G:-}"
+HOST_BOOT_NODE0_ONLINE_32G="${HOST_BOOT_NODE0_ONLINE_32G:-}"
+HOST_BOOT_CMDLINE_48G="${HOST_BOOT_CMDLINE_48G:-}"
+HOST_BOOT_NODE0_ONLINE_48G="${HOST_BOOT_NODE0_ONLINE_48G:-}"
 
 RUN_ID="${RUN_ID:-}"
 TARGET_INDEX="${TARGET_INDEX:-0}"
@@ -78,9 +102,12 @@ Usage:
   run_host_native_migration_sweep.sh status
   run_host_native_migration_sweep.sh remove-hook
 
-Runs host-native eval_1 workloads for memory targets 16G and 32G, with
-migration off/on, minimizing reboots by finishing every workload for a target
-before switching memory target.
+Runs host-native eval_1 workloads for memory targets 16G, 32G, and 48G, with
+migration modes off/on/tpp/ours, minimizing reboots by finishing every workload for
+a target before switching memory target.  By default the boot cmdline is
+generated from the current host topology when switching targets;
+HOST_BOOT_CMDLINE_<target>G may still be set to force a known-good static
+cmdline.
 EOF
 }
 
@@ -105,6 +132,32 @@ split_words() {
   SPLIT_WORDS=(${value})
 }
 
+validate_run_configuration() {
+  local mode
+  [[ "${GAPBS_GRAPH_SCALE}" == "29" ]] || die "GAPBS graph scale must be 29"
+  split_words "${MIGRATION_MODES}"
+  ((${#SPLIT_WORDS[@]} > 0)) || die "MIGRATION_MODES is empty"
+  for mode in "${SPLIT_WORDS[@]}"; do
+    case "${mode}" in
+      off|on|tpp|ours) ;;
+      *) die "unknown migration mode: ${mode}" ;;
+    esac
+  done
+}
+
+require_kernel_abi() {
+  [[ -r /sys/kernel/mm/numa_balancing/fault_latency_quantiles ]] ||
+    die "missing fault_latency_quantiles"
+  [[ -r /sys/kernel/mm/numa_balancing/remote_scan_cycles ]] ||
+    die "missing remote_scan_cycles"
+  [[ -w /proc/sys/kernel/numa_balancing ]] ||
+    die "kernel.numa_balancing is not writable"
+  [[ -w "${OURS_MIGRATION_ENABLED_PATH}" ]] ||
+    die "migration knob is not writable: ${OURS_MIGRATION_ENABLED_PATH}"
+  [[ -w /sys/kernel/mm/numa/demotion_enabled ]] ||
+    die "demotion_enabled is not writable"
+}
+
 save_state() {
   mkdir -p "${STATE_ROOT}" "${LOG_ROOT}" "${RESULTS_ROOT}"
   {
@@ -112,11 +165,15 @@ save_state() {
     printf 'TARGET_INDEX=%q\n' "${TARGET_INDEX}"
     printf 'MIGRATION_INDEX=%q\n' "${MIGRATION_INDEX}"
     printf 'WORKLOAD_INDEX=%q\n' "${WORKLOAD_INDEX}"
+    printf 'LOCAL_NODE=%q\n' "${LOCAL_NODE}"
+    printf 'REMOTE_NODE=%q\n' "${REMOTE_NODE}"
+    printf 'KEEP_MEMORY_NODES=%q\n' "${KEEP_MEMORY_NODES}"
+    printf 'OFFLINE_CPU_NODE=%q\n' "${OFFLINE_CPU_NODE}"
+    printf 'CPU_NODE=%q\n' "${CPU_NODE}"
     printf 'TARGETS=%q\n' "${TARGETS}"
     printf 'MIGRATION_MODES=%q\n' "${MIGRATION_MODES}"
     printf 'WORKLOADS=%q\n' "${WORKLOADS}"
     printf 'RESULTS_ROOT=%q\n' "${RESULTS_ROOT}"
-    printf 'GAPBS_GRAPH=%q\n' "${GAPBS_GRAPH}"
     printf 'GAPBS_GRAPH_SCALE=%q\n' "${GAPBS_GRAPH_SCALE}"
     printf 'PR_ITERATIONS=%q\n' "${PR_ITERATIONS}"
     printf 'PR_TOLERANCE=%q\n' "${PR_TOLERANCE}"
@@ -131,6 +188,29 @@ save_state() {
     printf 'HOST_BOOT_NODE0_ONLINE_16G=%q\n' "${HOST_BOOT_NODE0_ONLINE_16G}"
     printf 'HOST_BOOT_CMDLINE_32G=%q\n' "${HOST_BOOT_CMDLINE_32G}"
     printf 'HOST_BOOT_NODE0_ONLINE_32G=%q\n' "${HOST_BOOT_NODE0_ONLINE_32G}"
+    printf 'HOST_BOOT_CMDLINE_48G=%q\n' "${HOST_BOOT_CMDLINE_48G}"
+    printf 'HOST_BOOT_NODE0_ONLINE_48G=%q\n' "${HOST_BOOT_NODE0_ONLINE_48G}"
+    printf 'NUMA_SCAN_SIZE_MB=%q\n' "${NUMA_SCAN_SIZE_MB}"
+    printf 'NUMA_SCAN_PERIOD_MIN_MS=%q\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
+    printf 'LOCAL_FAULT_RATE=%q\n' "${LOCAL_FAULT_RATE}"
+    printf 'LOCAL_FAULT_SCAN_PERIOD_MS=%q\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    printf 'LOCAL_FAULT_SCAN_SIZE_MB=%q\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+    printf 'MGLRU_ENABLED=%q\n' "${MGLRU_ENABLED}"
+    printf 'THP_MODE=%q\n' "${THP_MODE}"
+    printf 'THP_DEFRAG=%q\n' "${THP_DEFRAG}"
+    printf 'DEMOTION_TARGETS=%q\n' "${DEMOTION_TARGETS}"
+    printf 'FAULT_BUCKET_CONTROLLER_DIR=%q\n' "${FAULT_BUCKET_CONTROLLER_DIR}"
+    printf 'FAULT_BUCKET_CONTROLLER_RUNNER=%q\n' "${FAULT_BUCKET_CONTROLLER_RUNNER}"
+    printf 'OURS_WINDOW_SEC=%q\n' "${OURS_WINDOW_SEC}"
+    printf 'OURS_CYCLE_WINDOW_MIN_SEC=%q\n' "${OURS_CYCLE_WINDOW_MIN_SEC}"
+    printf 'OURS_CYCLE_WINDOW_MAX_SEC=%q\n' "${OURS_CYCLE_WINDOW_MAX_SEC}"
+    printf 'OURS_MIGRATION_ENABLED_PATH=%q\n' "${OURS_MIGRATION_ENABLED_PATH}"
+    printf 'DISABLE_SWAP=%q\n' "${DISABLE_SWAP}"
+    printf 'OURS_MIN_LOCAL_PAGES=%q\n' "${OURS_MIN_LOCAL_PAGES}"
+    printf 'OURS_MIN_REMOTE_PAGES=%q\n' "${OURS_MIN_REMOTE_PAGES}"
+    printf 'OURS_START_CONSECUTIVE=%q\n' "${OURS_START_CONSECUTIVE}"
+    printf 'OURS_START_CAPACITY_MARGIN_PCT=%q\n' "${OURS_START_CAPACITY_MARGIN_PCT}"
+    printf 'OURS_STOP_CAPACITY_RATIO_THRESHOLD=%q\n' "${OURS_STOP_CAPACITY_RATIO_THRESHOLD}"
     printf 'SILO_BIN=%q\n' "${SILO_BIN}"
     printf 'SILO_THREADS=%q\n' "${SILO_THREADS}"
     printf 'SILO_SCALE_FACTOR=%q\n' "${SILO_SCALE_FACTOR}"
@@ -200,7 +280,8 @@ tmux_env_prefix() {
   local name
   local -a names=(
     RUN_ID TARGETS MIGRATION_MODES WORKLOADS RESULTS_ROOT
-    GAPBS_GRAPH GAPBS_GRAPH_SCALE
+    LOCAL_NODE REMOTE_NODE KEEP_MEMORY_NODES OFFLINE_CPU_NODE CPU_NODE
+    GAPBS_GRAPH_SCALE
     PR_ITERATIONS PR_TOLERANCE PR_TRIALS BC_ITERATIONS BC_TRIALS
     GRAPH500_BIN GRAPH500_SCALE
     SILO_BIN SILO_THREADS SILO_SCALE_FACTOR SILO_OPS_PER_WORKER
@@ -208,6 +289,16 @@ tmux_env_prefix() {
     TMUX_BIN TMUX_SESSION TMUX_LOG
     HOST_BOOT_CMDLINE_16G HOST_BOOT_NODE0_ONLINE_16G
     HOST_BOOT_CMDLINE_32G HOST_BOOT_NODE0_ONLINE_32G
+    HOST_BOOT_CMDLINE_48G HOST_BOOT_NODE0_ONLINE_48G
+    NUMA_SCAN_SIZE_MB NUMA_SCAN_PERIOD_MIN_MS
+    LOCAL_FAULT_RATE LOCAL_FAULT_SCAN_PERIOD_MS LOCAL_FAULT_SCAN_SIZE_MB
+    MGLRU_ENABLED THP_MODE THP_DEFRAG DEMOTION_TARGETS
+    FAULT_BUCKET_CONTROLLER_DIR FAULT_BUCKET_CONTROLLER_RUNNER
+    OURS_WINDOW_SEC OURS_CYCLE_WINDOW_MIN_SEC OURS_CYCLE_WINDOW_MAX_SEC
+    OURS_MIGRATION_ENABLED_PATH DISABLE_SWAP
+    OURS_MIN_LOCAL_PAGES OURS_MIN_REMOTE_PAGES
+    OURS_START_CONSECUTIVE OURS_START_CAPACITY_MARGIN_PCT
+    OURS_STOP_CAPACITY_RATIO_THRESHOLD
   )
   for name in "${names[@]}"; do
     printf '%s=%q ' "${name}" "${!name}"
@@ -239,6 +330,16 @@ drop_caches() {
   fi
 }
 
+disable_swap_if_requested() {
+  if [[ "${DISABLE_SWAP}" != "1" ]]; then
+    return 0
+  fi
+  if swapon --noheadings --show=NAME 2>/dev/null | grep -q .; then
+    log "disable swap before workload"
+    swapoff -a || log "warning: swapoff -a failed"
+  fi
+}
+
 node_memfree_mib() {
   local node="$1"
   awk -v node="${node}" '
@@ -249,13 +350,163 @@ node_memfree_mib() {
   ' "/sys/devices/system/node/node${node}/meminfo"
 }
 
+memory_block_mib() {
+  local raw
+  raw="$(cat /sys/devices/system/memory/block_size_bytes)"
+  raw="${raw#0x}"
+  printf '%d\n' $((16#${raw} / 1024 / 1024))
+}
+
+target_tolerance_mib() {
+  local configured_mib block_mib
+  configured_mib=$((TARGET_TOLERANCE_GIB * 1024))
+  block_mib="$(memory_block_mib)"
+  (( configured_mib < block_mib )) && configured_mib="${block_mib}"
+  printf '%s\n' "${configured_mib}"
+}
+
 target_ok() {
   local target="$1"
-  local free_mib lower upper
+  local free_mib tolerance_mib lower upper
   free_mib="$(node_memfree_mib "${LOCAL_NODE}")"
-  lower=$(((target - TARGET_TOLERANCE_GIB) * 1024))
-  upper=$(((target + TARGET_TOLERANCE_GIB) * 1024))
+  tolerance_mib="$(target_tolerance_mib)"
+  lower=$((target * 1024 - tolerance_mib))
+  upper=$((target * 1024 + tolerance_mib))
   (( free_mib >= lower && free_mib <= upper ))
+}
+
+write_sysfs_if_writable() {
+  local path="$1" value="$2"
+  [[ -w "${path}" ]] || return 0
+  printf '%s\n' "${value}" > "${path}" || true
+}
+
+demotion_target_for_wrapper() {
+  local first="${DEMOTION_TARGETS%% *}"
+  if [[ "${first}" == *:* ]]; then
+    printf '%s %s\n' "${first%%:*}" "${first#*:}"
+  else
+    printf '%s\n' "${first}"
+  fi
+}
+
+WRAPPED_RC=""
+WRAPPED_ELAPSED=""
+
+run_controller_wrapped_workload() {
+  local target="$1" migration="$2" workload="$3" outdir="$4"
+  local controller_outdir wrapper_rc status_rc workload_command_quoted
+  local -a wrapper_env
+
+  [[ -x "${FAULT_BUCKET_CONTROLLER_RUNNER}" ]] ||
+    die "missing executable fault bucket controller runner: ${FAULT_BUCKET_CONTROLLER_RUNNER}"
+
+  controller_outdir="${outdir}/controller"
+  mkdir -p "${controller_outdir}"
+  printf -v workload_command_quoted '%q ' "${WORKLOAD_CMD[@]}"
+
+  wrapper_env=(
+    env
+    "OUTDIR=${controller_outdir}"
+    "RUN_NAME=${migration}-${workload}"
+    "WORKLOAD_COMMAND=${workload_command_quoted}"
+    "CPU_NODE=${CPU_NODE}"
+    "OMP_THREADS=${OMP_THREADS}"
+    "WINDOW_SEC=${OURS_WINDOW_SEC}"
+    "CYCLE_WINDOW_MIN_SEC=${OURS_CYCLE_WINDOW_MIN_SEC}"
+    "CYCLE_WINDOW_MAX_SEC=${OURS_CYCLE_WINDOW_MAX_SEC}"
+    "LOCAL_RATE=${LOCAL_FAULT_RATE}"
+    "LOCAL_FAULT_SCAN_PERIOD_MS=${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    "LOCAL_FAULT_SCAN_SIZE_MB=${LOCAL_FAULT_SCAN_SIZE_MB}"
+    "MIN_LOCAL_PAGES=${OURS_MIN_LOCAL_PAGES}"
+    "MIN_REMOTE_PAGES=${OURS_MIN_REMOTE_PAGES}"
+    "START_CONSECUTIVE=${OURS_START_CONSECUTIVE}"
+    "START_CAPACITY_MARGIN_PCT=${OURS_START_CAPACITY_MARGIN_PCT}"
+    "STOP_CAPACITY_RATIO_THRESHOLD=${OURS_STOP_CAPACITY_RATIO_THRESHOLD}"
+    "LOCAL_NODE=${LOCAL_NODE}"
+    "REMOTE_NODE=${REMOTE_NODE}"
+    "MIGRATION_ENABLED_PATH=${OURS_MIGRATION_ENABLED_PATH}"
+    "MGLRU_ENABLED=${MGLRU_ENABLED}"
+    "DEMOTION_ENABLED=true"
+    "DEMOTION_TARGET=$(demotion_target_for_wrapper)"
+    "NUMA_SCAN_SIZE_MB=${NUMA_SCAN_SIZE_MB}"
+    "NUMA_SCAN_PERIOD_MIN_MS=${NUMA_SCAN_PERIOD_MIN_MS}"
+    "THP_MODE=${THP_MODE}"
+    "THP_DEFRAG=${THP_DEFRAG}"
+    "${FAULT_BUCKET_CONTROLLER_RUNNER}"
+  )
+
+  {
+    printf 'wrapper_command='
+    printf '%q ' "${wrapper_env[@]}"
+    printf '\n'
+    printf 'controller_outdir=%s\n' "${controller_outdir}"
+    printf 'controller_csv=%s\n' "${controller_outdir}/controller.csv"
+    printf 'controller_runner=%s\n' "${FAULT_BUCKET_CONTROLLER_RUNNER}"
+    printf 'controller_window_sec=%s\n' "${OURS_WINDOW_SEC}"
+    printf 'controller_cycle_window_min_sec=%s\n' "${OURS_CYCLE_WINDOW_MIN_SEC}"
+    printf 'controller_cycle_window_max_sec=%s\n' "${OURS_CYCLE_WINDOW_MAX_SEC}"
+    printf 'controller_local_rate=%s\n' "${LOCAL_FAULT_RATE}"
+    printf 'controller_local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    printf 'controller_local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+    printf 'controller_min_local_pages=%s\n' "${OURS_MIN_LOCAL_PAGES}"
+    printf 'controller_min_remote_pages=%s\n' "${OURS_MIN_REMOTE_PAGES}"
+    printf 'controller_start_consecutive=%s\n' "${OURS_START_CONSECUTIVE}"
+    printf 'controller_start_capacity_margin_pct=%s\n' "${OURS_START_CAPACITY_MARGIN_PCT}"
+    printf 'controller_stop_capacity_ratio_threshold=%s\n' "${OURS_STOP_CAPACITY_RATIO_THRESHOLD}"
+    printf 'controller_local_node=%s\n' "${LOCAL_NODE}"
+    printf 'controller_remote_node=%s\n' "${REMOTE_NODE}"
+    printf 'controller_workload_command=%s\n' "${workload_command_quoted}"
+    printf 'controller_migration_enabled_path=%s\n' "${OURS_MIGRATION_ENABLED_PATH}"
+  } > "${outdir}/controller.env"
+
+  log "run quantile controller target=${target}G mode=${migration} workload=${workload}"
+  set +e
+  "${wrapper_env[@]}"
+  wrapper_rc=$?
+  set -e
+
+  status_rc=""
+  if [[ -r "${controller_outdir}/exit.status" ]]; then
+    status_rc="$(cat "${controller_outdir}/exit.status")"
+  fi
+  [[ "${status_rc}" =~ ^[0-9]+$ ]] || status_rc="${wrapper_rc}"
+  WRAPPED_RC="${status_rc}"
+  WRAPPED_ELAPSED=""
+
+  {
+    printf '### controller workload stdout\n'
+    cat "${controller_outdir}/stdout.txt" 2>/dev/null || true
+    printf '\n### controller workload stderr\n'
+    cat "${controller_outdir}/stderr.txt" 2>/dev/null || true
+    printf '\n### controller time\n'
+    cat "${controller_outdir}/time.txt" 2>/dev/null || true
+  } > "${outdir}/workload.stdout.txt"
+  printf '%s\n' "${wrapper_rc}" > "${outdir}/wrapper.rc"
+  ln -sf controller/controller.csv "${outdir}/controller.csv" 2>/dev/null || true
+  ln -sf controller/config.meta "${outdir}/controller.config.meta" 2>/dev/null || true
+  ln -sf controller/time.txt "${outdir}/controller.time.txt" 2>/dev/null || true
+}
+
+apply_runtime_knobs() {
+  mkdir -p /sys/kernel/debug
+  mountpoint -q /sys/kernel/debug ||
+    mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+  write_sysfs_if_writable /sys/kernel/debug/sched/numa_balancing/scan_size_mb "${NUMA_SCAN_SIZE_MB}"
+  write_sysfs_if_writable /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms "${NUMA_SCAN_PERIOD_MIN_MS}"
+  write_sysfs_if_writable /sys/kernel/mm/transparent_hugepage/enabled "${THP_MODE}"
+  write_sysfs_if_writable /sys/kernel/mm/transparent_hugepage/defrag "${THP_DEFRAG}"
+  write_sysfs_if_writable /sys/kernel/mm/lru_gen/enabled "${MGLRU_ENABLED}"
+
+  local pair src dst
+  if [[ -w /sys/kernel/mm/numa/demotion_target ]]; then
+    for pair in ${DEMOTION_TARGETS}; do
+      src="${pair%%:*}"
+      dst="${pair#*:}"
+      [[ -n "${src}" && -n "${dst}" && "${src}" != "${dst}" ]] || continue
+      printf '%s %s\n' "${src}" "${dst}" > /sys/kernel/mm/numa/demotion_target || true
+    done
+  fi
 }
 
 wait_for_converge_if_running() {
@@ -288,7 +539,9 @@ converge_current_target_and_reboot() {
   local target="$1" reason="$2"
   log "${reason}; preserving current boot plan and rebooting for target=${target}G convergence"
   save_state
-  MAX_REBOOTS=4 ICCD_FROM_REBOOT_HOOK=1 VERIFY_WARMUP_PR_AFTER_REBOOT=0 \
+  LOCAL_NODE="${LOCAL_NODE}" KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES}" \
+    OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE}" MAX_REBOOTS=4 \
+    ICCD_FROM_REBOOT_HOOK=1 VERIFY_WARMUP_PR_AFTER_REBOOT=0 \
     "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
   exit 0
 }
@@ -301,11 +554,17 @@ apply_target_boot_and_reboot() {
   save_state
   if [[ -n "${cmdline}" && -n "${online_gib}" ]]; then
     log "switching to target=${target}G with current-host boot cmdline and rebooting"
-    MAX_REBOOTS=4 BOOT_CMDLINE_OVERRIDE="${cmdline}" \
+    LOCAL_NODE="${LOCAL_NODE}" KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES}" \
+      OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE}" MAX_REBOOTS=4 \
+      VERIFY_WARMUP_PR_AFTER_REBOOT=0 \
+      BOOT_CMDLINE_OVERRIDE="${cmdline}" \
       "${HOST_BOOT_SCRIPT}" apply --target-gib "${target}" --node0-online-gib "${online_gib}" --apply --reboot
   else
     log "switching to target=${target}G; no static cmdline configured, starting convergence and reboot"
-    MAX_REBOOTS=4 "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
+    LOCAL_NODE="${LOCAL_NODE}" KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES}" \
+      OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE}" MAX_REBOOTS=4 \
+      VERIFY_WARMUP_PR_AFTER_REBOOT=0 \
+      "${HOST_BOOT_SCRIPT}" converge --target-gib "${target}" --apply --reboot
   fi
   exit 0
 }
@@ -321,6 +580,8 @@ verify_target_or_reboot() {
     drop_caches
     verify_log="${outdir}/verify.target${target}g.attempt${attempt}.txt"
     if DROP_CACHES_BEFORE_VERIFY=1 TARGET_TOLERANCE_GIB="${TARGET_TOLERANCE_GIB}" \
+        LOCAL_NODE="${LOCAL_NODE}" KEEP_MEMORY_NODES="${KEEP_MEMORY_NODES}" \
+        OFFLINE_CPU_NODE="${OFFLINE_CPU_NODE}" \
         "${HOST_BOOT_SCRIPT}" verify --target-gib "${target}" > "${verify_log}" 2>&1; then
       cp /proc/cmdline "${outdir}/proc.cmdline.txt" 2>/dev/null || true
       return 0
@@ -336,25 +597,75 @@ verify_target_or_reboot() {
 
 set_migration_mode() {
   local mode="$1"
+  local expected_numa expected_migration expected_demotion
+  local actual_numa actual_migration actual_demotion
   case "${mode}" in
-    on)
-      printf '2\n' > /proc/sys/kernel/numa_balancing
-      ;;
     off)
-      printf '0\n' > /proc/sys/kernel/numa_balancing
+      expected_numa=0
+      expected_migration=0
+      expected_demotion=false
+      ;;
+    on)
+      expected_numa=2
+      expected_migration=1
+      expected_demotion=true
+      ;;
+    tpp)
+      expected_numa=4
+      expected_migration=1
+      expected_demotion=true
+      ;;
+    ours)
+      expected_numa=2
+      expected_migration=1
+      expected_demotion=true
+      write_sysfs_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+      write_sysfs_if_writable /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb "${LOCAL_FAULT_SCAN_SIZE_MB}"
       ;;
     *)
       die "unknown migration mode: ${mode}"
       ;;
   esac
+
+  printf '%s\n' "${expected_numa}" > /proc/sys/kernel/numa_balancing
+  write_sysfs_if_writable "${OURS_MIGRATION_ENABLED_PATH}" "${expected_migration}"
+  write_sysfs_if_writable /sys/kernel/mm/numa/demotion_enabled "${expected_demotion}"
+  if [[ "${mode}" == "ours" ]]; then
+    write_sysfs_if_writable /sys/kernel/mm/numa_balancing/local_fault_rate "${LOCAL_FAULT_RATE}"
+  else
+    write_sysfs_if_writable /sys/kernel/mm/numa_balancing/local_fault_rate 0
+  fi
+
+  actual_numa="$(tr -d '[:space:]' < /proc/sys/kernel/numa_balancing)"
+  actual_migration="$(tr -d '[:space:]' < "${OURS_MIGRATION_ENABLED_PATH}")"
+  actual_demotion="$(tr -d '[:space:]' < /sys/kernel/mm/numa/demotion_enabled)"
+  [[ "${actual_numa}" == "${expected_numa}" ]] ||
+    die "${mode}: NUMA balancing readback ${actual_numa}, expected ${expected_numa}"
+  [[ "${actual_migration}" == "${expected_migration}" ]] ||
+    die "${mode}: migration readback ${actual_migration}, expected ${expected_migration}"
+  [[ "${actual_demotion}" == "${expected_demotion}" ]] ||
+    die "${mode}: demotion readback ${actual_demotion}, expected ${expected_demotion}"
 }
 
 snapshot_common() {
   local outdir="$1" phase="$2"
   mkdir -p "${outdir}"
   cat /proc/sys/kernel/numa_balancing > "${outdir}/numa_balancing.${phase}.txt" 2>/dev/null || true
+  cat "${OURS_MIGRATION_ENABLED_PATH}" > "${outdir}/migration_enabled.${phase}.txt" 2>/dev/null || true
+  swapon --show > "${outdir}/swapon.${phase}.txt" 2>/dev/null || true
+  cat /sys/kernel/debug/sched/numa_balancing/scan_size_mb > "${outdir}/scan_size_mb.${phase}.txt" 2>/dev/null || true
+  cat /sys/kernel/debug/sched/numa_balancing/scan_period_min_ms > "${outdir}/scan_period_min_ms.${phase}.txt" 2>/dev/null || true
   cat /sys/kernel/mm/numa/demotion_enabled > "${outdir}/demotion_enabled.${phase}.txt" 2>/dev/null || true
   cat /sys/kernel/mm/numa/demotion_target > "${outdir}/demotion_target.${phase}.txt" 2>/dev/null || true
+  for name in \
+    local_fault_rate \
+    local_fault_scan_period_ms \
+    local_fault_scan_size_mb \
+    local_fault_window \
+    remote_scan_cycles \
+    fault_latency_quantiles; do
+    cat "/sys/kernel/mm/numa_balancing/${name}" > "${outdir}/${name}.${phase}.txt" 2>/dev/null || true
+  done
   cat "/sys/devices/system/node/node${LOCAL_NODE}/meminfo" > "${outdir}/node${LOCAL_NODE}.meminfo.${phase}.txt" 2>/dev/null || true
   cat "/sys/devices/system/node/node${REMOTE_NODE}/meminfo" > "${outdir}/node${REMOTE_NODE}.meminfo.${phase}.txt" 2>/dev/null || true
   cat /proc/vmstat > "${outdir}/vmstat.${phase}.txt" 2>/dev/null || true
@@ -475,12 +786,10 @@ workload_command() {
   WORKLOAD_CMD=()
   case "${workload}" in
     pr)
-      [[ -r "${GAPBS_GRAPH}" ]] || die "missing GAPBS graph: ${GAPBS_GRAPH}"
-      WORKLOAD_CMD=("${PR_BIN}" -f "${GAPBS_GRAPH}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
+      WORKLOAD_CMD=("${PR_BIN}" -g "${GAPBS_GRAPH_SCALE}" -i "${PR_ITERATIONS}" -t "${PR_TOLERANCE}" -n "${PR_TRIALS}")
       ;;
     bc)
-      [[ -r "${GAPBS_GRAPH}" ]] || die "missing GAPBS graph: ${GAPBS_GRAPH}"
-      WORKLOAD_CMD=("${BC_BIN}" -f "${GAPBS_GRAPH}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
+      WORKLOAD_CMD=("${BC_BIN}" -g "${GAPBS_GRAPH_SCALE}" -i "${BC_ITERATIONS}" -n "${BC_TRIALS}")
       ;;
     gups)
       WORKLOAD_CMD=("${GUPS_BIN}")
@@ -522,7 +831,9 @@ run_one_workload() {
   mkdir -p "${outdir}"
 
   verify_target_or_reboot "${target}" "${outdir}"
+  apply_runtime_knobs
   set_migration_mode "${migration}"
+  disable_swap_if_requested
   drop_caches
   if ! target_ok "${target}"; then
     log "target ${target}G drifted after setting migration=${migration}; retrying verify before convergence"
@@ -537,7 +848,38 @@ run_one_workload() {
     printf 'target_gib=%s\n' "${target}"
     printf 'migration=%s\n' "${migration}"
     printf 'workload=%s\n' "${workload}"
-    printf 'gapbs_graph=%s\n' "${GAPBS_GRAPH}"
+    printf 'local_node=%s\n' "${LOCAL_NODE}"
+    printf 'remote_node=%s\n' "${REMOTE_NODE}"
+    printf 'keep_memory_nodes=%s\n' "${KEEP_MEMORY_NODES}"
+    printf 'offline_cpu_node=%s\n' "${OFFLINE_CPU_NODE}"
+    printf 'cpu_node=%s\n' "${CPU_NODE}"
+    printf 'local_fault_rate=%s\n' "${LOCAL_FAULT_RATE}"
+    printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+    printf 'migration_enabled_path=%s\n' "${OURS_MIGRATION_ENABLED_PATH}"
+    printf 'migration_enabled=%s\n' "$(cat "${OURS_MIGRATION_ENABLED_PATH}" 2>/dev/null || printf 'NA')"
+    printf 'disable_swap=%s\n' "${DISABLE_SWAP}"
+    printf 'swap_total_kib=%s\n' "$(awk '/^SwapTotal:/ { print $2; found = 1 } END { if (!found) print "NA" }' /proc/meminfo 2>/dev/null)"
+    printf 'swap_free_kib=%s\n' "$(awk '/^SwapFree:/ { print $2; found = 1 } END { if (!found) print "NA" }' /proc/meminfo 2>/dev/null)"
+    printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
+    printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
+    printf 'thp_mode=%s\n' "${THP_MODE}"
+    printf 'thp_defrag=%s\n' "${THP_DEFRAG}"
+    printf 'mglru_enabled=%s\n' "${MGLRU_ENABLED}"
+    printf 'numa_balancing=%s\n' "$(cat /proc/sys/kernel/numa_balancing 2>/dev/null || printf 'NA')"
+    printf 'demotion_enabled=%s\n' "$(cat /sys/kernel/mm/numa/demotion_enabled 2>/dev/null || printf 'NA')"
+    printf 'demotion_targets=%s\n' "${DEMOTION_TARGETS}"
+    printf 'fault_bucket_controller_dir=%s\n' "${FAULT_BUCKET_CONTROLLER_DIR}"
+    printf 'fault_bucket_controller_runner=%s\n' "${FAULT_BUCKET_CONTROLLER_RUNNER}"
+    printf 'ours_window_sec=%s\n' "${OURS_WINDOW_SEC}"
+    printf 'ours_cycle_window_min_sec=%s\n' "${OURS_CYCLE_WINDOW_MIN_SEC}"
+    printf 'ours_cycle_window_max_sec=%s\n' "${OURS_CYCLE_WINDOW_MAX_SEC}"
+    printf 'ours_min_local_pages=%s\n' "${OURS_MIN_LOCAL_PAGES}"
+    printf 'ours_min_remote_pages=%s\n' "${OURS_MIN_REMOTE_PAGES}"
+    printf 'ours_start_consecutive=%s\n' "${OURS_START_CONSECUTIVE}"
+    printf 'ours_start_capacity_margin_pct=%s\n' "${OURS_START_CAPACITY_MARGIN_PCT}"
+    printf 'ours_stop_capacity_ratio_threshold=%s\n' "${OURS_STOP_CAPACITY_RATIO_THRESHOLD}"
+    printf 'gapbs_graph_source=generated\n'
     printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE}"
     printf 'command='
     printf '%q ' "${TIME_BIN}" -v "${NUMACTL_BIN}" --cpunodebind="${CPU_NODE}" --localalloc \
@@ -552,18 +894,28 @@ run_one_workload() {
   rapl_dram_max="$(rapl_read_value "${RAPL_DRAM_DOMAIN}" max_energy_range_uj 2>/dev/null || true)"
   start_ipmi_power_sampler "${outdir}"
   start="$(date +%s)"
-  set +e
-  "${TIME_BIN}" -v \
-    "${NUMACTL_BIN}" --cpunodebind="${CPU_NODE}" --localalloc \
-    env OMP_NUM_THREADS="${OMP_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores \
-    "${WORKLOAD_CMD[@]}" > "${outdir}/workload.stdout.txt" 2>&1
-  rc=$?
-  set -e
+  if [[ "${migration}" == "ours" ]]; then
+    WRAPPED_RC=""
+    WRAPPED_ELAPSED=""
+    run_controller_wrapped_workload "${target}" "${migration}" "${workload}" "${outdir}"
+    rc="${WRAPPED_RC}"
+  else
+    set +e
+    "${TIME_BIN}" -v \
+      "${NUMACTL_BIN}" --cpunodebind="${CPU_NODE}" --localalloc \
+      env OMP_NUM_THREADS="${OMP_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores \
+      "${WORKLOAD_CMD[@]}" > "${outdir}/workload.stdout.txt" 2>&1
+    rc=$?
+    set -e
+  fi
   end="$(date +%s)"
   stop_ipmi_power_sampler
   rapl_pkg_end="$(rapl_read_value "${RAPL_PACKAGE_DOMAIN}" energy_uj 2>/dev/null || true)"
   rapl_dram_end="$(rapl_read_value "${RAPL_DRAM_DOMAIN}" energy_uj 2>/dev/null || true)"
   elapsed=$((end - start))
+  if [[ "${migration}" == "ours" && "${WRAPPED_ELAPSED}" =~ ^[0-9]+$ ]]; then
+    elapsed="${WRAPPED_ELAPSED}"
+  fi
   rapl_pkg_delta="$(rapl_delta_uj "${rapl_pkg_start}" "${rapl_pkg_end}" "${rapl_pkg_max}" 2>/dev/null || true)"
   rapl_dram_delta="$(rapl_delta_uj "${rapl_dram_start}" "${rapl_dram_end}" "${rapl_dram_max}" 2>/dev/null || true)"
   rapl_pkg_j="$(uj_to_j "${rapl_pkg_delta}")"
@@ -643,6 +995,8 @@ resume_run() {
   fi
 
   load_state
+  validate_run_configuration
+  require_kernel_abi
   split_words "${TARGETS}"; local -a targets=("${SPLIT_WORDS[@]}")
   split_words "${MIGRATION_MODES}"; local -a migrations=("${SPLIT_WORDS[@]}")
   split_words "${WORKLOADS}"; local -a workloads=("${SPLIT_WORDS[@]}")
@@ -667,6 +1021,8 @@ resume_run() {
 
 start_run() {
   require_root
+  validate_run_configuration
+  require_kernel_abi
   RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
   TARGET_INDEX=0
   MIGRATION_INDEX=0
@@ -679,9 +1035,15 @@ start_run() {
     printf 'targets=%s\n' "${TARGETS}"
     printf 'migration_modes=%s\n' "${MIGRATION_MODES}"
     printf 'workloads=%s\n' "${WORKLOADS}"
-    printf 'gapbs_graph=%s\n' "${GAPBS_GRAPH}"
-    printf 'pr_args=-f %s -i %s -t %s -n %s\n' "${GAPBS_GRAPH}" "${PR_ITERATIONS}" "${PR_TOLERANCE}" "${PR_TRIALS}"
-    printf 'bc_args=-f %s -i %s -n %s\n' "${GAPBS_GRAPH}" "${BC_ITERATIONS}" "${BC_TRIALS}"
+    printf 'local_node=%s\n' "${LOCAL_NODE}"
+    printf 'remote_node=%s\n' "${REMOTE_NODE}"
+    printf 'keep_memory_nodes=%s\n' "${KEEP_MEMORY_NODES}"
+    printf 'offline_cpu_node=%s\n' "${OFFLINE_CPU_NODE}"
+    printf 'cpu_node=%s\n' "${CPU_NODE}"
+    printf 'gapbs_graph_source=generated\n'
+    printf 'gapbs_graph_scale=%s\n' "${GAPBS_GRAPH_SCALE}"
+    printf 'pr_args=-g %s -i %s -t %s -n %s\n' "${GAPBS_GRAPH_SCALE}" "${PR_ITERATIONS}" "${PR_TOLERANCE}" "${PR_TRIALS}"
+    printf 'bc_args=-g %s -i %s -n %s\n' "${GAPBS_GRAPH_SCALE}" "${BC_ITERATIONS}" "${BC_TRIALS}"
     printf 'gups_bin=%s\n' "${GUPS_BIN}"
     printf 'btree_bin=%s\n' "${BTREE_BIN}"
     printf 'graph500_bin=%s\n' "${GRAPH500_BIN}"
@@ -700,9 +1062,36 @@ start_run() {
     printf 'rapl_dram_domain=%s\n' "${RAPL_DRAM_DOMAIN}"
     printf 'ipmi_power_sampling=%s\n' "${IPMI_POWER_SAMPLING}"
     printf 'ipmi_power_interval_sec=%s\n' "${IPMI_POWER_INTERVAL_SEC}"
+    printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
+    printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
+    printf 'local_fault_rate=%s\n' "${LOCAL_FAULT_RATE}"
+    printf 'local_fault_scan_period_ms=%s\n' "${LOCAL_FAULT_SCAN_PERIOD_MS}"
+    printf 'local_fault_scan_size_mb=%s\n' "${LOCAL_FAULT_SCAN_SIZE_MB}"
+    printf 'mglru_enabled=%s\n' "${MGLRU_ENABLED}"
+    printf 'thp_mode=%s\n' "${THP_MODE}"
+    printf 'thp_defrag=%s\n' "${THP_DEFRAG}"
+    printf 'demotion_policy=off:false;on:true;tpp:true;ours:true\n'
+    printf 'demotion_targets=%s\n' "${DEMOTION_TARGETS}"
+    printf 'fault_bucket_controller_dir=%s\n' "${FAULT_BUCKET_CONTROLLER_DIR}"
+    printf 'fault_bucket_controller_runner=%s\n' "${FAULT_BUCKET_CONTROLLER_RUNNER}"
+    printf 'ours_window_sec=%s\n' "${OURS_WINDOW_SEC}"
+    printf 'ours_cycle_window_min_sec=%s\n' "${OURS_CYCLE_WINDOW_MIN_SEC}"
+    printf 'ours_cycle_window_max_sec=%s\n' "${OURS_CYCLE_WINDOW_MAX_SEC}"
+    printf 'ours_min_local_pages=%s\n' "${OURS_MIN_LOCAL_PAGES}"
+    printf 'ours_min_remote_pages=%s\n' "${OURS_MIN_REMOTE_PAGES}"
+    printf 'ours_start_consecutive=%s\n' "${OURS_START_CONSECUTIVE}"
+    printf 'ours_start_capacity_margin_pct=%s\n' "${OURS_START_CAPACITY_MARGIN_PCT}"
+    printf 'ours_stop_capacity_ratio_threshold=%s\n' "${OURS_STOP_CAPACITY_RATIO_THRESHOLD}"
+    printf 'ours_migration_enabled_path=%s\n' "${OURS_MIGRATION_ENABLED_PATH}"
   } > "$(run_dir)/run_meta.env"
   save_state
   install_reboot_hook
+  split_words "${TARGETS}"
+  local first_target="${SPLIT_WORDS[0]}"
+  if ! target_ok "${first_target}"; then
+    log "initial target=${first_target}G is not active; applying target boot before first workload"
+    apply_target_boot_and_reboot "${first_target}"
+  fi
   resume_run
 }
 

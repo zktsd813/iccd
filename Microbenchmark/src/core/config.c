@@ -188,6 +188,8 @@ const char *mbench_placement_name(enum mbench_placement_kind kind)
         return "split";
     case MBENCH_PLACEMENT_WINDOW_SPLIT:
         return "window-split";
+    case MBENCH_PLACEMENT_ARENA_SPLIT:
+        return "arena-split";
     default:
         return "unknown";
     }
@@ -316,6 +318,26 @@ const char *mbench_phase_preset_name(enum mbench_phase_preset preset)
         return "fixed4g-remote-split32";
     case MBENCH_PHASE_PRESET_FIXED8G_REMOTE_SPLIT32:
         return "fixed8g-remote-split32";
+    case MBENCH_PHASE_PRESET_SPARSE64_MULSHIFT4G:
+        return "sparse64-mulshift4g";
+    case MBENCH_PHASE_PRESET_SPARSE64_WEIGHTED8G:
+        return "sparse64-weighted8g";
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT8G:
+        return "sparse60-disjoint8g";
+    case MBENCH_PHASE_PRESET_SPARSE60_DISJOINT28G:
+        return "sparse60-disjoint28g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT28G:
+        return "gups60-disjoint28g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT32G:
+        return "gups60-disjoint32g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT48G:
+        return "gups60-disjoint48g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT36G:
+        return "gups60-disjoint36g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT38G:
+        return "gups60-disjoint38g";
+    case MBENCH_PHASE_PRESET_GUPS60_DISJOINT40G:
+        return "gups60-disjoint40g";
     default:
         return "unknown";
     }
@@ -446,6 +468,61 @@ int mbench_phase_preset_from_string(const char *value,
         strcasecmp(value, "fixed8g-remote-vs-split32") == 0 ||
         strcasecmp(value, "fixed8g-remote-vs-stream32") == 0) {
         *preset = MBENCH_PHASE_PRESET_FIXED8G_REMOTE_SPLIT32;
+        return 0;
+    }
+    if (strcasecmp(value, "sparse64-mulshift4g") == 0 ||
+        strcasecmp(value, "sparse64-vs-mulshift4g") == 0) {
+        *preset = MBENCH_PHASE_PRESET_SPARSE64_MULSHIFT4G;
+        return 0;
+    }
+    if (strcasecmp(value, "sparse64-weighted8g") == 0 ||
+        strcasecmp(value, "sparse64-vs-weighted8g") == 0) {
+        *preset = MBENCH_PHASE_PRESET_SPARSE64_WEIGHTED8G;
+        return 0;
+    }
+    if (strcasecmp(value, "sparse60-disjoint8g") == 0 ||
+        strcasecmp(value, "sparse60-vs-disjoint8g") == 0) {
+        *preset = MBENCH_PHASE_PRESET_SPARSE60_DISJOINT8G;
+        return 0;
+    }
+    if (strcasecmp(value, "sparse60-disjoint28g") == 0 ||
+        strcasecmp(value, "sparse60-vs-disjoint28g") == 0) {
+        *preset = MBENCH_PHASE_PRESET_SPARSE60_DISJOINT28G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint28g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint28g") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT28G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint32g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint32g") == 0 ||
+        strcasecmp(value, "gups60-bg24-hot8g80") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT32G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint48g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint48g") == 0 ||
+        strcasecmp(value, "gups60-bg24-hot24g80") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT48G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint36g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint36g") == 0 ||
+        strcasecmp(value, "gups60-bg24-hot12g80") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT36G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint38g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint38g") == 0 ||
+        strcasecmp(value, "gups60-bg24-hot14g80") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT38G;
+        return 0;
+    }
+    if (strcasecmp(value, "gups60-disjoint40g") == 0 ||
+        strcasecmp(value, "gups60-vs-disjoint40g") == 0 ||
+        strcasecmp(value, "gups60-bg24-hot16g80") == 0) {
+        *preset = MBENCH_PHASE_PRESET_GUPS60_DISJOINT40G;
         return 0;
     }
     return -EINVAL;
@@ -674,6 +751,73 @@ int mbench_parse_double(const char *value, double *out)
     return 0;
 }
 
+int mbench_parse_residency_probe(const char *value,
+                                 struct mbench_residency_probe_config *probe)
+{
+    char *copy;
+    char *offset_text;
+    char *size_text;
+    size_t label_len;
+    size_t offset_bytes;
+    size_t size_bytes;
+    int rc;
+
+    if (!value || !probe) {
+        return -EINVAL;
+    }
+
+    copy = strdup(value);
+    if (!copy) {
+        return -ENOMEM;
+    }
+
+    offset_text = strchr(copy, ':');
+    if (!offset_text) {
+        free(copy);
+        return -EINVAL;
+    }
+    *offset_text++ = '\0';
+
+    size_text = strchr(offset_text, ':');
+    if (!size_text || strchr(size_text + 1, ':') != NULL) {
+        free(copy);
+        return -EINVAL;
+    }
+    *size_text++ = '\0';
+
+    label_len = strlen(copy);
+    if (label_len == 0 || label_len >= sizeof(probe->label)) {
+        free(copy);
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < label_len; ++i) {
+        unsigned char ch = (unsigned char)copy[i];
+        bool ascii_alnum = (ch >= '0' && ch <= '9') ||
+            (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+
+        if (!ascii_alnum && ch != '_' && ch != '-' && ch != '.') {
+            free(copy);
+            return -EINVAL;
+        }
+    }
+
+    rc = mbench_parse_size_bytes(offset_text, &offset_bytes);
+    if (rc == 0) {
+        rc = mbench_parse_size_bytes(size_text, &size_bytes);
+    }
+    if (rc != 0 || size_bytes == 0) {
+        free(copy);
+        return rc != 0 ? rc : -EINVAL;
+    }
+
+    memset(probe, 0, sizeof(*probe));
+    memcpy(probe->label, copy, label_len);
+    probe->offset_bytes = offset_bytes;
+    probe->size_bytes = size_bytes;
+    free(copy);
+    return 0;
+}
+
 void mbench_config_init(struct mbench_config *config)
 {
     memset(config, 0, sizeof(*config));
@@ -681,6 +825,7 @@ void mbench_config_init(struct mbench_config *config)
     config->bw_kernel = MBENCH_BW_TRIAD;
     config->hugepage = MBENCH_HUGEPAGE_NONE;
     config->prefault = true;
+    config->prefault_node = -1;
     config->seed = k_default_seed;
     config->timing.duration_ms = k_default_duration_ms;
     config->timing.sample_ms = k_default_sample_ms;
@@ -700,6 +845,7 @@ void mbench_config_init(struct mbench_config *config)
     config->placement.local_node = -1;
     config->placement.remote_node = -1;
     config->placement.window_split_local_bytes = 0;
+    config->placement.arena_split_local_bytes = 0;
     config->placement.strict = false;
     config->threads.total_threads = 0;
     config->threads.pc_threads = 0;
@@ -713,12 +859,15 @@ void mbench_config_init(struct mbench_config *config)
     config->bw_pattern.block_bytes = 0;
     config->bw_pattern.shared_window = false;
     config->hotset.hotset_pages = 0;
+    config->hotset.background_pages = 0;
     config->hotset.hot_prob_pct = 90U;
     config->hotset.read_pct = 100U;
     config->hotset.write_pct = 0U;
     config->hotset.rmw_pct = 0U;
     config->hotset.index_mode = MBENCH_HOTSET_INDEX_XORSHIFT;
     config->hotset.prefault_node = -1;
+    config->hotset.shared_window = false;
+    config->hotset.tail = false;
     config->irregular.kernel = MBENCH_INDEX_RMW;
     config->irregular.distribution = MBENCH_INDEX_DIST_UNIFORM;
     config->irregular.zipf_alpha = k_default_index_zipf_alpha;
@@ -729,6 +878,8 @@ void mbench_config_init(struct mbench_config *config)
     config->phase.preset = MBENCH_PHASE_PRESET_NONE;
     config->phase.repeat = 1U;
     config->phase.duration_ms = k_default_phase_duration_ms;
+    config->phase.phase1_target_ops = 0;
+    config->phase.phase2_target_ops = 0;
 }
 
 static int finalize_thread_counts(struct mbench_config *config)
@@ -828,6 +979,8 @@ int mbench_config_validate(struct mbench_config *config)
         mbench_align_up_size(config->window.move_max_offset_bytes, ps);
     config->placement.window_split_local_bytes =
         mbench_align_up_size(config->placement.window_split_local_bytes, ps);
+    config->placement.arena_split_local_bytes =
+        mbench_align_up_size(config->placement.arena_split_local_bytes, ps);
     /*
      * Ignore caller-provided duration knobs and keep every run at a fixed
      * 200-second measured window. The runtime layer adds a fixed warmup
@@ -889,6 +1042,12 @@ int mbench_config_validate(struct mbench_config *config)
     if ((size_t)config->hotset.hotset_pages > total_pages) {
         config->hotset.hotset_pages = (uint32_t)total_pages;
     }
+    if (config->hotset.background_pages > 0 &&
+        (!config->hotset.tail ||
+         (size_t)config->hotset.background_pages >
+             total_pages - (size_t)config->hotset.hotset_pages)) {
+        return -EINVAL;
+    }
     if (config->hotset.hot_prob_pct > 100U) {
         return -EINVAL;
     }
@@ -919,13 +1078,25 @@ int mbench_config_validate(struct mbench_config *config)
         config->irregular.segment_span_ops = k_default_index_segment_span_ops;
     }
     if ((config->placement.kind == MBENCH_PLACEMENT_SPLIT ||
-         config->placement.kind == MBENCH_PLACEMENT_WINDOW_SPLIT) &&
+         config->placement.kind == MBENCH_PLACEMENT_WINDOW_SPLIT ||
+         config->placement.kind == MBENCH_PLACEMENT_ARENA_SPLIT) &&
         config->placement.nodes.count < 2) {
         return -EINVAL;
     }
     if (config->placement.kind == MBENCH_PLACEMENT_WINDOW_SPLIT &&
         config->placement.window_split_local_bytes >= config->window.window_bytes &&
         config->placement.window_split_local_bytes != 0) {
+        return -EINVAL;
+    }
+    if (config->placement.kind == MBENCH_PLACEMENT_ARENA_SPLIT) {
+        if (config->placement.nodes.count != 2 ||
+            config->placement.nodes.nodes[0] == config->placement.nodes.nodes[1] ||
+            config->placement.arena_split_local_bytes == 0 ||
+            config->placement.arena_split_local_bytes >= config->window.arena_bytes ||
+            !config->prefault) {
+            return -EINVAL;
+        }
+    } else if (config->placement.arena_split_local_bytes != 0) {
         return -EINVAL;
     }
     if (config->placement.kind == MBENCH_PLACEMENT_NONE) {
@@ -943,9 +1114,46 @@ int mbench_config_validate(struct mbench_config *config)
     if (config->phase.duration_ms == 0) {
         return -EINVAL;
     }
+    if ((config->phase.phase1_target_ops == 0) !=
+        (config->phase.phase2_target_ops == 0)) {
+        return -EINVAL;
+    }
+    if (config->phase.phase1_target_ops > 0 &&
+        config->phase.preset == MBENCH_PHASE_PRESET_NONE) {
+        return -EINVAL;
+    }
     if (config->request.target_ops > 0 &&
         config->phase.preset != MBENCH_PHASE_PRESET_NONE) {
         return -EINVAL;
+    }
+    if (config->phase.boundary_probe_count > MBENCH_MAX_PHASE_BOUNDARY_PROBES) {
+        return -E2BIG;
+    }
+    if (config->phase.boundary_probe_count > 0 &&
+        config->phase.preset == MBENCH_PHASE_PRESET_NONE) {
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < config->phase.boundary_probe_count; ++i) {
+        const struct mbench_residency_probe_config *probe =
+            &config->phase.boundary_probes[i];
+        size_t label_len = strnlen(probe->label, sizeof(probe->label));
+
+        if (label_len == 0 || label_len == sizeof(probe->label) ||
+            probe->size_bytes == 0 ||
+            probe->offset_bytes % ps != 0 || probe->size_bytes % ps != 0 ||
+            probe->offset_bytes > config->window.arena_bytes ||
+            probe->size_bytes > config->window.arena_bytes - probe->offset_bytes) {
+            return -EINVAL;
+        }
+        for (size_t ch_index = 0; ch_index < label_len; ++ch_index) {
+            unsigned char ch = (unsigned char)probe->label[ch_index];
+            bool ascii_alnum = (ch >= '0' && ch <= '9') ||
+                (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+
+            if (!ascii_alnum && ch != '_' && ch != '-' && ch != '.') {
+                return -EINVAL;
+            }
+        }
     }
     return finalize_thread_counts(config);
 }
@@ -970,6 +1178,7 @@ static int parse_placement_spec(const char *value, struct mbench_numa_config *pl
             placement->local_node = -1;
             placement->remote_node = -1;
             placement->window_split_local_bytes = 0;
+            placement->arena_split_local_bytes = 0;
             return 0;
         }
         return -EINVAL;
@@ -994,6 +1203,8 @@ static int parse_placement_spec(const char *value, struct mbench_numa_config *pl
     } else if (strcasecmp(kind_buf, "window-split") == 0 ||
                strcasecmp(kind_buf, "windowsplit") == 0) {
         placement->kind = MBENCH_PLACEMENT_WINDOW_SPLIT;
+    } else if (strcasecmp(kind_buf, "arena-split") == 0) {
+        placement->kind = MBENCH_PLACEMENT_ARENA_SPLIT;
     } else {
         return -EINVAL;
     }
@@ -1037,12 +1248,16 @@ void mbench_print_usage(FILE *out, const char *progname)
             "  --sample-ms N\n"
             "  --move-interval-ms N\n"
             "  timing note: non-phase runs ignore duration knobs and use a fixed 20s warmup + 200s measured phase\n"
-            "  --phase-preset none|friendly-unfriendly|tail-hotset-sparse16|tail-hotset-sparse24|sparse24-tail-hotset|skew4g-sparse64|mulshift4g-sparse24|mulshift4g-sparse64|mulshift4g-rot-sparse24|mulshift4g-rot-sparse64|mulshift4g-rot-move16g3s|mulshift4g-block2m-sparse64|move15s4g-split32|move15s4g-remote-split32|move60s4g-remote-split32|fixed4g-remote-split32|fixed8g-remote-split32\n"
+            "  --phase-preset none|friendly-unfriendly|tail-hotset-sparse16|tail-hotset-sparse24|sparse24-tail-hotset|skew4g-sparse64|mulshift4g-sparse24|mulshift4g-sparse64|sparse64-mulshift4g|sparse64-weighted8g|sparse60-disjoint8g|sparse60-disjoint28g|gups60-disjoint28g|gups60-disjoint32g|gups60-disjoint36g|gups60-disjoint38g|gups60-disjoint40g|gups60-disjoint48g|mulshift4g-rot-sparse24|mulshift4g-rot-sparse64|mulshift4g-rot-move16g3s|mulshift4g-block2m-sparse64|move15s4g-split32|move15s4g-remote-split32|move60s4g-remote-split32|fixed4g-remote-split32|fixed8g-remote-split32\n"
             "  --phase-ms N\n"
             "  --phase-repeat N\n"
             "  --phase-duration-ms N\n"
-            "  --placement none|bind:N[,N...]|interleave:N[,N...]|preferred:N|split:N,N|window-split:N,N\n"
+            "  --phase1-target-ops N (fixed work for phase 1 of every repeated pair)\n"
+            "  --phase2-target-ops N (fixed work for phase 2; set both phase targets or neither)\n"
+            "  --phase-boundary-probe LABEL:OFFSET:SIZE (repeatable; query one page per 1 MiB after phase 1)\n"
+            "  --placement none|bind:N[,N...]|interleave:N[,N...]|preferred:N|split:N,N|window-split:N,N|arena-split:N,N\n"
             "  --window-split-local BYTES|K|M|G (override first node bytes for window-split)\n"
+            "  --arena-split-local BYTES|K|M|G (required local prefix for arena-split)\n"
             "  --threads N\n"
             "  --pc-threads N\n"
             "  --bw-threads N\n"
@@ -1061,7 +1276,11 @@ void mbench_print_usage(FILE *out, const char *progname)
             "  --hotset-write-pct 0..100\n"
             "  --hotset-rmw-pct 0..100 (read+write+rmw must sum to 100)\n"
             "  --hotset-index-mode xorshift|mulshift\n"
+            "  --prefault-node N (first-touch entire arena on node N, then reset policy)\n"
             "  --hotset-prefault-node N (first-touch hotset/window on node N, then reset policy)\n"
+            "  --hotset-shared-window (all hotset threads access the full window)\n"
+            "  --hotset-tail (place the hot pages at the end of the window)\n"
+            "  --hotset-background-pages N (tail mode: limit background to first N pages)\n"
             "  --index-kernel gather|scatter|rmw\n"
             "  --index-distribution uniform|zipf|clustered|segmented\n"
             "  --index-zipf-alpha FLOAT\n"
@@ -1079,16 +1298,17 @@ void mbench_print_usage(FILE *out, const char *progname)
 void mbench_config_dump(FILE *out, const struct mbench_config *config)
 {
     fprintf(out,
-            "mode=%s bw_kernel=%s hugepage=%s prefault=%d seed=%llu\n"
+            "mode=%s bw_kernel=%s hugepage=%s prefault=%d prefault_node=%d seed=%llu\n"
             "arena_bytes=%zu window_bytes=%zu offset_bytes=%zu move_step_bytes=%zu move_min_offset_bytes=%zu move_max_offset_bytes=%zu move_policy=%s\n"
             "duration_ms=%u sample_ms=%u move_interval_ms=%u csv=%d quiet=%d emit_summary=%d\n"
-            "ops_per_pass=%llu target_ops=%llu pause_ns=%llu pc_pattern=%s bw_stride=%u bw_block_bytes=%zu bw_shared_window=%d hotset_pages=%u hot_prob_pct=%u hotset_read_pct=%u hotset_write_pct=%u hotset_rmw_pct=%u hotset_index_mode=%s hotset_prefault_node=%d\n"
+            "ops_per_pass=%llu target_ops=%llu pause_ns=%llu pc_pattern=%s bw_stride=%u bw_block_bytes=%zu bw_shared_window=%d hotset_pages=%u hotset_background_pages=%u hot_prob_pct=%u hotset_read_pct=%u hotset_write_pct=%u hotset_rmw_pct=%u hotset_index_mode=%s hotset_prefault_node=%d hotset_shared_window=%d hotset_tail=%d\n"
             "index_kernel=%s index_distribution=%s index_zipf_alpha=%.3f index_cluster_bytes=%zu index_cluster_span_ops=%u index_segments=%u index_segment_span_ops=%u\n"
             "placement=%s nodes=",
             mbench_mode_name(config->mode),
             mbench_bw_kernel_name(config->bw_kernel),
             mbench_hugepage_name(config->hugepage),
             config->prefault ? 1 : 0,
+            config->prefault_node,
             (unsigned long long)config->seed,
             config->window.arena_bytes,
             config->window.window_bytes,
@@ -1111,12 +1331,15 @@ void mbench_config_dump(FILE *out, const struct mbench_config *config)
             config->bw_pattern.block_bytes,
             config->bw_pattern.shared_window ? 1 : 0,
             config->hotset.hotset_pages,
+            config->hotset.background_pages,
             config->hotset.hot_prob_pct,
             config->hotset.read_pct,
             config->hotset.write_pct,
             config->hotset.rmw_pct,
             mbench_hotset_index_mode_name(config->hotset.index_mode),
             config->hotset.prefault_node,
+            config->hotset.shared_window ? 1 : 0,
+            config->hotset.tail ? 1 : 0,
             mbench_index_kernel_name(config->irregular.kernel),
             mbench_index_distribution_name(config->irregular.distribution),
             config->irregular.zipf_alpha,
@@ -1129,7 +1352,7 @@ void mbench_config_dump(FILE *out, const struct mbench_config *config)
         fprintf(out, "%s%d", (i == 0) ? "" : ",", config->placement.nodes.nodes[i]);
     }
     fprintf(out,
-            "\ntotal_threads=%d pc_threads=%d bw_threads=%d pc_chains=%d local_node=%d remote_node=%d window_split_local_bytes=%zu strict=%d\n",
+            "\ntotal_threads=%d pc_threads=%d bw_threads=%d pc_chains=%d local_node=%d remote_node=%d window_split_local_bytes=%zu arena_split_local_bytes=%zu strict=%d\n",
             config->threads.total_threads,
             config->threads.pc_threads,
             config->threads.bw_threads,
@@ -1137,14 +1360,33 @@ void mbench_config_dump(FILE *out, const struct mbench_config *config)
             config->placement.local_node,
             config->placement.remote_node,
             config->placement.window_split_local_bytes,
+            config->placement.arena_split_local_bytes,
             config->placement.strict ? 1 : 0);
     if (mbench_phase_enabled(config)) {
         fprintf(out,
-                "phase_preset=%s phase_repeat=%u phase_duration_ms=%u phase_count=%zu\n",
+                "phase_preset=%s phase_repeat=%u phase_duration_ms=%u phase1_target_ops=%llu phase2_target_ops=%llu phase_count=%zu\n",
                 mbench_phase_preset_name(config->phase.preset),
                 config->phase.repeat,
                 config->phase.duration_ms,
+                (unsigned long long)config->phase.phase1_target_ops,
+                (unsigned long long)config->phase.phase2_target_ops,
                 mbench_phase_total_count(config));
+        if (config->phase.boundary_probe_count > 0) {
+            fprintf(out,
+                    "phase_boundary_probe_count=%zu\n",
+                    config->phase.boundary_probe_count);
+        }
+        for (size_t i = 0; i < config->phase.boundary_probe_count; ++i) {
+            const struct mbench_residency_probe_config *probe =
+                &config->phase.boundary_probes[i];
+
+            fprintf(out,
+                    "phase_boundary_probe label=%s offset_bytes=%zu size_bytes=%zu stride_bytes=%llu\n",
+                    probe->label,
+                    probe->offset_bytes,
+                    probe->size_bytes,
+                    (unsigned long long)MBENCH_PHASE_BOUNDARY_PROBE_STRIDE);
+        }
     }
 }
 
@@ -1232,6 +1474,36 @@ int mbench_config_parse(struct mbench_config *config, int argc, char **argv)
             if (!value || mbench_parse_u32(value, &config->phase.repeat) != 0) {
                 return -EINVAL;
             }
+        } else if (strncmp(arg, "--phase1-target-ops", 19) == 0 &&
+                   (arg[19] == '\0' || arg[19] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            if (!value || mbench_parse_u64(value, &config->phase.phase1_target_ops) != 0) {
+                return -EINVAL;
+            }
+        } else if (strncmp(arg, "--phase2-target-ops", 19) == 0 &&
+                   (arg[19] == '\0' || arg[19] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            if (!value || mbench_parse_u64(value, &config->phase.phase2_target_ops) != 0) {
+                return -EINVAL;
+            }
+        } else if (strncmp(arg, "--phase-boundary-probe", 22) == 0 &&
+                   (arg[22] == '\0' || arg[22] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            size_t probe_index = config->phase.boundary_probe_count;
+            int parse_rc;
+
+            if (!value) {
+                return -EINVAL;
+            }
+            if (probe_index >= MBENCH_MAX_PHASE_BOUNDARY_PROBES) {
+                return -E2BIG;
+            }
+            parse_rc = mbench_parse_residency_probe(
+                value, &config->phase.boundary_probes[probe_index]);
+            if (parse_rc != 0) {
+                return parse_rc;
+            }
+            config->phase.boundary_probe_count++;
         } else if ((strncmp(arg, "--phase-ms", 10) == 0 && (arg[10] == '\0' || arg[10] == '=')) ||
                    (strncmp(arg, "--phase-duration-ms", 19) == 0 &&
                     (arg[19] == '\0' || arg[19] == '='))) {
@@ -1259,6 +1531,13 @@ int mbench_config_parse(struct mbench_config *config, int argc, char **argv)
             const char *value = option_value(&i, argc, argv, arg);
             if (!value ||
                 mbench_parse_size_bytes(value, &config->placement.window_split_local_bytes) != 0) {
+                return -EINVAL;
+            }
+        } else if (strncmp(arg, "--arena-split-local", 19) == 0 &&
+                   (arg[19] == '\0' || arg[19] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            if (!value ||
+                mbench_parse_size_bytes(value, &config->placement.arena_split_local_bytes) != 0) {
                 return -EINVAL;
             }
         } else if (strncmp(arg, "--pc-threads", 12) == 0) {
@@ -1379,6 +1658,18 @@ int mbench_config_parse(struct mbench_config *config, int argc, char **argv)
                 return -EINVAL;
             }
             config->hotset.prefault_node = (int)tmp;
+        } else if (strcmp(arg, "--hotset-shared-window") == 0) {
+            config->hotset.shared_window = true;
+        } else if (strcmp(arg, "--hotset-tail") == 0) {
+            config->hotset.tail = true;
+        } else if (strncmp(arg, "--hotset-background-pages", 25) == 0 &&
+                   (arg[25] == '\0' || arg[25] == '=')) {
+            const char *value = option_value(&i, argc, argv, arg);
+            uint32_t tmp = 0;
+            if (!value || mbench_parse_u32(value, &tmp) != 0) {
+                return -EINVAL;
+            }
+            config->hotset.background_pages = tmp;
         } else if (strncmp(arg, "--index-kernel", 14) == 0) {
             const char *value = option_value(&i, argc, argv, arg);
             if (!value || mbench_index_kernel_from_string(value, &config->irregular.kernel) != 0) {
@@ -1433,6 +1724,14 @@ int mbench_config_parse(struct mbench_config *config, int argc, char **argv)
             }
         } else if (strcmp(arg, "--prefault") == 0) {
             config->prefault = true;
+        } else if (strncmp(arg, "--prefault-node", 15) == 0) {
+            const char *value = option_value(&i, argc, argv, arg);
+            unsigned long long tmp = 0;
+            if (!value || parse_unsigned_suffix(value, &tmp) != 0 ||
+                tmp >= MBENCH_MAX_NUMA_NODES) {
+                return -EINVAL;
+            }
+            config->prefault_node = (int)tmp;
         } else if (strcmp(arg, "--no-prefault") == 0) {
             config->prefault = false;
         } else if (strcmp(arg, "--csv") == 0) {

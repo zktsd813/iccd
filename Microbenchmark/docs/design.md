@@ -115,6 +115,9 @@ The implementation targets a single binary, `mbench`, with runtime options:
 - `--hotset-read-pct 0..100`
 - `--hotset-write-pct 0..100`
 - `--hotset-rmw-pct 0..100`
+- `--hotset-shared-window`
+- `--hotset-tail`
+- `--hotset-background-pages N`
 - `--index-kernel gather|scatter|rmw`
 - `--index-distribution uniform|zipf|clustered|segmented`
 - `--index-zipf-alpha FLOAT`
@@ -122,7 +125,8 @@ The implementation targets a single binary, `mbench`, with runtime options:
 - `--index-cluster-span-ops N`
 - `--index-segments N`
 - `--index-segment-span-ops N`
-- `--placement none|bind:LIST|interleave:LIST|preferred:LIST|split:LIST`
+- `--placement none|bind:LIST|interleave:LIST|preferred:LIST|split:LIST|window-split:LOCAL,REMOTE|arena-split:LOCAL,REMOTE`
+- `--arena-split-local SIZE`
 - `--prefault`
 - `--no-prefault`
 - `--hugepage none|thp|2m|1g`
@@ -132,6 +136,24 @@ The implementation targets a single binary, `mbench`, with runtime options:
 
 Additional tuning flags are acceptable as long as the defaults stay small and
 the options above remain stable.
+
+`arena-split` is an initial-residency mode for experiments whose logical active
+window does not cover the full allocation. It first-touches the first
+`--arena-split-local` bytes of the arena under a temporary bind policy for the
+local node, first-touches the remaining arena under the remote-node policy, and
+then restores `MPOL_DEFAULT`. Unlike `split`, it installs no persistent VMA
+policy; unlike `window-split`, its boundary is relative to the whole arena and
+does not move with the active window.
+
+Skewed-hotset workers use private window slices by default. The shared-window
+option gives every worker the complete logical window but preserves a distinct
+per-worker random sequence. The hotset is a window prefix by default; the tail
+option reverses the hot/background position without changing their sizes or
+access probabilities.
+An optional nonzero background-page limit is valid only with a tail hotset. It
+restricts background selection to a window prefix and excludes the gap before
+the tail hotset. Zero keeps all cold pages eligible and therefore preserves the
+existing selector behavior.
 
 ## Reporting
 

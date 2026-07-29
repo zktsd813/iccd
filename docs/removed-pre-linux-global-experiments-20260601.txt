@@ -36,7 +36,6 @@
 20260508-cgroup-hss32-pc-node1-128g-overhigh-softcap-retry16-120s
 20260508-cgroup-hss32-pc-node1-128g-overhigh-sync-120s
 20260508-cgroup-hss32-pc-reclaimd-refhook-400s
-20260508-cgroup-hss32-pc-windowremote-scan4096-400s
 20260508-friendly-hss16-scan100-onoff
 20260508-friendly-hss16-scan4096-onoff
 20260508-friendly-hss32-cgroup-scan100-on

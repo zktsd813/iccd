@@ -7,7 +7,9 @@ OUTROOT="${OUTROOT:-/root/fault-bucket-controller}"
 RUN_NAME="${RUN_NAME:-$(date -u +%Y%m%d-%H%M%S)}"
 OUTDIR="${OUTDIR:-${OUTROOT}/${RUN_NAME}}"
 CONTROLLER="${CONTROLLER:-${SCRIPT_DIR}/bucket_latency_controller.py}"
+PLOTTER="${PLOTTER:-${SCRIPT_DIR}/plot_controller.py}"
 WORKLOAD_COMMAND="${WORKLOAD_COMMAND:-}"
+BTREE="${BTREE:-/root/benchmark/vmitosis-workloads/bin/bench_btree_mt}"
 CPU_NODE="${CPU_NODE:-0}"
 OMP_THREADS="${OMP_THREADS:-32}"
 
@@ -43,10 +45,12 @@ NUMA_SCAN_DELAY_MS="${NUMA_SCAN_DELAY_MS:-}"
 THP_MODE="${THP_MODE:-}"
 THP_DEFRAG="${THP_DEFRAG:-}"
 MAX_WINDOWS="${MAX_WINDOWS:-0}"
+PLOT_AFTER="${PLOT_AFTER:-1}"
 RESTORE_KNOBS="${RESTORE_KNOBS:-1}"
 
 STOP_FILE="${OUTDIR}/stop-controller"
 CONTROLLER_CSV="${OUTDIR}/controller.csv"
+SAMPLE_DIR="${OUTDIR}/fault_latency_windows"
 WORKLOAD_PID_FILE="${OUTDIR}/workload.pid"
 
 log() {
@@ -74,7 +78,14 @@ write_if_writable() {
 	fi
 }
 
+mount_debugfs() {
+	mkdir -p /sys/kernel/debug 2>/dev/null || true
+	mountpoint -q /sys/kernel/debug ||
+		mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+}
+
 save_original_knobs() {
+	mount_debugfs
 	ORIG_NUMA_BALANCING="$(read_file /proc/sys/kernel/numa_balancing)"
 	ORIG_NUMA_SCAN_SIZE_MB="$(read_file /sys/kernel/mm/numa_balancing/numa_scan_size_mb)"
 	ORIG_NUMA_SCAN_PERIOD_MIN_MS="$(read_file /sys/kernel/mm/numa_balancing/numa_scan_period_min_ms)"
@@ -130,10 +141,13 @@ require_environment() {
 		die "missing writable kernel.numa_balancing"
 	[[ -w "${MIGRATION_ENABLED_PATH}" ]] ||
 		die "missing writable migration knob: ${MIGRATION_ENABLED_PATH}"
-	[[ -n "${WORKLOAD_COMMAND}" ]] || die "WORKLOAD_COMMAND is required"
+	if [[ -z "${WORKLOAD_COMMAND}" ]]; then
+		[[ -x "${BTREE}" ]] || die "benchmark is not executable: ${BTREE}"
+	fi
 }
 
 set_common_knobs() {
+	mount_debugfs
 	write_if_writable /sys/kernel/mm/lru_gen/enabled "${MGLRU_ENABLED}"
 	write_if_writable /sys/kernel/mm/numa/demotion_enabled "${DEMOTION_ENABLED}"
 	write_if_writable /sys/kernel/mm/numa/demotion_target "${DEMOTION_TARGET}"
@@ -161,6 +175,34 @@ set_common_knobs() {
 		die "failed to set NUMA scan size to ${NUMA_SCAN_SIZE_MB} MB"
 	[[ "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)" == "${LOCAL_FAULT_SCAN_SIZE_MB}" ]] ||
 		die "failed to set local fault scan size to ${LOCAL_FAULT_SCAN_SIZE_MB} MB"
+}
+
+snapshot() {
+	local tag="$1"
+	{
+		printf 'tag=%s\n' "${tag}"
+		printf 'date_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		printf 'uname=%s\n' "$(uname -a)"
+		printf 'cmdline=%s\n' "$(cat /proc/cmdline)"
+		printf 'numa_balancing=%s\n' "$(read_file /proc/sys/kernel/numa_balancing)"
+		printf 'migration_enabled=%s\n' "$(read_file "${MIGRATION_ENABLED_PATH}")"
+		printf 'remote_scan_cycles=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/remote_scan_cycles)"
+		printf 'lru_gen_enabled=%s\n' "$(read_file /sys/kernel/mm/lru_gen/enabled)"
+		printf 'demotion_enabled=%s\n' "$(read_file /sys/kernel/mm/numa/demotion_enabled)"
+		printf 'demotion_target=%s\n' "$(read_file /sys/kernel/mm/numa/demotion_target | tr '\n' ' ')"
+		printf 'scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_size_mb)"
+		printf 'scan_period_min_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_period_min_ms)"
+		printf 'scan_period_max_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_period_max_ms)"
+		printf 'scan_delay_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/numa_scan_delay_ms)"
+		printf 'local_fault_rate=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_rate)"
+		printf 'local_fault_scan_period_ms=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_period_ms)"
+		printf 'local_fault_scan_size_mb=%s\n' "$(read_file /sys/kernel/mm/numa_balancing/local_fault_scan_size_mb)"
+	} > "${OUTDIR}/${tag}.meta"
+	cp /proc/vmstat "${OUTDIR}/${tag}.vmstat" 2>/dev/null || true
+	cp /proc/pressure/memory "${OUTDIR}/${tag}.pressure.memory" 2>/dev/null || true
+	cp /sys/kernel/mm/numa_balancing/fault_latency_quantiles \
+		"${OUTDIR}/${tag}.fault_latency_quantiles" 2>/dev/null || true
+	numactl -H > "${OUTDIR}/${tag}.numactl" 2>&1 || true
 }
 
 write_config() {
@@ -193,7 +235,7 @@ write_config() {
 		printf 'migration_enabled_path=%s\n' "${MIGRATION_ENABLED_PATH}"
 		printf 'numa_scan_size_mb=%s\n' "${NUMA_SCAN_SIZE_MB}"
 		printf 'numa_scan_period_min_ms=%s\n' "${NUMA_SCAN_PERIOD_MIN_MS}"
-		printf 'workload_command=%s\n' "${WORKLOAD_COMMAND}"
+		printf 'workload_command=%s\n' "${WORKLOAD_COMMAND:-${BTREE}}"
 	} > "${OUTDIR}/config.meta"
 }
 
@@ -217,6 +259,7 @@ main() {
 	save_original_knobs
 	set_common_knobs
 	write_config
+	snapshot before
 
 	controller_args=(
 		"${CONTROLLER}"
@@ -240,6 +283,7 @@ main() {
 		--migration-enabled-path "${MIGRATION_ENABLED_PATH}"
 		--stop-file "${STOP_FILE}"
 		--output "${CONTROLLER_CSV}"
+		--sample-dir "${SAMPLE_DIR}"
 		--max-windows "${MAX_WINDOWS}"
 	)
 	log "starting capacity-rank latency controller with P75 stagnation guard"
@@ -252,16 +296,29 @@ main() {
 		numactl "--cpunodebind=${CPU_NODE}"
 		env "OMP_NUM_THREADS=${OMP_THREADS}" OMP_PROC_BIND=true OMP_PLACES=cores
 	)
-	printf -v workload_display '%q ' "${workload_prefix[@]}" bash -lc "exec ${WORKLOAD_COMMAND}"
-	printf '%s\n' "${workload_display}" > "${OUTDIR}/command.txt"
-	set +e
-	"${workload_prefix[@]}" bash -lc "exec ${WORKLOAD_COMMAND}" \
-		> "${OUTDIR}/stdout.txt" 2> "${OUTDIR}/stderr.txt" &
-	workload_pid=$!
-	printf '%s\n' "${workload_pid}" > "${WORKLOAD_PID_FILE}"
-	wait "${workload_pid}"
-	workload_status=$?
-	set -e
+	if [[ -n "${WORKLOAD_COMMAND}" ]]; then
+		printf -v workload_display '%q ' "${workload_prefix[@]}" bash -lc "exec ${WORKLOAD_COMMAND}"
+		printf '%s\n' "${workload_display}" > "${OUTDIR}/command.txt"
+		set +e
+		"${workload_prefix[@]}" bash -lc "exec ${WORKLOAD_COMMAND}" \
+			> "${OUTDIR}/stdout.txt" 2> "${OUTDIR}/stderr.txt" &
+		workload_pid=$!
+		printf '%s\n' "${workload_pid}" > "${WORKLOAD_PID_FILE}"
+		wait "${workload_pid}"
+		workload_status=$?
+		set -e
+	else
+		printf -v workload_display '%q ' "${workload_prefix[@]}" "${BTREE}"
+		printf '%s\n' "${workload_display}" > "${OUTDIR}/command.txt"
+		set +e
+		"${workload_prefix[@]}" "${BTREE}" \
+			> "${OUTDIR}/stdout.txt" 2> "${OUTDIR}/stderr.txt" &
+		workload_pid=$!
+		printf '%s\n' "${workload_pid}" > "${WORKLOAD_PID_FILE}"
+		wait "${workload_pid}"
+		workload_status=$?
+		set -e
+	fi
 	printf '%s\n' "${workload_status}" > "${OUTDIR}/workload.exit.status"
 
 	touch "${STOP_FILE}"
@@ -279,6 +336,12 @@ main() {
 		fi
 	fi
 	printf '%s\n' "${run_status}" > "${OUTDIR}/exit.status"
+
+	snapshot after
+	if [[ "${PLOT_AFTER}" == "1" && -x "${PLOTTER}" && -s "${CONTROLLER_CSV}" ]]; then
+		python3 "${PLOTTER}" "${CONTROLLER_CSV}" \
+			--out-dir "${OUTDIR}/figures" --prefix controller || true
+	fi
 
 	log "done: ${OUTDIR}"
 	return "${run_status}"

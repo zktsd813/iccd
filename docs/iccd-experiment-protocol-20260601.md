@@ -1,45 +1,108 @@
-# ICCD Experiment Protocol - 2026-06-01
+# ICCD Experiment Protocol
 
-This document is the required pre-read before running or interpreting current
-ICCD experiments in `/Serverless/iccd-git`.
+Originally recorded: 2026-06-01. Current revision: 2026-07-11.
 
-## Pre-Run Summary
+This is the required protocol for the current ICCD two-tier memory stack in
+`/Serverless/iccd-git`.
 
-Read this section before every experiment:
+## Source of Truth
 
-- Use `/Serverless/iccd-git` only. Do not use `/Serverless/iccd`.
-- Do not use cgroup or memcg NUMA controls for the current baseline.
-- Boot `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage` through
-  `/Serverless/iccd-git/VM/vmctl.sh`.
-- Use `host-cxl`, not no-HMAT `numa`, for local-vs-CXL performance results.
-- Bind guest node0 memory to host node0 and guest node1 memory to host node2.
-- Preallocate QEMU memory with host NUMA bind policy.
-- Verify guest memory tiers split node0 and node1 before interpreting results.
-- Keep MGLRU at `0x0007`.
-- Use global NUMA balancing: `2` for migration on, `0` for migration off.
-- Enable global demotion and verify `demotion_target` contains `0 1`.
-- Do not tune the NUMA hot/latency threshold reference knob; keep the kernel
-  default and record it in result metadata.
-- Run workloads with the shared default placement: `numactl --cpunodebind=0`.
-- For all-fast/all-slow controls, change VM memory sizing and use explicit
-  `numactl --membind` for the control node.
+```text
+repository          /Serverless/iccd-git
+kernel source       /Serverless/iccd-git/linux
+kernel build        /Serverless/iccd-git/linux-global-build
+kernel image        linux-global-build/arch/x86/boot/bzImage
+VM helper           VM/vmctl.sh
+VM sweep            motivation/3_realworld/VM/scripts/run_vm_sweep_host.sh
+shared controller   design/fault_bucket_controller/run_guest.sh
+policy definition   design/fault_bucket_controller/DESIGN.md
+```
 
-## Source Of Truth
+Do not use `/Serverless/iccd`, an older kernel image, a separate controller
+implementation, or cgroup/memcg NUMA policy knobs for current measurements.
 
-- Repo root: `/Serverless/iccd-git`
-- Kernel source: `/Serverless/iccd-git/linux`
-- Kernel build: `/Serverless/iccd-git/linux-global-build`
-- Kernel image: `/Serverless/iccd-git/linux-global-build/arch/x86/boot/bzImage`
-- VM helper: `/Serverless/iccd-git/VM/vmctl.sh`
-- Shared defaults and workload placement:
-  `/Serverless/iccd-git/scripts/iccd_experiment_defaults.sh`
+## Canonical Configurations
 
-Do not use `/Serverless/iccd` for current work. Do not use cgroup or memcg NUMA
-controls as part of the current implementation or experiment baseline.
+Only these result configurations are valid:
+
+| Config | `numa_balancing` | `migration_enabled` at entry | Demotion | Local sampler |
+| --- | ---: | ---: | --- | --- |
+| `off` | 0 | 0 | `false` | disabled |
+| `on` | 2 | 1 | `true` | disabled |
+| `tpp` | 4 | 1 | `true` | disabled |
+| `ours` | 2 | 1, then controller-managed | `true` | enabled |
+
+The runner must read back all three policy states before starting a measured
+workload. `off` disables both promotion and demotion. `ours` keeps NUMA
+scanning enabled and changes only `migration_enabled`.
+
+## Fixed Scan Settings
+
+Use these values unless the current experiment request explicitly overrides
+them:
+
+```text
+MGLRU_ENABLED=0x0007
+NUMA_SCAN_SIZE_MB=256
+NUMA_SCAN_PERIOD_MIN_MS=1000
+LOCAL_FAULT_RATE=5                  # ours only
+LOCAL_FAULT_SCAN_PERIOD_MS=1000     # ours only
+LOCAL_FAULT_SCAN_SIZE_MB=64         # ours only
+START_CAPACITY_MARGIN_PCT=10        # ours only
+DEMOTION_TARGET="0 1"
+```
+
+Do not use an automatic or capacity-scaled local scan size. Do not add a
+hot-threshold, histogram, arbitrary CDF, score, phase, trace, or restart-policy
+knob to the current controller path.
+
+## Controller Contract
+
+The controller recomputes current local and remote resident pages, `L` and
+`R`, from the workload PID tree every accepted window. With local P75 latency
+`q`:
+
+```text
+STOP_RAW  = (F_remote_le(q) * R) / (0.25 * L) > 0.9
+START_RAW = F_remote_lt(q) * R >= 1.10 * 0.75 * L
+```
+
+STOP is immediate. START requires two consecutive valid windows. Confirmed
+START wins when START and STOP overlap. A false or invalid START observation
+resets its consecutive count.
+
+The required kernel ABI under `/sys/kernel/mm/numa_balancing` is:
+
+```text
+fault_latency_quantiles
+local_fault_rate
+local_fault_scan_period_ms
+local_fault_scan_size_mb
+local_fault_window
+remote_scan_cycles
+migration_enabled
+```
+
+The quantile snapshot must report `quantile_snapshot_v3`, algorithm
+`kll_weighted_ms_v1`, and value source `sketch_latency_ms_to_ns`. Missing or
+incompatible ABI data must fail closed before a policy transition.
+
+## GAPBS Rule
+
+PR and BC must generate the graph in the measured command:
+
+```text
+pr -g 29 ...
+bc -g 29 ...
+```
+
+Do not stage or read `.sg` or `.wsg` files. Record
+`gapbs_graph_mode=generated`, `gapbs_graph_scale=29`, and
+`graph_build_included=1` in result metadata.
 
 ## VM Topology
 
-Use this topology unless an experiment explicitly states otherwise:
+The standard performance topology is:
 
 ```text
 HOST_CPUS=0-31
@@ -52,146 +115,30 @@ NUMA_MEM_POLICY=bind
 NUMA_PREALLOC=1
 ```
 
-Interpretation:
+Guest node 0 is local DRAM and contains all guest CPUs. Guest node 1 is the
+CPU-less remote tier backed by the host CXL node. Run workloads with
+`numactl --cpunodebind=0`. Verify that HMAT creates separate guest memory tiers
+and that the demotion path is `node 0 -> node 1`.
 
-- Guest node0 is the fast/local DRAM node.
-- Guest node0 memory is backed by host NUMA node0.
-- Guest node1 is the slow memory node.
-- Guest node1 memory is backed by host NUMA node2, which is the real host CXL
-  memory node on the current machine.
-- QEMU must preallocate and bind memory so backing pages are actually allocated
-  from the intended host NUMA nodes.
+Use a fresh VM for each measured configuration. Do not mix VM and host-native
+absolute runtimes in one comparison because their local-capacity mechanisms
+differ.
 
-Run workloads with the shared default placement unless an experiment explicitly
-states a control placement:
+## Minimum Metadata
 
-```text
-numactl --cpunodebind=0 /root/pr ...
-```
+Every result must record:
 
-This is encoded globally in `scripts/iccd_experiment_defaults.sh`:
+- kernel image and kernel release/build number;
+- configuration and the three policy-state readbacks;
+- VM image, CPU topology, memory sizes, and host NUMA backing nodes;
+- HMAT latency/bandwidth and guest memory-tier nodelists;
+- MGLRU, THP, swap, normal scan, and local scan settings;
+- exact workload command and generated graph metadata;
+- workload PID and local/remote residency;
+- elapsed workload time and return code;
+- promotion, demotion, and migration counter deltas;
+- controller CSV and raw quantile snapshots for `ours`.
 
-```text
-ICCD_WORKLOAD_CPU_NODE=0
-```
-
-## Slow Memory Modes
-
-Use `host-cxl` for performance experiments.
-
-```text
---slow-memory-mode host-cxl
-```
-
-This mode keeps guest node1 as normal KVM RAM backed by host NUMA node2, then
-adds ACPI HMAT metadata so the guest kernel classifies node1 as a lower memory
-tier. It does not inject latency and does not route guest load/store traffic
-through QEMU CXL MMIO emulation.
-
-The default HMAT metadata is:
-
-```text
-HMAT_FAST_LATENCY_NS=80
-HMAT_SLOW_LATENCY_NS=250
-HMAT_FAST_BANDWIDTH=40000M
-HMAT_SLOW_BANDWIDTH=10000M
-```
-
-Use `qemu-cxl` only for CXL topology, driver, and enumeration validation:
-
-```text
---slow-memory-mode qemu-cxl
-```
-
-`qemu-cxl` creates a QEMU CXL Type3 volatile memory device. The CXL Fixed Memory
-Window uses QEMU `MemoryRegionOps` callbacks, so it can add large emulation
-overhead to memory access. Do not use it for performance results unless the
-experiment is explicitly measuring QEMU CXL emulation behavior.
-
-Legacy aliases:
-
-- `hmat` is accepted as `host-cxl`.
-- `cxl` is accepted as `qemu-cxl`.
-- `numa` is the old no-HMAT RAM NUMA mode and should not be used for current
-  local-vs-CXL performance experiments.
-
-## Guest Kernel Runtime Knobs
-
-Use these kernel runtime settings unless the experiment explicitly overrides
-them:
-
-```text
-MGLRU_ENABLED=0x0007
-DEMOTION_ENABLED=true
-DEMOTION_TARGET="0 1"
-NUMA_BALANCING_ON=2
-NUMA_BALANCING_OFF=0
-NUMA_SCAN_SIZE_MB=4096
-NUMA_SCAN_PERIOD_MIN_MS=1000
-```
-
-Do not write `/sys/kernel/debug/sched/numa_balancing/hot_threshold_ms` for
-baseline, ours, or performance-comparison runs. The current kernel default
-reference value is `1000 ms` (`sysctl_numa_balancing_hot_threshold =
-MSEC_PER_SEC` in `linux/kernel/sched/fair.c`). In memory-tiering promotion, the
-effective per-node threshold can still adapt internally through
-`numa_promotion_adjust_threshold()` and `pgdat->nbp_threshold`; experiments
-should preserve that adaptive behavior and only record the exposed reference
-knob before/after so accidental tuning is visible.
-
-For on/off experiments:
-
-- migration on: write `2` to `/proc/sys/kernel/numa_balancing`
-- migration off: write `0` to `/proc/sys/kernel/numa_balancing`
-
-Before interpreting results, verify:
-
-```text
-/sys/kernel/mm/lru_gen/enabled = 0x0007
-/sys/kernel/mm/numa/demotion_enabled = true
-/sys/kernel/mm/numa/demotion_target contains "0 1"
-/sys/devices/virtual/memory_tiering/*/nodelist separates node0 and node1
-```
-
-Expected memory-tier result with `host-cxl`:
-
-```text
-memory_tier*/nodelist=0
-memory_tier*/nodelist=1
-```
-
-The exact tier IDs can vary. The important condition is that node0 and node1 are
-not in the same tier.
-
-## Why This Is Required
-
-Without HMAT, QEMU exposes both guest nodes as default DRAM. The guest kernel
-then places node0 and node1 in the same memory tier, so memory-tiering-only NUMA
-balancing can treat node1 as top-tier memory and skip top-tier page scans.
-
-With `host-cxl`, node1 is still backed by real host CXL memory, but the guest
-also sees enough HMAT metadata to build a proper demotion path:
-
-```text
-Node 0 -> Node 1
-```
-
-## Minimum Result Metadata
-
-Every experiment summary should include:
-
-- kernel image path
-- rootfs/overlay path
-- `SLOW_MEMORY_MODE`
-- host CPU pinning
-- guest CPU count and guest node0 CPU range
-- fast/slow guest memory sizes
-- fast/slow host NUMA backing nodes
-- HMAT latency/bandwidth values
-- guest memory tier nodelists
-- MGLRU value
-- global NUMA balancing value
-- demotion enabled/target values
-- NUMA scan size and scan period
-- NUMA hot/latency threshold reference knob value
-- promoted and demoted page counters
+The final cleanup and TPP availability record is in
+`docs/final-controller-kernel-cleanup-20260711.md` and
+`docs/tpp-baseline-feasibility-20260711.md`.

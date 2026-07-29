@@ -6,6 +6,7 @@
 #include <linux/memory.h>
 #include <linux/memory-tiers.h>
 #include <linux/memcontrol.h>
+#include <linux/sched/numa_balancing.h>
 #include <linux/notifier.h>
 #include <linux/sched/sysctl.h>
 

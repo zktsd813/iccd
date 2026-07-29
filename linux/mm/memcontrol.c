@@ -4871,6 +4871,7 @@ static void uncharge_folio(struct folio *folio, struct uncharge_gather *ug)
 
 	nr_pages = folio_nr_pages(folio);
 #ifdef CONFIG_NUMA_BALANCING_MT
+	numa_account_fault_probe_cancel(folio);
 	folio_clear_local_tiering_sampled(folio);
 #endif
 

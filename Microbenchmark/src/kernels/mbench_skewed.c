@@ -88,6 +88,13 @@ int mbench_run_skewed_hotset(struct mbench_skew_job *job)
     }
 
     size_t cold_pages = total_pages - job->hot_pages;
+    if (job->background_pages > 0 &&
+        (!job->hotset_tail || job->background_pages > cold_pages)) {
+        return -EINVAL;
+    }
+    size_t selectable_cold_pages = job->background_pages > 0
+        ? job->background_pages
+        : cold_pages;
     if (job->index_mode == MBENCH_SKEW_INDEX_MULSHIFT &&
         cold_pages == 0 &&
         job->hot_prob_pct == 100U &&
@@ -108,10 +115,14 @@ int mbench_run_skewed_hotset(struct mbench_skew_job *job)
         uint64_t value = mbench_xorshift64(&state);
         size_t page;
         if (cold_pages == 0 || (choose % 100ULL) < (uint64_t)job->hot_prob_pct) {
-            page = (size_t)(mbench_xorshift64(&state) % (uint64_t)job->hot_pages);
+            size_t hot_index =
+                (size_t)(mbench_xorshift64(&state) % (uint64_t)job->hot_pages);
+            page = job->hotset_tail ? cold_pages + hot_index : hot_index;
         } else {
-            page = job->hot_pages +
-                (size_t)(mbench_xorshift64(&state) % (uint64_t)cold_pages);
+            size_t cold_index =
+                (size_t)(mbench_xorshift64(&state) %
+                         (uint64_t)selectable_cold_pages);
+            page = job->hotset_tail ? cold_index : job->hot_pages + cold_index;
         }
 
         size_t word = (size_t)(mbench_xorshift64(&state) % (uint64_t)job->page_words);

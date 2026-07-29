@@ -62,17 +62,28 @@ Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
 		Read-write sampling-window sequence. Reading returns the current
 		sequence. Writing a non-zero integer advances the sequence. Local
-		and remote KLL sketches are reset lazily when their first sample for
-		the new sequence arrives.
+		and remote KLL sketches and protection counters are reset lazily when
+		their first event for the new sequence arrives. A fault contributes to
+		the sketches only when its protection probe was installed in the same
+		sequence. Consumers read the current window snapshot before advancing
+		the sequence; completed windows are not retained.
+
+		The probe state uses one 64-bit page extension word: bits 63:32 hold
+		the window sequence, bits 31:2 hold the install time in milliseconds
+		modulo 2^30, and bits 1:0 hold inactive, local, remote, or internal
+		arming state. Latency arithmetic is modulo 2^30 milliseconds. Probe
+		state is installed only for order-0 folios.
 
 What:		/sys/kernel/mm/numa_balancing/remote_scan_cycles
 Date:		July 2026
 Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
 		Read-only cumulative count of completed normal NUMA address-space
-		scan passes that installed at least one remote-tier access-time
-		probe. A controller can use changes in this counter to align a
-		sampling window with remote scan progress.
+		scan passes that processed at least one eligible remote-tier access-time
+		probe opportunity. Eligible remote large folios contribute to this signal
+		even though they are excluded from latency probe accounting.
+		Userspace can use changes in this counter to align a sampling window
+		with remote scan progress.
 
 What:		/sys/kernel/mm/numa_balancing/fault_latency_quantiles
 Date:		July 2026
@@ -80,7 +91,7 @@ Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:
 		Read-only weighted-KLL snapshot for the current sampling window.
 		All values in one read come from the same copied sketch snapshot.
-		The quantile_snapshot_v4 schema contains:
+		The quantile_snapshot_v5 schema contains:
 
 		schema
 		window_seq
@@ -88,37 +99,43 @@ Description:
 		value_source
 		local_total
 		remote_total
+		local_protected_pages
+		local_cancelled_pages
+		local_dropped_fault_pages
+		remote_protected_pages
+		remote_cancelled_pages
+		remote_dropped_fault_pages
 		local_q75_ns
-		remote_query_rank_ppm
-		remote_query_q_ns
-		remote_query_valid
+		local_cdf_lt_local_q75_ppm
+		local_cdf_le_local_q75_ppm
 		remote_cdf_lt_local_q75_ppm
 		remote_cdf_le_local_q75_ppm
 
-		The totals are page-weighted sample counts. local_q75_ns is zero
-		when there are no local samples. The CDF fields are integer parts
-		per million in [0, 1000000], evaluated at local_q75_ns. The _lt_
-		field excludes remote samples equal to local P75; the _le_ field
-		includes them.
+		Latency probe accounting is limited to order-0 folios. Large folios
+		do not contribute to accepted, protected, cancelled, or dropped counts.
+		All counts are therefore base-page counts. local_total and remote_total
+		count accepted same-window fault samples. protected_pages counts unique
+		per-base-page-folio protection opportunities armed in this window. When
+		a normal NUMA scan revisits an eligible base-page PTE_NUMA mapping, or
+		the local physical sampler revisits one of its PTE_NUMA mappings, the
+		existing mapping is rearmed and counted once for the current window.
+		Repeated visits in the same window do not add another opportunity.
 
-		remote_query_rank_ppm echoes the value of remote_quantile_rank_ppm
-		captured at the start of this read. When that rank is in [1, 1000000]
-		and the copied remote sketch is nonempty, remote_query_valid is one
-		and remote_query_q_ns is the smallest latency whose inclusive remote
-		CDF reaches that rank. Otherwise remote_query_valid and
-		remote_query_q_ns are zero. A valid quantile can itself be zero, so
-		consumers must check remote_query_valid rather than using the
-		quantile value as a validity test.
+		The probe install time in the page extension is independent of the
+		folio access-time field used by Linux memory tiering. Rearming an
+		existing base-page PTE_NUMA mapping does not change that Linux access
+		time. Large-folio access-time handling remains the standard Linux NUMA
+		balancing behavior.
+		cancelled_pages counts probes known to have been invalidated in the same
+		window before producing a fault sample. dropped_fault_pages counts
+		fault-accounting attempts in this window that had no matching active
+		probe installed by this tier in this window. Dropped faults do not
+		contribute to the totals or KLLs.
 
-What:		/sys/kernel/mm/numa_balancing/remote_quantile_rank_ppm
-Date:		July 2026
-Contact:	Linux memory management mailing list <linux-mm@kvack.org>
-Description:
-		Read-write remote weighted-KLL query rank in integer parts per
-		million. Values in [1, 1000000] select the inverse inclusive-CDF
-		quantile returned by fault_latency_quantiles. Zero disables the
-		query. Other values are rejected. Writing this query parameter does
-		not advance the sampling window or change the sampling policy.
+		local_q75_ns is zero when there are no local samples. The CDF fields
+		are integer parts per million in [0, 1000000], evaluated at
+		local_q75_ns. An _lt_ field excludes samples equal to local P75; an
+		_le_ field includes them.
 
 What:		/sys/kernel/mm/numa_balancing/migration_enabled
 Date:		July 2026

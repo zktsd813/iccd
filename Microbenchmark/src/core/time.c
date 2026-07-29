@@ -16,6 +16,14 @@ uint64_t mbench_now_us(void)
     return mbench_now_ns() / 1000ULL;
 }
 
+uint64_t mbench_clock_monotonic_ns(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
 void mbench_sleep_ms(uint32_t ms)
 {
     struct timespec req;
